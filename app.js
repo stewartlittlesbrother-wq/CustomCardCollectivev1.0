@@ -3033,15 +3033,25 @@ function deckMainCount() {
   return Object.values(state.deck).reduce((sum, qty) => sum + qty, 0);
 }
 
+// Deck list ordering: group by card type (characters, then events, then
+// stages), and within each group sort by cost ascending. Tokens render after
+// all of these (see renderBuilder), so the full visible order is
+// characters -> events -> stages -> tokens, each cheapest-first.
+const DECK_CATEGORY_ORDER = { character: 0, event: 1, stage: 2 };
+
+function deckSortComparator(a, b) {
+  const catA = DECK_CATEGORY_ORDER[a.category] ?? 3;
+  const catB = DECK_CATEGORY_ORDER[b.category] ?? 3;
+  if (catA !== catB) return catA - catB;
+  const costDiff = Number(a.cost || 0) - Number(b.cost || 0);
+  return costDiff || String(a.name || "").localeCompare(String(b.name || ""));
+}
+
 function deckEntries() {
   return Object.entries(state.deck)
     .map(([id, qty]) => ({ card: getCard(id), qty }))
     .filter(entry => entry.card)
-    .sort((a, b) => {
-      const costA = Number(a.card.cost || 0);
-      const costB = Number(b.card.cost || 0);
-      return costA - costB || a.card.name.localeCompare(b.card.name);
-    });
+    .sort((a, b) => deckSortComparator(a.card, b.card));
 }
 
 // Standard OPTCG limit, used when a card doesn't specify its own.
@@ -3437,7 +3447,11 @@ function renderBuilder() {
   // so was effectively invisible. They carry a TOKEN badge instead of a copy
   // count and are never part of deckMainCount(), so the 50/50 total is unaffected.
   const entries = deckEntries();
-  const tokenCards = state.tokens.map(id => getCard(id)).filter(Boolean);
+  // Tokens come last, also cheapest-first.
+  const tokenCards = state.tokens
+    .map(id => getCard(id))
+    .filter(Boolean)
+    .sort(deckSortComparator);
 
   const deckMarkup = entries.map(entry => renderDeckRow(entry.card, entry.qty)).join("");
   const tokenMarkup = tokenCards.map(card => renderTokenRow(card)).join("");
