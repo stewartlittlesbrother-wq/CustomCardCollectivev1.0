@@ -3558,36 +3558,33 @@ function showDeckContextMenu(event, player, pileKey = "deck", pileLabel = "Deck"
     addItem(`Open ${pileLabel.toLowerCase()} (${total})`, () =>
         showDeckViewer(player, pileKey, pileLabel));
 
-    // Common look-at sizes, only offered when there are that many cards.
-    [1, 3, 5].forEach(n => {
-        if (total >= n) {
-            addItem(`Peek at top ${n}`, () =>
-                showDeckViewer(player, pileKey, pileLabel, n));
-        }
-    });
-
-    addItem("Peek at top…", () => {
-        window.showCustomPrompt?.(`Look at how many cards? (1-${total})`, "5", (input) => {
+    // Prompt-driven "top X" actions. One entry each - no fixed 1/3/5 shortcuts.
+    const promptTopCount = (verb, run) => {
+        window.showCustomPrompt?.(`${verb} how many cards? (1-${total})`, "5", (input) => {
             const count = Math.max(1, Math.min(total, parseInt(input, 10) || 0));
-            if (count > 0) showDeckViewer(player, pileKey, pileLabel, count);
+            if (count > 0) run(count);
         });
-    });
+    };
 
-    // Trash the top X directly, without opening the viewer.
+    // Moves the top `count` cards (end of the array) into a zone.
+    const sendTop = (count, destination, label) => {
+        const moved = player[pileKey].splice(player[pileKey].length - count, count);
+        if (destination === "trash") { if (!player.trash) player.trash = []; player.trash.push(...moved); window.renderTrash?.(); }
+        else if (destination === "hand") { player.hand.push(...moved); window.renderHands?.(); }
+        if (pileKey === "deck") window.renderDecks?.(); else window.renderExtraPiles?.();
+        addGameLog(`${player.name} sent the top ${count} card${count === 1 ? "" : "s"} to ${label}.`);
+        window.scheduleOnlineBoardSync?.();
+    };
+
     if (total > 0) {
-        addItem("Send top X → trash", () => {
-            window.showCustomPrompt?.(`Send top how many cards to trash? (1-${total})`, "1", (input) => {
-                const count = Math.max(1, Math.min(total, parseInt(input, 10) || 0));
-                if (count <= 0) return;
-                const moved = player[pileKey].splice(player[pileKey].length - count, count);
-                if (!player.trash) player.trash = [];
-                player.trash.push(...moved);
-                window.renderTrash?.();
-                if (pileKey === "deck") window.renderDecks?.(); else window.renderExtraPiles?.();
-                addGameLog(`${player.name} sent the top ${count} card${count === 1 ? "" : "s"} to trash.`);
-                window.scheduleOnlineBoardSync?.();
-            });
-        });
+        addItem("Look at top X", () =>
+            promptTopCount("Look at", count => showDeckViewer(player, pileKey, pileLabel, count)));
+
+        addItem("Send top X → trash", () =>
+            promptTopCount("Send to trash", count => sendTop(count, "trash", "trash")));
+
+        addItem("Add top X → hand", () =>
+            promptTopCount("Add to hand", count => sendTop(count, "hand", "hand")));
     }
 
     document.body.appendChild(menu);
@@ -3611,6 +3608,9 @@ function showDeckContextMenu(event, player, pileKey = "deck", pileLabel = "Deck"
 function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount = 0) {
     if (!Array.isArray(player[pileKey])) player[pileKey] = [];
 
+    // The trash is public, so its cards open face-up.
+    if (pileKey === "trash") player[pileKey].forEach(card => { if (card) card.faceUp = true; });
+
     // Snapshot the peeked cards by identity, so the set can only shrink.
     // Top of the pile is the END of the array (draws pop() off the end).
     let peekIds = null;
@@ -3619,9 +3619,17 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
             player[pileKey].slice(-peekCount).map(card => card.instanceId).filter(Boolean)
         );
     }
-    // Re-render whichever pile this viewer is showing (deck or an extra pile).
+
+    // The cards the buttons (Reveal/Hide/Shuffle) are allowed to touch: just the
+    // peeked snapshot when looking at the top X, otherwise the whole pile.
+    const visibleCards = () =>
+        peekIds ? player[pileKey].filter(c => peekIds.has(c.instanceId)) : player[pileKey].slice();
+
+    // Re-render whichever pile this viewer is showing.
     const renderPileSource = () => {
         if (pileKey === "deck") window.renderDecks?.();
+        else if (pileKey === "trash") window.renderTrash?.();
+        else if (pileKey === "tokens") window.renderTokenZones?.();
         else window.renderExtraPiles?.();
     };
     const overlay = document.createElement("div");
@@ -3645,17 +3653,24 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
         b.style.cssText = `padding:5px 10px;background:${bg};color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;`;
         return b;
     }
-    const revealAllBtn = mkBtn("Reveal All", "#4CAF50");
-    revealAllBtn.onclick = () => { player[pileKey].forEach(c => c.faceUp = true); buildGrid(); addGameLog(`${player.name}'s deck revealed`); window.scheduleOnlineBoardSync?.(); };
+    // "the ones I'm looking at" - the peeked subset, or the whole pile.
+    const scopeLabel = peekIds ? "shown" : pileLabel.toLowerCase();
+
+    const revealAllBtn = mkBtn(peekIds ? "Reveal shown" : "Reveal All", "#4CAF50");
+    revealAllBtn.onclick = () => { visibleCards().forEach(c => c.faceUp = true); buildGrid(); addGameLog(`${player.name}'s ${scopeLabel} revealed`); window.scheduleOnlineBoardSync?.(); };
     toolbar.appendChild(revealAllBtn);
 
-    const hideAllBtn = mkBtn("Hide All", "#2196F3");
-    hideAllBtn.onclick = () => { player[pileKey].forEach(c => c.faceUp = false); buildGrid(); addGameLog(`${player.name}'s deck hidden`); window.scheduleOnlineBoardSync?.(); };
+    const hideAllBtn = mkBtn(peekIds ? "Hide shown" : "Hide All", "#2196F3");
+    hideAllBtn.onclick = () => { visibleCards().forEach(c => c.faceUp = false); buildGrid(); addGameLog(`${player.name}'s ${scopeLabel} hidden`); window.scheduleOnlineBoardSync?.(); };
     toolbar.appendChild(hideAllBtn);
 
-    const shuffleBtn = mkBtn("\uD83D\uDD00 Shuffle", "#FF9800");
-    shuffleBtn.onclick = () => { shuffleDeck(player[pileKey]); buildGrid(); addGameLog(`${player.name}'s deck shuffled`); window.scheduleOnlineBoardSync?.(); };
-    toolbar.appendChild(shuffleBtn);
+    // Shuffle isn't meaningful for the trash or a peek snapshot - only offer it
+    // when browsing a whole pile that can actually be shuffled.
+    if (!peekIds && pileKey !== "trash") {
+        const shuffleBtn = mkBtn("\uD83D\uDD00 Shuffle", "#FF9800");
+        shuffleBtn.onclick = () => { shuffleDeck(player[pileKey]); buildGrid(); addGameLog(`${player.name}'s ${pileLabel.toLowerCase()} shuffled`); window.scheduleOnlineBoardSync?.(); };
+        toolbar.appendChild(shuffleBtn);
+    }
 
     // Prompt for a count, then move that many cards off the top of the deck
     // (the end of the array - see the top/bottom convention used throughout
@@ -4771,8 +4786,9 @@ function renderPlayerTrash(player, trashAreaId) {
     trashArea.classList.toggle("clickable-trash", player.trash.length > 0);
     trashArea.onclick = () => {
         if (player.trash.length === 0) return;
-
-        showTrashViewer(player);
+        // Use the full deck-style viewer so it stays open across actions and has
+        // the same controls (send to hand / bottom of deck / reorder).
+        showDeckViewer(player, "trash", "Trash");
     };
 
     if (player.trash.length > 0) {
