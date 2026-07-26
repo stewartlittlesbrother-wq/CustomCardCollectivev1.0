@@ -1,0 +1,39 @@
+{
+  "rules": {
+    "//": "Realtime Database security rules for the multiplayer lobby, match data and the shared card library.",
+    "//2": "APPLY THESE in the Firebase console: Realtime Database -> Rules -> paste -> Publish.",
+    "//3": "Or with the Firebase CLI: firebase deploy --only database.",
+    "//4": "Without these, authenticated writes to /matches, /lobbies and /cards return PERMISSION_DENIED.",
+
+    "matches": {
+      "$roomCode": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+
+    "lobbies": {
+      ".read": "auth != null",
+      "$roomCode": {
+        ".write": "auth != null"
+      }
+    },
+
+    "//cards": "Shared card library. Readable by anyone so the pool loads before sign-in completes; writable by signed-in users only.",
+    "cards": {
+      ".read": true,
+      "$cardNumber": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['cardNumber', 'name'])"
+      }
+    },
+
+    "//cardIndex": "Per-card { updatedAt } so clients only download artwork that actually changed. A deleted card keeps an entry here marked { deleted: true } - that tombstone is what stops it reappearing from data/cards/custom-project-cards.json, which is reloaded on every visit. Deliberately no .validate here, so tombstones work under these rules with no extra setup.",
+    "cardIndex": {
+      ".read": true,
+      "$cardNumber": {
+        ".write": "auth != null"
+      }
+    }
+  }
+}

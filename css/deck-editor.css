@@ -1,0 +1,762 @@
+/* =========================
+   Reset
+========================= */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* =========================
+   Page Setup
+========================= */
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: radial-gradient(circle at 15% 12%, rgba(16,185,129,.10), transparent 30%), linear-gradient(135deg, #0a0e0c 0%, #060908 100%);
+    color: white;
+}
+
+/* =========================
+   Deck Editor Page
+========================= */
+
+.deck-editor-page {
+    width: 100vw;
+    height: 100vh;
+    padding: clamp(16px, 3vw, 36px);
+
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+}
+
+/* =========================
+   Header
+========================= */
+
+.deck-editor-header {
+    width: 100%;
+    min-height: 70px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    position: relative;
+}
+
+.header-title-group {
+    text-align: center;
+}
+
+.header-title-group h1 {
+    font-size: clamp(2rem, 4vw, 3.4rem);
+    line-height: 1;
+    letter-spacing: 1px;
+}
+
+.header-title-group p {
+    margin-top: 10px;
+    color: #d5d5d5;
+    font-size: clamp(0.9rem, 1.5vw, 1.05rem);
+}
+
+.btn-back {
+    position: absolute;
+    left: 0;
+
+    color: white;
+    text-decoration: none;
+    font-size: 1rem;
+    font-weight: 600;
+
+    padding: 12px 18px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-radius: 14px;
+
+    background: rgba(255, 255, 255, 0.08);
+    transition: 0.2s ease;
+}
+
+.btn-back:hover {
+    background: rgba(255, 255, 255, 0.18);
+    transform: translateY(-2px);
+}
+
+/* =========================
+   Main Layout
+========================= */
+
+.deck-editor-layout {
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+
+    display: grid;
+    grid-template-columns: minmax(320px, 430px) 1fr;
+    gap: 24px;
+}
+
+/* =========================
+   Shared Panels
+========================= */
+
+.deck-panel,
+.library-panel {
+    min-height: 0;
+
+    background: rgba(20, 20, 20, 0.55);
+    border: 2px solid rgba(255, 255, 255, 0.14);
+    border-radius: 24px;
+
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(8px);
+
+    padding: 22px;
+
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.panel-header h2 {
+    font-size: 1.45rem;
+}
+
+.panel-header p {
+    margin-top: 4px;
+    color: #c7c7c7;
+    font-size: 0.9rem;
+}
+
+.deck-count {
+    min-width: 72px;
+    padding: 10px 14px;
+
+    text-align: center;
+    font-weight: 700;
+
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* =========================
+   Deck Name / Filters Inputs
+========================= */
+
+.deck-name-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.deck-name-box label,
+.filter-group label {
+    color: #dddddd;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.deck-name-box input,
+.filter-group input,
+.filter-group select {
+    width: 100%;
+
+    color: white;
+    font-size: 0.95rem;
+
+    padding: 12px 14px;
+    border-radius: 12px;
+
+    background: rgba(255, 255, 255, 0.09);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    outline: none;
+}
+
+.deck-name-box input::placeholder,
+.filter-group input::placeholder {
+    color: #a9a9a9;
+}
+
+.deck-name-box input:focus,
+.filter-group input:focus,
+.filter-group select:focus {
+    border-color: rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.13);
+}
+
+.filter-group select option {
+    color: black;
+}
+
+/* =========================
+   Deck Display
+========================= */
+
+.deck-display {
+    flex: 1;
+    min-height: 0;
+
+    overflow-y: auto;
+    padding-right: 6px;
+
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.empty-deck-message {
+    margin-top: 8px;
+    padding: 20px;
+
+    color: #bcbcbc;
+    text-align: center;
+    font-size: 0.9rem;
+
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    border-radius: 16px;
+}
+
+/* =========================
+   Deck Card Items
+========================= */
+
+.deck-card-item {
+    width: 100%;
+    min-height: 92px;
+
+    display: grid;
+    grid-template-columns: 60px 1fr auto;
+    align-items: center;
+    gap: 14px;
+
+    padding: 10px;
+
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 16px;
+
+    transition: 0.2s ease;
+}
+
+.deck-card-item:hover {
+    background: rgba(255, 255, 255, 0.13);
+    transform: translateX(3px);
+}
+
+.deck-leader-item {
+    border-color: rgba(255, 215, 120, 0.5);
+    background: rgba(255, 215, 120, 0.12);
+}
+
+.deck-card-image {
+    width: 60px;
+    height: 78px;
+
+    border-radius: 10px;
+    overflow: hidden;
+
+    background: linear-gradient(145deg, #666, #333);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.deck-card-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.deck-card-image span {
+    font-size: 0.65rem;
+    color: #d0d0d0;
+}
+
+.deck-card-info h3 {
+    font-size: 0.98rem;
+    margin-bottom: 5px;
+}
+
+.deck-card-info p {
+    color: #bbbbbb;
+    font-size: 0.82rem;
+}
+
+.deck-card-amount {
+    min-width: 42px;
+    height: 42px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+
+    font-weight: 800;
+    font-size: 0.95rem;
+}
+
+/* =========================
+   Deck Card Controls
+========================= */
+
+.deck-card-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.quantity-button {
+    cursor: pointer;
+
+    width: 32px;
+    height: 32px;
+
+    color: white;
+    font-size: 1rem;
+    font-weight: 800;
+
+    border: none;
+    border-radius: 10px;
+
+    background: rgba(255, 255, 255, 0.14);
+    transition: 0.2s ease;
+}
+
+.quantity-button:hover {
+    background: rgba(255, 255, 255, 0.24);
+    transform: translateY(-2px);
+}
+
+.quantity-button:first-child {
+    background: rgba(180, 45, 45, 0.85);
+}
+
+.quantity-button:first-child:hover {
+    background: rgba(220, 60, 60, 0.95);
+}
+
+.quantity-button:last-child {
+    background: rgba(45, 120, 220, 0.85);
+}
+
+.quantity-button:last-child:hover {
+    background: rgba(65, 145, 255, 0.95);
+}
+
+.small-remove-button {
+    cursor: pointer;
+
+    color: white;
+    font-size: 0.8rem;
+    font-weight: 700;
+
+    padding: 8px 10px;
+
+    border: none;
+    border-radius: 10px;
+
+    background: rgba(180, 45, 45, 0.85);
+    transition: 0.2s ease;
+}
+
+.small-remove-button:hover {
+    background: rgba(220, 60, 60, 0.95);
+    transform: translateY(-2px);
+}
+
+/* =========================
+   Deck Actions
+========================= */
+
+.deck-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.deck-action-button,
+.add-card-button {
+    cursor: pointer;
+
+    color: white;
+    font-weight: 700;
+    font-size: 0.95rem;
+
+    border: none;
+    border-radius: 14px;
+
+    transition: 0.2s ease;
+}
+
+.deck-action-button {
+    padding: 14px;
+}
+
+.save-button {
+    background: linear-gradient(135deg, #10b981, #0e9f70);
+}
+
+.clear-button {
+    background: linear-gradient(135deg, #8f3131, #5f1f1f);
+}
+
+.deck-action-button:hover,
+.add-card-button:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.12);
+}
+
+/* =========================
+   Filters
+========================= */
+
+.filter-box {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+
+    padding: 16px;
+
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+}
+
+.filter-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.search-group {
+    grid-column: 1 / -1;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* =========================
+   Card Library
+========================= */
+
+.card-library-grid {
+    flex: 1;
+    min-height: 0;
+
+    overflow-y: auto;
+    padding-right: 6px;
+
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    align-content: start;
+    gap: 16px;
+}
+
+.library-card {
+    min-height: 290px;
+
+    padding: 12px;
+
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 18px;
+
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+
+    transition: 0.2s ease;
+}
+
+.library-card:hover {
+    background: rgba(255, 255, 255, 0.13);
+    transform: translateY(-4px);
+}
+
+.library-card-image {
+    width: 100%;
+    aspect-ratio: 2.5 / 3.5;
+
+    border-radius: 14px;
+    overflow: hidden;
+
+    background: linear-gradient(145deg, #686868, #2e2e2e);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.library-card-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.library-card-image span {
+    color: #d0d0d0;
+    font-size: 0.8rem;
+}
+
+.library-card-info {
+    flex: 1;
+}
+
+.library-card-info h3 {
+    font-size: 0.95rem;
+    line-height: 1.25;
+}
+
+.add-card-button {
+    padding: 10px;
+    background: linear-gradient(135deg, #10b981, #0e9f70);
+}
+
+.library-message {
+    grid-column: 1 / -1;
+
+    padding: 18px;
+
+    text-align: center;
+    color: #d7d7d7;
+
+    border: 1px dashed rgba(255, 255, 255, 0.24);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.07);
+}
+
+/* =========================
+   Clickable Card Images
+========================= */
+
+.library-card-image,
+.deck-card-image {
+    cursor: pointer;
+}
+
+.library-card-image:hover,
+.deck-card-image:hover {
+    filter: brightness(1.15);
+}
+
+/* =========================
+   Disabled Button States
+========================= */
+
+.disabled-button,
+.disabled-button:hover {
+    cursor: not-allowed;
+    opacity: 0.45;
+    filter: grayscale(1);
+    transform: none;
+}
+
+.add-card-button:disabled,
+.quantity-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+    filter: grayscale(1);
+    transform: none;
+}
+
+/* =========================
+   Card Preview Modal
+========================= */
+
+.card-preview-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+
+    display: none;
+    align-items: center;
+    justify-content: center;
+
+    padding: 24px;
+}
+
+.card-preview-modal.open {
+    display: flex;
+}
+
+.card-preview-backdrop {
+    position: absolute;
+    inset: 0;
+
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(6px);
+}
+
+.card-preview-box {
+    position: relative;
+    z-index: 1;
+
+    width: min(420px, 92vw);
+    max-height: 92vh;
+
+    padding: 18px;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+
+    background: rgba(25, 25, 25, 0.96);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 24px;
+
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.65);
+}
+
+.card-preview-image {
+    width: min(330px, 78vw);
+    max-height: 70vh;
+
+    object-fit: contain;
+
+    border-radius: 18px;
+    box-shadow: 0 14px 35px rgba(0, 0, 0, 0.55);
+}
+
+.card-preview-info {
+    width: 100%;
+    text-align: center;
+}
+
+.card-preview-info h2 {
+    font-size: 1.25rem;
+    margin-bottom: 6px;
+}
+
+.card-preview-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+
+    width: 38px;
+    height: 38px;
+
+    cursor: pointer;
+
+    color: white;
+    font-size: 1.6rem;
+    line-height: 1;
+
+    border: none;
+    border-radius: 50%;
+
+    background: rgba(180, 45, 45, 0.9);
+    transition: 0.2s ease;
+}
+
+.card-preview-close:hover {
+    background: rgba(230, 60, 60, 1);
+    transform: scale(1.08);
+}
+
+/* =========================
+   Scrollbars
+========================= */
+
+.deck-display::-webkit-scrollbar,
+.card-library-grid::-webkit-scrollbar {
+    width: 8px;
+}
+
+.deck-display::-webkit-scrollbar-track,
+.card-library-grid::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 20px;
+}
+
+.deck-display::-webkit-scrollbar-thumb,
+.card-library-grid::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.25);
+    border-radius: 20px;
+}
+
+.deck-display::-webkit-scrollbar-thumb:hover,
+.card-library-grid::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.38);
+}
+
+/* =========================
+   Responsive Design
+========================= */
+
+@media (max-width: 1000px) {
+    html,
+    body {
+        overflow: auto;
+    }
+
+    .deck-editor-page {
+        min-height: 100vh;
+        height: auto;
+    }
+
+    .deck-editor-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .deck-panel,
+    .library-panel {
+        min-height: 500px;
+    }
+}
+
+@media (max-width: 650px) {
+    .deck-editor-header {
+        justify-content: flex-end;
+    }
+
+    .header-title-group {
+        text-align: right;
+        max-width: 70%;
+    }
+
+    .btn-back {
+        left: 0;
+    }
+
+    .filter-row {
+        grid-template-columns: 1fr;
+    }
+
+    .search-group {
+        grid-column: auto;
+    }
+
+    .deck-actions {
+        grid-template-columns: 1fr;
+    }
+}

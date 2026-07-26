@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VS Self - Custom Cards</title>
+
+    <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-2">
+    <link rel="stylesheet" href="../css/manual-play.css?v=manual-2">
+</head>
+<body>
+    <!-- Manual Play Sidebar -->
+    <aside class="manual-sidebar" id="manualSidebar">
+        <h3>Tools</h3>
+        <button class="tool-btn" id="drawArrowTool">→ Draw Arrow</button>
+        <button class="tool-btn secondary" id="resetArrowsTool">⟲ Reset Arrows</button>
+        <button class="tool-btn secondary" id="restandAllTool">↺ Restand All</button>
+        <button class="tool-btn" id="addNoteTool">✎ Add Note</button>
+        <button class="tool-btn warning" id="clearNotesTool">✖ Clear Notes</button>
+
+        <div class="separator"></div>
+
+        <div class="life-tracker">
+            <div class="life-tracker-title">Counter</div>
+            <div class="life-display" id="lifeDisplay">0</div>
+            <div class="life-controls">
+                <button class="life-btn" id="lifeMinus1">-1</button>
+                <button class="life-btn" id="lifePlus1">+1</button>
+                <button class="life-btn" id="lifeMinus5">-5</button>
+                <button class="life-btn" id="lifePlus5">+5</button>
+            </div>
+        </div>
+
+        <div class="separator"></div>
+
+        <div class="phase-info">
+            <div class="phase-label">Phase</div>
+            <div class="phase-display" id="phaseDisplay">Your Turn</div>
+            <button class="tool-btn secondary" id="nextTurnBtn" style="width: 100%; margin-top: 8px;">Next Turn</button>
+            <!-- Online matches only; shown by updateOnlinePhaseButton. -->
+            <button class="tool-btn warning hidden" id="concedeBtn" style="width: 100%; margin-top: 6px;">I Lose</button>
+        </div>
+
+        <div class="separator"></div>
+
+        <div class="tips-section">
+            <h3>How to Play</h3>
+
+            <div class="tip-group">
+                <div class="tip-title">Cards</div>
+                <div class="tip-item">
+                    <span class="tip-icon">↻</span>
+                    <span><strong>Double-click</strong> any card to rest or unrest it</span>
+                </div>
+                <div class="tip-item">
+                    <span class="tip-icon">👁</span>
+                    <span><strong>Hover</strong> a card to preview it</span>
+                </div>
+                <div class="tip-item">
+                    <span class="tip-icon">🖱</span>
+                    <span><strong>Right-click</strong> board cards for a move menu</span>
+                </div>
+            </div>
+
+            <div class="tip-group">
+                <div class="tip-title">DON!!</div>
+                <div class="tip-item">
+                    <span class="tip-icon">+</span>
+                    <span><strong>Click</strong> a DON card to select it (blue glow), then click a character or leader to attach it</span>
+                </div>
+                <div class="tip-item">
+                    <span class="tip-icon">−</span>
+                    <span><strong>Right-click</strong> a DON card to remove 1 from your count</span>
+                </div>
+            </div>
+
+            <div class="tip-group">
+                <div class="tip-title">Life Cards</div>
+                <div class="tip-item">
+                    <span class="tip-icon">👀</span>
+                    <span><strong>Hover</strong> the life area to fan out your cards</span>
+                </div>
+                <div class="tip-item">
+                    <span class="tip-icon">🖱</span>
+                    <span><strong>Right-click</strong> a life card to reveal it or send it somewhere</span>
+                </div>
+            </div>
+
+            <div class="tip-group">
+                <div class="tip-title">Hand</div>
+                <div class="tip-item">
+                    <span class="tip-icon">🖱</span>
+                    <span><strong>Right-click</strong> a hand card to send it to trash, deck, or life</span>
+                </div>
+            </div>
+
+            <div class="tip-group">
+                <div class="tip-title">Deck</div>
+                <div class="tip-item">
+                    <span class="tip-icon">🖱</span>
+                    <span><strong>Right-click</strong> your deck to view all cards inside</span>
+                </div>
+            </div>
+
+            <div class="tip-group">
+                <div class="tip-title">Tools</div>
+                <div class="tip-item">
+                    <span class="tip-icon">→</span>
+                    <span><strong>Draw Arrow:</strong> click button, then click 2 cards to draw a red line between them</span>
+                </div>
+                <div class="tip-item">
+                    <span class="tip-icon">✎</span>
+                    <span><strong>Add Note:</strong> click button, then click any card to add coloured text on it</span>
+                </div>
+                <div class="tip-item">
+                    <span class="tip-icon">↺</span>
+                    <span><strong>Restand All</strong> untaps every card and detaches all DON</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <a href="../index.html?view=game" class="btn-back">Back to Lobby</a>
+
+    <main class="self-page">
+
+        <div id="onlineMatchInfo" class="online-match-info hidden"></div>
+
+        <div class="game-layout">
+            <section class="game-board">
+
+                <!-- Floats just left of the board (absolutely positioned, see
+                     .extra-zones-column) so it never takes width from the
+                     play area. -->
+                <aside class="extra-zones-column" id="extraZonesColumn">
+                    <!-- Labels are set from the player's actual seat in
+                         renderExtraPiles - P2 owns the "player2" group. -->
+                    <div class="extra-zones-group" id="extraZonesOpponent">
+                        <div class="extra-zones-label" id="extraZonesLabelP2">Opponent Piles</div>
+                        <div class="area extra-faceup-area token-zone-area" id="player2TokenZoneArea" data-player="player2" data-pile="tokens"></div>
+                        <div class="area extra-facedown-area" id="player2ExtraFaceDownArea" data-player="player2" data-pile="extraFaceDown"></div>
+                        <div class="area extra-faceup-area" id="player2ExtraFaceUpArea" data-player="player2" data-pile="extraFaceUp"></div>
+                    </div>
+                    <div class="extra-zones-group" id="extraZonesSelf">
+                        <div class="area extra-faceup-area" id="player1ExtraFaceUpArea" data-player="player1" data-pile="extraFaceUp"></div>
+                        <div class="area extra-facedown-area" id="player1ExtraFaceDownArea" data-player="player1" data-pile="extraFaceDown"></div>
+                        <div class="area extra-faceup-area token-zone-area" id="player1TokenZoneArea" data-player="player1" data-pile="tokens"></div>
+                        <div class="extra-zones-label" id="extraZonesLabelP1">Your Piles</div>
+                    </div>
+                </aside>
+
+
+                <div class="hand opponent-hand" id="player2Hand"></div>
+        
+                <section class="play-area opponent-area">
+                    <div class="character-area">
+                        <div class="character-label">Character Area</div>
+                        <div class="character-slot" data-player="player2" data-slot="0"></div>
+                        <div class="character-slot" data-player="player2" data-slot="1"></div>
+                        <div class="character-slot" data-player="player2" data-slot="2"></div>
+                        <div class="character-slot" data-player="player2" data-slot="3"></div>
+                        <div class="character-slot" data-player="player2" data-slot="4"></div>
+                    </div>
+        
+                    <div class="life-area" id="lifeArea">
+                        <span class="life-toggle-text" id="lifeToggleText">View Life Cards</span>
+                    </div>
+        
+                    <div class="area leader-area" id="player2LeaderArea"></div>
+                    <div class="area stage-area" id="player2StageArea"></div>
+                    <div class="area deck-area" id="player2DeckArea"></div>
+        
+                    <div class="area don-deck-area" id="player2DonDeckArea"></div>
+                    <div class="area don-area" id="player2DonArea"></div>
+                    <div class="area trash-area" id="player2TrashArea"></div>
+                </section>
+        
+                <section class="play-area player-area">
+                    <div class="character-area">
+                        <div class="character-label">Character Area</div>
+                        <div class="character-slot" data-player="player1" data-slot="0"></div>
+                        <div class="character-slot" data-player="player1" data-slot="1"></div>
+                        <div class="character-slot" data-player="player1" data-slot="2"></div>
+                        <div class="character-slot" data-player="player1" data-slot="3"></div>
+                        <div class="character-slot" data-player="player1" data-slot="4"></div>
+                    </div>
+        
+                    <div class="life-area" id="opponentLifeArea">
+                        <span class="life-toggle-text" id="opponentLifeToggleText">View Life Cards</span>
+                    </div>
+        
+                    <div class="area leader-area" id="player1LeaderArea"></div>
+                    <div class="area stage-area" id="player1StageArea"></div>
+                    <div class="area deck-area" id="player1DeckArea"></div>
+        
+                    <div class="area don-deck-area" id="player1DonDeckArea"></div>
+                    <div class="area don-area" id="player1DonArea"></div>
+                    <div class="area trash-area" id="player1TrashArea"></div>
+                </section>
+
+                <div class="hand player-hand" id="player1Hand"></div>
+        
+            </section>
+
+            <aside class="card-preview-panel">
+                <div class="card-preview">
+                    <div class="preview-placeholder" id="previewPlaceholder">
+                        Hover a card to preview it
+                    </div>
+
+                    <img id="previewImage" class="preview-image" src="" alt="Card Preview">
+                </div>
+
+                <div class="game-log">
+                    <h3>Game Log</h3>
+                    <div id="gameLogMessages" class="game-log-messages"></div>
+                    <!-- Shown only in online matches (see setupOnlineChat) -->
+                    <form id="chatForm" class="chat-form hidden">
+                        <input id="chatInput" type="text" maxlength="300"
+                               placeholder="Message your opponent…" autocomplete="off">
+                        <button type="submit" id="chatSend">Send</button>
+                    </form>
+                </div>
+            </aside>
+            
+        </div>
+    </main>
+
+    <script src="../js/core/phases.js?v=creation-13&t=20260714172304"></script>
+    <script src="../js/manual-play.js?v=manual-2&t=20260714172304"></script>
+    <script src="../js/cards/cardDatabase.js?v=creation-14&t=20260714172304"></script>
+    <script src="../js/cards/decks.js?v=creation-13&t=20260714172304"></script>
+    <script src="../js/core/deckParser.js?t=20260714172304"></script>
+
+    <script src="../js/pages/self.js?v=deck-grid-4&t=20260716000004"></script>
+  <script src="../js/rotate-prompt.js"></script>
+
+  <script src="../js/version.js"></script>
+</body>
+</html>

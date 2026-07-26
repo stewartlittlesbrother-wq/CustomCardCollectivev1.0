@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preset Decks - Custom Cards</title>
+
+    <link rel="icon" type="image/png" href="../images/basic/logo-without-title.png">
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/presetDecks.css">
+</head>
+
+<body>
+    <main class="preset-decks-page">
+        <header class="preset-decks-header">
+            <a href="../index.html" class="btn-back">← Back</a>
+
+            <section class="preset-title-group">
+                <h1>Preset Decks</h1>
+                <p>Browse ready-made decks, view their cards, and choose one for testing.</p>
+            </section>
+        </header>
+
+        <section class="preset-decks-panel">
+            <div class="preset-decks-toolbar">
+                <div>
+                    <h2>Available Decks</h2>
+                    <p id="deckCountText">Loading decks...</p>
+                </div>
+
+                <input 
+                    type="text" 
+                    id="deckSearchInput" 
+                    class="deck-search-input" 
+                    placeholder="Search decks..."
+                    autocomplete="off"
+                >
+            </div>
+
+            <div id="presetDecksGrid" class="preset-decks-grid"></div>
+
+            <div id="emptyDecksMessage" class="empty-decks-message hidden">
+                No preset decks found.
+            </div>
+        </section>
+    </main>
+
+    <script src="../js/cards/cardDatabase.js?v=ry-ichigo-1"></script>
+    <script src="../js/cards/decks.js?v=ry-ichigo-1"></script>
+    <script src="../js/pages/presetDecks.js"></script>
+  <script src="../js/rotate-prompt.js"></script>
+
+  <script src="../js/version.js"></script>
+</body>
+</html>

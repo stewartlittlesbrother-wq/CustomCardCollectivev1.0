@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Play - Custom Cards</title>
+
+    <link rel="icon" type="image/png" href="../images/basic/logo-without-title.png">
+    <link rel="stylesheet" href="../css/play.css">
+</head>
+
+<body>
+    <main class="play-page">
+        <header class="play-header">
+            <a href="../index.html" class="btn-back">← Back</a>
+
+            <div class="header-title-group">
+                <p>Select game mode</p>
+            </div>
+        </header>
+
+        <section class="play-panel">
+            <div class="play-side">
+                <h2>Practice</h2>
+                <p>Play both sides yourself and test cards, effects, phases, and deck flow. Note that right now, all decks available are pre-set. We will add deck editor functionality in the future.</p>
+
+                <div class="deck-picker-group">
+                    <label class="deck-picker-field" for="player1DeckSelect">
+                        <span>Player 1 Deck</span>
+                        <select id="player1DeckSelect" class="deck-picker-select"></select>
+                    </label>
+
+                    <label class="deck-picker-field" for="player2DeckSelect">
+                        <span>Player 2 Deck</span>
+                        <select id="player2DeckSelect" class="deck-picker-select"></select>
+                    </label>
+                </div>
+
+                <a href="self.html" class="btn btn-primary" id="selfPlayLink">
+                    VS Self
+                </a>
+            </div>
+
+            <div class="play-divider"></div>
+
+            <div class="play-side">
+                <h2>Online</h2>
+                <p>Play against another player. Multiplayer setup will be added later.</p>
+
+                <a href="multiplayer.html" class="btn btn-secondary">
+                    Multiplayer
+                </a>
+            </div>
+        </section>
+
+    </main>
+
+    <script src="../js/cards/decks.js?v=ry-ichigo-1"></script>
+    <script src="../js/pages/play.js"></script>
+  <script src="../js/rotate-prompt.js"></script>
+
+  <script src="../js/version.js"></script>
+</body>
+</html>

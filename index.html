@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Custom Cards Simulator</title>
+  <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
+  <link rel="stylesheet" href="styles.css?v=creation-9">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="top-nav">
+      <button class="brand" type="button" data-view="home" aria-label="Home">
+        <img src="images/basic/custom-sim-logo.svg" alt="">
+        <span>
+          <strong>Custom Cards Sim</strong>
+          <!-- Build number. Deliberately a <span>, not a <small> - existing
+               responsive rules hide .brand small on narrow screens. -->
+          <span class="app-version"></span>
+        </span>
+      </button>
+
+      <nav class="nav-tabs" aria-label="Main views">
+        <button class="nav-tab active" type="button" data-view="home">Home</button>
+        <button class="nav-tab" type="button" data-view="builder">Deck Builder</button>
+        <button class="nav-tab" type="button" id="navCardCreator">Card Creator</button>
+        <button class="nav-tab" type="button" data-view="game">Practice Board</button>
+        <button class="nav-tab" type="button" id="navMultiplayer">Multiplayer</button>
+        <button class="nav-tab" type="button" data-view="settings">Settings</button>
+      </nav>
+
+      <div class="nav-actions" aria-hidden="true"></div>
+    </header>
+
+    <main>
+      <section class="view active" id="homeView" data-view-panel="home">
+        <section class="home-launch">
+          <img src="images/basic/custom-sim-logo.svg" alt="">
+          <h1>Custom OPTCG Online Simulator</h1>
+          <div class="home-launch-actions">
+            <button type="button" data-view="builder">Deck Builder</button>
+            <button type="button" data-view="game">Practice VS Self</button>
+            <button type="button" id="multiplayerButton">Multiplayer</button>
+          </div>
+
+          <div class="home-hidden-stats" aria-hidden="true">
+            <span id="homeLeader">None</span>
+            <span id="homeDeckCount">0</span>
+            <span id="homePoolCount">Loading</span>
+            <span id="leaderTotal">0</span>
+            <span id="characterTotal">0</span>
+            <span id="eventTotal">0</span>
+            <span id="stageTotal">0</span>
+            <button type="button" id="quickBuild"></button>
+            <button type="button" id="clearDeckHome"></button>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="settingsView" data-view-panel="settings">
+        <div class="settings-page">
+          <header class="settings-header">
+            <h1>Settings</h1>
+            <p>Preferences are saved automatically and apply across all game modes.</p>
+          </header>
+
+          <section class="settings-group" aria-label="Turn automation settings">
+            <h2>Turn Automation</h2>
+            <p class="settings-group-note">
+              Applied at the start of your turn, when the turn passes back to you.
+            </p>
+            <label class="settings-row">
+              <input type="checkbox" id="setAutoDraw">
+              <span>
+                <strong>Auto Draw at Start of Turn</strong>
+                <small>Draw 1 card automatically.</small>
+              </span>
+            </label>
+            <label class="settings-row">
+              <input type="checkbox" id="setAutoAddDon">
+              <span>
+                <strong>Auto Add 2 DON!!</strong>
+                <small>Gain 2 DON!! from your DON!! deck.</small>
+              </span>
+            </label>
+            <label class="settings-row">
+              <input type="checkbox" id="setAutoRestand">
+              <span>
+                <strong>Auto Restand Cards</strong>
+                <small>Set your rested cards and DON!! back to active.</small>
+              </span>
+            </label>
+            <label class="settings-row">
+              <input type="checkbox" id="setAutoDetach">
+              <span>
+                <strong>Auto Detach Attached DON!!</strong>
+                <small>Return DON!! attached to your cards to the active area.</small>
+              </span>
+            </label>
+          </section>
+
+          <section class="settings-group" aria-label="Card importer settings">
+            <h2>Card Importer</h2>
+            <p class="settings-group-note">
+              Controls the Card Creator's automatic image scanning.
+            </p>
+            <label class="settings-row">
+              <input type="checkbox" id="setOcrEnabled">
+              <span>
+                <strong>Enable Automatic Card Scanning</strong>
+                <small>Read cost, name and set number from a card image and pre-fill the fields. You can always edit them.</small>
+              </span>
+            </label>
+          </section>
+
+          <section class="settings-group" aria-label="Shared card library">
+            <h2>Shared Card Library</h2>
+            <p class="settings-group-note">
+              Every card anyone saves is published here automatically, so all
+              players see it permanently — no server and no extra step needed.
+            </p>
+            <div class="settings-row">
+              <span>
+                <strong>Status</strong>
+                <small id="libraryStatus">Checking…</small>
+              </span>
+            </div>
+            <div class="settings-row settings-row-actions">
+              <span>
+                <strong>Restore cards from this browser</strong>
+                <small id="restoreHint">
+                  This browser keeps a full copy of every card it has downloaded.
+                  If cards are missing from the shared library, this puts them back.
+                </small>
+              </span>
+              <button class="red-button" type="button" id="restoreCards">Restore</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="builderView" data-view-panel="builder">
+        <div class="builder-window">
+          <aside class="filter-stack">
+            <button class="tip-button" id="showSearchTips" type="button" title="Search tips">i</button>
+            <input id="searchInput" type="search" placeholder="Search cards">
+            <button class="red-button" id="runSearch" type="button">Search</button>
+            <button type="button" class="red-button" id="resetFilters">Reset</button>
+            <input id="filterQuick" type="hidden">
+
+            <div class="color-wheel-wrap" aria-label="Color shortcuts">
+              <svg class="color-wheel" viewBox="0 0 120 120" role="img" aria-label="Choose a color">
+                <polygon class="wheel-core" points="60,60 60,8 105,34 105,86 60,112 15,86 15,34"></polygon>
+                <polygon class="wheel-wedge yellow" data-color-shortcut="yellow" points="60,60 60,8 15,34"></polygon>
+                <polygon class="wheel-wedge red" data-color-shortcut="red" points="60,60 60,8 105,34"></polygon>
+                <polygon class="wheel-wedge green" data-color-shortcut="green" points="60,60 105,34 105,86"></polygon>
+                <polygon class="wheel-wedge blue" data-color-shortcut="blue" points="60,60 105,86 60,112"></polygon>
+                <polygon class="wheel-wedge purple" data-color-shortcut="purple" points="60,60 60,112 15,86"></polygon>
+                <polygon class="wheel-wedge black" data-color-shortcut="black" points="60,60 15,86 15,34"></polygon>
+              </svg>
+            </div>
+
+            <input id="colorFilter" type="hidden" value="">
+            <div class="sort-buttons" aria-label="Sort by">
+              <span>Sort By</span>
+              <button class="active" type="button" data-sort-field="number">Card #</button>
+              <button type="button" data-sort-field="cost">Cost</button>
+              <button type="button" data-sort-field="name">Name</button>
+              <button type="button" data-sort-field="power">Power</button>
+            </div>
+            <div class="filter-row">
+              <select id="setFilter" aria-label="Set"><option value="">Set</option></select>
+              <select id="categoryFilter" aria-label="Type">
+                <option value="">Type</option>
+                <option value="leader">Leader</option>
+                <option value="character">Character</option>
+                <option value="event">Event</option>
+                <option value="stage">Stage</option>
+                <option value="token">Token</option>
+              </select>
+              <select id="costFilter" aria-label="Cost"><option value="">Cost</option></select>
+              <select id="powerFilter" aria-label="Power"><option value="">Power</option></select>
+              <select id="counterFilter" aria-label="Counter"><option value="">Counter</option></select>
+              <select id="rarityFilter" aria-label="Rarity"><option value="">Rarity</option></select>
+              <select id="blockFilter" aria-label="Block"><option value="">Block</option></select>
+            </div>
+          </aside>
+
+          <section class="builder-main">
+            <section class="collection-panel">
+              <div class="collection-top">
+                <div></div>
+                <h2>My Collection</h2>
+                <div class="collection-actions">
+                  <!-- Says WHY the grid is filtered (leader-first browsing),
+                       so a small count never looks like missing cards. -->
+                  <span class="collection-hint" id="collectionHint"></span>
+                  <span class="count-pill"><span id="filteredCount">0</span> shown</span>
+                </div>
+              </div>
+              <div class="card-grid" id="cardGrid" aria-live="polite"></div>
+            </section>
+
+            <section class="deck-table">
+              <div class="deck-tabs">
+                <span class="active">Deck Builder</span>
+                <button type="button" id="savedDecksTab">Saved Decks</button>
+                <button type="button" id="cardCreationTab">Card Creation</button>
+              </div>
+
+              <div class="deck-toolbar">
+                <label class="deck-name-field">
+                  <span id="deckTitle">Untitled Deck</span>
+                  <input id="deckName" type="text" placeholder="Deck name">
+                </label>
+                <div class="deck-counts">
+                  <strong><span id="deckCount">0</span>/50</strong>
+                  <span>Main deck</span>
+                </div>
+                <div class="deck-tools">
+                  <button class="red-button" type="button" id="saveDeckMini">Save</button>
+                  <button class="red-button" type="button" id="clearDeck">Clear</button>
+                </div>
+              </div>
+
+              <div id="deckWarnings" class="warnings"></div>
+              <section class="saved-decks-panel" id="savedDecksPanel" hidden>
+                <div class="saved-decks-header">
+                  <strong>Saved Decks</strong>
+                  <button class="ghost" type="button" id="closeSavedDecks">Close</button>
+                </div>
+                <div id="savedDeckList" class="saved-deck-list"></div>
+              </section>
+              <section class="card-creation-panel" id="cardCreationPanel" hidden>
+                <div class="saved-decks-header">
+                  <strong>Card Creation</strong>
+                  <button class="ghost" type="button" id="closeCardCreation">Close</button>
+                </div>
+
+                <div class="creation-layout">
+                  <form id="cardCreationForm" class="card-creation-form">
+                    <div class="import-grid">
+                      <label>
+                        Image URL <small style="opacity:.65">(recommended — stores only the link)</small>
+                        <input id="creationImageUrl" type="url" placeholder="https://example.com/card.png">
+                      </label>
+                      <label>
+                        Or upload image <small style="opacity:.65">(scanned locally)</small>
+                        <input id="creationImage" type="file" accept="image/png,image/jpeg,image/webp">
+                      </label>
+                      <label class="ocr-toggle-row" title="Reads cost, name and set number from the image and pre-fills the fields. You can always edit them.">
+                        <input id="creationOcrToggle" type="checkbox">
+                        <span>Auto-scan card images (OCR)</span>
+                      </label>
+                      <label>
+                        Card #
+                        <input id="creationCardNumber" type="text" placeholder="JJBA-001" required>
+                      </label>
+                      <label>
+                        Name
+                        <input id="creationName" type="text" placeholder="Character name" required>
+                      </label>
+                      <label>
+                        Card Type
+                        <select id="creationCategory">
+                          <option value="leader">Leader</option>
+                          <option value="character" selected>Character</option>
+                          <option value="event">Event</option>
+                          <option value="stage">Stage</option>
+                          <option value="token">Token</option>
+                        </select>
+                      </label>
+                      <label>
+                        Colors
+                        <select id="creationColors">
+                          <option value="">Colorless</option>
+                          <option value="red">Red</option>
+                          <option value="green">Green</option>
+                          <option value="blue">Blue</option>
+                          <option value="purple">Purple</option>
+                          <option value="black">Black</option>
+                          <option value="yellow">Yellow</option>
+                          <option value="red, green">Red / Green</option>
+                          <option value="red, blue">Red / Blue</option>
+                          <option value="red, purple">Red / Purple</option>
+                          <option value="red, black">Red / Black</option>
+                          <option value="red, yellow">Red / Yellow</option>
+                          <option value="green, blue">Green / Blue</option>
+                          <option value="green, purple">Green / Purple</option>
+                          <option value="green, black">Green / Black</option>
+                          <option value="green, yellow">Green / Yellow</option>
+                          <option value="blue, purple">Blue / Purple</option>
+                          <option value="blue, black">Blue / Black</option>
+                          <option value="blue, yellow">Blue / Yellow</option>
+                          <option value="purple, black">Purple / Black</option>
+                          <option value="purple, yellow">Purple / Yellow</option>
+                          <option value="black, yellow">Black / Yellow</option>
+                        </select>
+                      </label>
+                      <label>
+                        Cost / Life
+                        <select id="creationCost">
+                          <option value="">None</option>
+                          <option value="0">0</option>
+                          <option value="1">1</option>
+                          <option value="2">2</option>
+                          <option value="3">3</option>
+                          <option value="4">4</option>
+                          <option value="5">5</option>
+                          <option value="6">6</option>
+                          <option value="7">7</option>
+                          <option value="8">8</option>
+                          <option value="9">9</option>
+                          <option value="10">10</option>
+                        </select>
+                      </label>
+                      <label>
+                        Power
+                        <input id="creationPower" type="number" min="0" step="1000" placeholder="5000">
+                      </label>
+                      <label>
+                        Counter
+                        <select id="creationCounter">
+                          <option value="">None</option>
+                          <option value="0">0</option>
+                          <option value="1000">+1000</option>
+                          <option value="2000">+2000</option>
+                        </select>
+                      </label>
+                      <label>
+                        Attribute
+                        <select id="creationAttribute">
+                          <option value="">None</option>
+                          <option value="Strike">Strike</option>
+                          <option value="Slash">Slash</option>
+                          <option value="Ranged">Ranged</option>
+                          <option value="Special">Special</option>
+                          <option value="Wisdom">Wisdom</option>
+                        </select>
+                      </label>
+                      <label>
+                        Types
+                        <input id="creationTypes" type="text" placeholder="Hamon/Bizarre">
+                      </label>
+                      <label>
+                        Rarity
+                        <select id="creationRarity">
+                          <option value="">None</option>
+                          <option value="C">C</option>
+                          <option value="UC">UC</option>
+                          <option value="R">R</option>
+                          <option value="SR">SR</option>
+                          <option value="SEC">SEC</option>
+                          <option value="L">L</option>
+                          <option value="P">P</option>
+                        </select>
+                      </label>
+                      <label>
+                        Copies allowed
+                        <select id="creationCopyLimit">
+                          <option value="4" selected>4 (standard)</option>
+                          <option value="1">1</option>
+                          <option value="2">2</option>
+                          <option value="3">3</option>
+                          <option value="5">5</option>
+                          <option value="6">6</option>
+                          <option value="8">8</option>
+                          <option value="10">10</option>
+                          <option value="0">Unlimited</option>
+                        </select>
+                      </label>
+                      <label>
+                        Keywords
+                        <select id="creationKeywords">
+                          <option value="">None</option>
+                          <option value="Blocker">Blocker</option>
+                          <option value="Rush">Rush</option>
+                          <option value="Rush:Characters">Rush:Character</option>
+                          <option value="Banish">Banish</option>
+                          <option value="Double Attack">Double Attack</option>
+                          <option value="Unblockable">Unblockable</option>
+                          <option value="Blocker, Rush">Blocker / Rush</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <label class="import-effect-field">
+                      Card Effect Text
+                      <textarea id="creationEffectText" spellcheck="false" placeholder="On Play: Draw 1 card.&#10;Activate: Main Once Per Turn: Rest 1 DON!!: ...&#10;(For reference only - effects not executed in manual mode)"></textarea>
+                    </label>
+
+                    <!-- Scan progress: the reader takes a few seconds per card,
+                         so it reports each field as it goes. -->
+                    <div class="scan-progress" id="scanProgress" hidden>
+                      <div class="scan-progress-bar"><span id="scanProgressFill"></span></div>
+                      <span class="scan-progress-label" id="scanProgressLabel">Preparing…</span>
+                    </div>
+
+                    <div class="import-actions">
+                      <span id="creationStatus">Ready</span>
+                      <button class="ghost" id="clearCreationForm" type="button">Clear</button>
+                      <button type="submit">Save Card</button>
+                    </div>
+                  </form>
+
+                  <aside class="creation-preview">
+                    <strong>Image Preview</strong>
+                    <div id="creationImagePreview" class="creation-image-preview">
+                      <span>No image yet</span>
+                    </div>
+                    <div class="creation-ai-note">
+                      <strong>Recipe filters</strong>
+                      <p>Search filters can use name, card type, color, type/subtype, cost, power, counter, life, attribute, rarity, set, and keyword. Example: <code>Where type includes "Bizarre"</code> or <code>Where cost &lt;= 3</code>.</p>
+                    </div>
+                  </aside>
+                </div>
+              </section>
+              <div class="deck-board-scroll">
+                <section class="leader-slot" id="leaderSlot"></section>
+                <div class="deck-list" id="deckList"></div>
+              </div>
+            </section>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="gameView" data-view-panel="game">
+        <h2 id="gameTitle" class="visually-hidden">Self-practice setup</h2>
+        <div class="practice-shell setup-mode">
+          <section class="game-board" id="gameBoard"></section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <template id="cardTemplate">
+    <article class="card-tile">
+      <button class="card-image" type="button" data-action="preview"></button>
+      <div class="card-body">
+        <strong></strong>
+        <span></span>
+      </div>
+      <div class="card-actions">
+        <button type="button" data-action="add">Add</button>
+        <button class="ghost" type="button" data-action="inspect">Inspect</button>
+        <button class="ghost custom-edit-action" type="button" data-action="edit" hidden>Edit</button>
+        <button class="ghost danger custom-delete-action" type="button" data-action="delete" hidden>Delete</button>
+      </div>
+    </article>
+  </template>
+
+  <dialog id="cardDialog">
+    <div id="cardPreview"></div>
+    <button type="button" id="closePreview">Close</button>
+  </dialog>
+
+  <dialog id="searchTipsDialog">
+    <h2>Search Tips</h2>
+    <ul>
+      <li><code>&amp;&amp;</code> searches for multiple terms.</li>
+      <li><code>||</code> matches any term.</li>
+      <li><code>()</code> separates logic blocks.</li>
+      <li><code>[exact phrase]</code> matches an exact phrase.</li>
+      <li><code>1..5</code> searches a number range across cost, power, counter, and life.</li>
+      <li>Leader cost uses starting life for leader cards.</li>
+    </ul>
+    <p><strong>Examples:</strong></p>
+    <p><code>luffy &amp;&amp; red</code>, <code>[animal]</code>, <code>2..4</code>, <code>(luffy &amp;&amp; 1..3) || (zoro &amp;&amp; red)</code></p>
+    <button type="button" id="closeSearchTips">Close</button>
+  </dialog>
+
+  <dialog id="cardImportDialog">
+    <form id="cardImportForm" class="card-import-form">
+      <div class="import-header">
+        <div>
+          <p class="eyebrow">Custom card intake</p>
+          <h2>Import Card</h2>
+        </div>
+        <button class="ghost" type="button" id="closeCardImport">Close</button>
+      </div>
+
+      <div class="import-grid">
+        <label>
+          Card PNG
+          <input id="importImage" type="file" accept="image/png,image/jpeg,image/webp" required>
+        </label>
+        <label>
+          Card #
+          <input id="importCardNumber" type="text" placeholder="JJBA-001" required>
+        </label>
+        <label>
+          Name
+          <input id="importName" type="text" placeholder="Character name" required>
+        </label>
+        <label>
+          Card Type
+          <select id="importCategory">
+            <option value="leader">Leader</option>
+            <option value="character" selected>Character</option>
+            <option value="event">Event</option>
+            <option value="stage">Stage</option>
+            <option value="token">Token</option>
+          </select>
+        </label>
+        <label>
+          Colors
+          <input id="importColors" type="text" placeholder="red, green">
+        </label>
+        <label>
+          Cost / Life
+          <input id="importCost" type="number" min="0" placeholder="Cost for non-leaders">
+        </label>
+        <label>
+          Power
+          <input id="importPower" type="number" min="0" step="1000" placeholder="5000">
+        </label>
+        <label>
+          Counter
+          <input id="importCounter" type="number" min="0" step="1000" placeholder="1000">
+        </label>
+        <label>
+          Attribute
+          <input id="importAttribute" type="text" placeholder="strike, slash, special">
+        </label>
+        <label>
+          Types
+          <input id="importTypes" type="text" placeholder="Morioh/Stand User">
+        </label>
+        <label>
+          Rarity
+          <input id="importRarity" type="text" placeholder="C, R, SR, L">
+        </label>
+        <label>
+          Keywords
+          <input id="importKeywords" type="text" placeholder="Blocker, Rush">
+        </label>
+      </div>
+
+      <label class="import-effect-field">
+        Effect Text
+        <textarea id="importEffectText" rows="5" placeholder="On Play: Draw 1 card.&#10;Activate: Main Once Per Turn: Rest 1 DON!!: ..."></textarea>
+      </label>
+
+      <details class="wording-guide">
+        <summary>Best wording for effects</summary>
+        <ul>
+          <li>Start each ability with timing: <code>On Play:</code>, <code>Activate: Main</code>, <code>When Attacking:</code>, <code>Counter:</code>, or <code>Trigger:</code>.</li>
+          <li>Write costs before the colon after timing: <code>Activate: Main Once Per Turn: Rest 3 DON!! cards:</code>.</li>
+          <li>Use exact zone words: <code>hand</code>, <code>deck</code>, <code>trash</code>, <code>life</code>, <code>stage</code>, <code>leader</code>, <code>character</code>.</li>
+          <li>Say whether choices are optional: <code>up to 1</code> means optional, <code>1</code> means required.</li>
+          <li>Use clear durations: <code>during this battle</code>, <code>during this turn</code>, <code>until the end of your opponent's next turn</code>.</li>
+          <li>For searches, say exactly how many cards to look at, what can be added, and where the rest go.</li>
+        </ul>
+      </details>
+
+      <div class="import-actions">
+        <span id="importStatus">Imported cards: 0</span>
+        <button class="ghost danger" id="clearImportedCards" type="button">Clear Imports</button>
+        <button type="submit">Add To Library</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="js/version.js"></script>
+  <script src="js/rotate-prompt.js"></script>
+  <script src="js/cards/decks.js?v=creation-8"></script>
+  <script src="js/manual-play.js?v=manual-3"></script>
+  <script src="app.js?v=creation-17"></script>
+  <script>
+    // Home-page Turn Automation settings. Persists to localStorage under the
+    // same key self.js reads at the start of each turn (getTurnAutomationSettings).
+    (function () {
+      const KEY = "optcgTurnAutomation";
+      const defaults = { autoDraw: true, autoAddDon: true, autoRestand: true, autoDetach: true };
+      const fields = {
+        autoDraw: "setAutoDraw",
+        autoAddDon: "setAutoAddDon",
+        autoRestand: "setAutoRestand",
+        autoDetach: "setAutoDetach"
+      };
+
+      function load() {
+        try {
+          return { ...defaults, ...JSON.parse(localStorage.getItem(KEY) || "{}") };
+        } catch {
+          return { ...defaults };
+        }
+      }
+
+      const settings = load();
+
+      Object.entries(fields).forEach(([key, id]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.checked = settings[key] !== false;
+        el.addEventListener("change", () => {
+          settings[key] = el.checked;
+          localStorage.setItem(KEY, JSON.stringify(settings));
+        });
+      });
+    })();
+
+    // Card Importer: automatic-scanning (OCR) toggle. Default on. app.js reads
+    // this key (getOcrEnabled) before running OCR on an imported image.
+    (function () {
+      const KEY = "optcgOcrEnabled";
+      const box = document.getElementById("setOcrEnabled");
+      if (!box) return;
+      const stored = localStorage.getItem(KEY);
+      box.checked = stored === null ? true : stored === "true";
+      box.addEventListener("change", () => {
+        localStorage.setItem(KEY, String(box.checked));
+      });
+    })();
+  </script>
+</body>
+</html>

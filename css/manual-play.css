@@ -1,0 +1,353 @@
+/* Manual Gameplay Sidebar */
+.manual-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 180px;
+    height: 100vh;
+    background: linear-gradient(135deg, #0a0f0c 0%, #0c1512 100%);
+    border-right: 2px solid #10b981;
+    overflow-y: auto;
+    padding: 15px;
+    z-index: 100;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.manual-sidebar h3 {
+    color: #fff;
+    font-size: 13px;
+    margin: 12px 0 8px 0;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid #10b981;
+    padding-bottom: 6px;
+}
+
+/* Toggles */
+.toggle-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 0;
+    cursor: pointer;
+}
+
+.toggle-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #10b981;
+}
+
+.toggle-item label {
+    color: #aaa;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.toggle-item input[type="checkbox"]:checked + label {
+    color: #10b981;
+    font-weight: bold;
+}
+
+/* Tools */
+.tool-btn {
+    width: 100%;
+    padding: 8px 8px;
+    margin: 4px 0;
+    background: #10b981;
+    border: 1px solid #0e9f70;
+    color: #000;
+    font-size: 11px;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.tool-btn:hover {
+    background: #10b981;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(77, 255, 158, 0.4);
+}
+
+.tool-btn.secondary {
+    background: #6c757d;
+    border-color: #5a6268;
+    color: #fff;
+}
+
+.tool-btn.secondary:hover {
+    background: #7d8a96;
+}
+
+.tool-btn.warning {
+    background: #dc3545;
+    border-color: #c82333;
+    color: #fff;
+}
+
+.tool-btn.warning:hover {
+    background: #e74c3c;
+}
+
+/* Online turn lock: the shared turn lives in the match document, so the End Turn
+   button is only live on your own turn (see updateOnlinePhaseButton). */
+.tool-btn:disabled,
+.tool-btn.not-your-turn {
+    background: #3a4048;
+    border-color: #2c3138;
+    color: #8b949e;
+    cursor: not-allowed;
+    opacity: .75;
+}
+
+.tool-btn:disabled:hover,
+.tool-btn.not-your-turn:hover {
+    background: #3a4048;
+    transform: none;
+    box-shadow: none;
+}
+
+/* Separator */
+.separator {
+    height: 1px;
+    background: #10b981;
+    margin: 12px 0;
+    opacity: 0.5;
+}
+
+/* Counter */
+.life-tracker {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid #10b981;
+    border-radius: 6px;
+    padding: 10px;
+    margin: 10px 0;
+}
+
+.life-tracker-title {
+    color: #10b981;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    font-weight: bold;
+}
+
+.life-display {
+    font-size: 28px;
+    font-weight: bold;
+    color: #10b981;
+    text-align: center;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    margin: 8px 0;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.life-display:hover {
+    background: rgba(16, 185, 129, 0.2);
+    transform: scale(1.05);
+}
+
+.life-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+}
+
+.life-btn {
+    padding: 6px;
+    background: #10b981;
+    border: 1px solid #0e9f70;
+    color: #000;
+    font-weight: bold;
+    font-size: 11px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.life-btn:hover {
+    background: #4dff9e;
+    transform: translateY(-1px);
+}
+
+/* Phase Info */
+.phase-info {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid #10b981;
+    border-radius: 6px;
+    padding: 10px;
+    margin: 10px 0;
+}
+
+.phase-label {
+    color: #10b981;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: bold;
+    margin-bottom: 6px;
+}
+
+.phase-display {
+    color: #fff;
+    font-size: 14px;
+    font-weight: bold;
+    text-align: center;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    margin-bottom: 8px;
+}
+
+/* Back Button */
+.btn-back {
+    position: fixed;
+    top: 10px;
+    left: 195px;
+    z-index: 99;
+    padding: 8px 12px;
+    background: #666;
+    color: #fff;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 12px;
+    border: 1px solid #555;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-back:hover {
+    background: #777;
+}
+
+/* Main content occupies exactly the space right of the sidebar (self.css
+   sets width:100vw, which would overflow the viewport by the sidebar width) */
+.self-page {
+    margin-left: 180px;
+    width: calc(100vw - 180px);
+}
+
+/* Narrower sidebar on small landscape screens (phones) to leave more room
+   for the board; fitBoardToViewport() measures the real width, so the board
+   scale follows automatically. */
+@media (max-width: 900px), (max-height: 500px) {
+    .manual-sidebar {
+        width: 140px;
+        padding: 10px;
+    }
+
+    .self-page {
+        margin-left: 140px;
+        width: calc(100vw - 140px);
+    }
+
+    .btn-back {
+        left: 150px;
+    }
+}
+
+/* Card rested state */
+.zone-card.rested,
+.hand-card.rested,
+.character-card.rested {
+    transform: rotate(90deg);
+}
+
+/* Scrollbar styling for sidebar */
+.manual-sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.manual-sidebar::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.manual-sidebar::-webkit-scrollbar-thumb {
+    background: #10b981;
+    border-radius: 3px;
+}
+
+.manual-sidebar::-webkit-scrollbar-thumb:hover {
+    background: #4dff9e;
+}
+
+/* Drop zone highlight during drag */
+.drop-zone-highlight {
+    outline: 2px dashed #10b981 !important;
+    outline-offset: -4px;
+    background: rgba(16, 185, 129, 0.1) !important;
+}
+
+/* Arrow drawing mode */
+.arrow-selectable {
+    outline: 2px solid rgba(77, 255, 158, 0.85) !important;
+    outline-offset: 2px;
+    cursor: crosshair !important;
+    filter: brightness(1.15);
+}
+
+.arrow-selected-first {
+    outline: 3px solid #4dff9e !important;
+    outline-offset: 2px;
+    filter: brightness(1.3) drop-shadow(0 0 8px rgba(77, 255, 158, 0.8)) !important;
+    cursor: crosshair !important;
+}
+
+/* Note mode */
+.note-selectable {
+    outline: 2px solid rgba(77, 255, 158, 0.85) !important;
+    outline-offset: 2px;
+    cursor: text !important;
+    filter: brightness(1.15);
+}
+
+/* Tips Section */
+.tips-section {
+    margin-top: 4px;
+}
+
+.tip-group {
+    margin-bottom: 12px;
+}
+
+.tip-title {
+    color: #4dff9e;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin-bottom: 5px;
+    padding-bottom: 3px;
+    border-bottom: 1px solid rgba(77, 255, 158, 0.25);
+}
+
+.tip-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-bottom: 6px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.75);
+    line-height: 1.4;
+}
+
+.tip-icon {
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+    color: #10b981;
+    font-size: 12px;
+    margin-top: 1px;
+}
+
+.tip-item strong {
+    color: #fff;
+    font-weight: 600;
+}

@@ -1,0 +1,7 @@
+{
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "import-card": "node scripts/import-card-settings.js"
+  }
+}

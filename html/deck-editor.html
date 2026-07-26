@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deck Editor - Custom Cards</title>
+
+    <link rel="icon" type="image/png" href="../images/basic/logo-without-title.png">
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/deck-editor.css?v=filters-1">
+</head>
+
+<body>
+    <div class="deck-editor-page">
+
+        <header class="deck-editor-header">
+            <a href="../index.html" class="btn-back">← Back</a>
+
+            <div class="header-title-group">
+                <h1>Deck Editor</h1>
+                <p>Build, edit, and manage your custom decks</p>
+            </div>
+        </header>
+
+        <main class="deck-editor-layout">
+
+            <!-- LEFT SIDE: DECK DISPLAY -->
+            <section class="deck-panel">
+                <div class="panel-header">
+                    <div>
+                        <h2>Current Deck</h2>
+                        <p>Cards currently added to this deck</p>
+                    </div>
+
+                    <div class="deck-count">
+                        <span id="deckCardCount">0</span>/50
+                    </div>
+                </div>
+
+                <div class="deck-name-box">
+                    <label for="deckName">Deck Name</label>
+                    <input 
+                        type="text" 
+                        id="deckName" 
+                        placeholder="Enter deck name..."
+                    >
+                </div>
+
+                <div class="deck-display" id="deckDisplay"></div>
+
+                <div class="deck-actions">
+                    <button class="deck-action-button save-button">
+                        Save Deck
+                    </button>
+
+                    <button class="deck-action-button clear-button" id="clearDeckButton">
+                        Clear Deck
+                    </button>
+                </div>
+            </section>
+
+
+            <!-- RIGHT SIDE: CARD LIBRARY -->
+            <section class="library-panel">
+                <div class="panel-header">
+                    <div>
+                        <h2>Card Library</h2>
+                        <p>All available cards in the project</p>
+                    </div>
+                </div>
+
+                <!-- FILTER AREA -->
+                <div class="filter-box">
+
+                    <div class="filter-row">
+                        <div class="filter-group search-group">
+                            <label for="cardSearch">Search</label>
+                            <input 
+                                type="text" 
+                                id="cardSearch" 
+                                placeholder="Search card name..."
+                            >
+                        </div>
+                    </div>
+
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label for="categoryFilter">Category</label>
+                            <select id="categoryFilter">
+                                <option value="all">All Categories</option>
+                                <option value="leader">Leader</option>
+                                <option value="character">Character</option>
+                                <option value="stage">Stage</option>
+                                <option value="event">Event</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="colorFilter">Color</label>
+                            <select id="colorFilter">
+                                <option value="all">All Colors</option>
+                                <option value="red">Red</option>
+                                <option value="green">Green</option>
+                                <option value="blue">Blue</option>
+                                <option value="purple">Purple</option>
+                                <option value="black">Black</option>
+                                <option value="yellow">Yellow</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="typeFilter">Type</label>
+                            <select id="typeFilter">
+                                <option value="all">All Types</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="costFilter">Cost</label>
+                            <select id="costFilter">
+                                <option value="all">All Costs</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="powerFilter">Power</label>
+                            <select id="powerFilter">
+                                <option value="all">All Power</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="attributeFilter">Attribute</label>
+                            <select id="attributeFilter">
+                                <option value="all">All Attributes</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="counterFilter">Counter</label>
+                            <select id="counterFilter">
+                                <option value="all">All Counters</option>
+                            </select>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- CARD LIBRARY DISPLAY -->
+                <div class="card-library-grid" id="cardLibraryGrid"></div>
+                
+            </section>
+
+        </main>
+    </div>
+
+    <!-- CARD PREVIEW MODAL -->
+    <div class="card-preview-modal" id="cardPreviewModal">
+        <div class="card-preview-backdrop" id="cardPreviewBackdrop"></div>
+
+        <div class="card-preview-box">
+            <button class="card-preview-close" id="cardPreviewClose">×</button>
+
+            <img 
+                src="" 
+                alt="Card Preview" 
+                class="card-preview-image" 
+                id="cardPreviewImage"
+            >
+
+            <div class="card-preview-info">
+                <h2 id="cardPreviewName">Card Name</h2>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/core/effectBlocks.js?v=blocks-1"></script>
+    <script src="../js/core/effectBlockParser.js?v=blocks-1"></script>
+    <script src="../js/core/effectBlockValidator.js?v=blocks-1"></script>
+    <script src="../js/core/effectBlockUi.js?v=blocks-1"></script>
+    <script src="../js/cards/cardDatabase.js?v=ry-ichigo-2"></script>
+    <script src="../js/pages/deck-editor.js?v=rb-guts-1"></script>
+  <script src="../js/rotate-prompt.js"></script>
+
+  <script src="../js/version.js"></script>
+</body>
+</html>

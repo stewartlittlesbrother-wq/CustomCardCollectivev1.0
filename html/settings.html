@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Custom Cards</title>
+
+    <link rel="icon" type="image/png" href="../images/basic/logo-without-title.png">
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/settings.css">
+</head>
+<body>
+    <div class="settings-container">
+        <header class="settings-header">
+            <a href="../index.html" class="btn-back">← Back</a>
+            <h1>Settings</h1>
+        </header>
+
+        <main class="settings-main">
+            <!-- Tab Navigation -->
+            <div class="tabs-navigation">
+                <button class="tab-button active" data-tab="game-behaviour">Game Behaviour</button>
+                <button class="tab-button" data-tab="audio">Audio</button>
+                <button class="tab-button" data-tab="display">Display</button>
+            </div>
+
+            <!-- Game Behaviour Tab -->
+            <div id="game-behaviour" class="tab-content active">
+                <h2>Game Behaviour</h2>
+
+                <div class="settings-section">
+                    <div class="setting-item">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="autoDraw" class="setting-checkbox" data-setting="autoDraw">
+                            <span class="checkbox-custom"></span>
+                            <span class="label-text">
+                                <strong>Auto Draw</strong>
+                                <p class="setting-description">Automatically draw cards at the start of your turn</p>
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="setting-item">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="autoSkipBlock" class="setting-checkbox" data-setting="autoSkipBlock">
+                            <span class="checkbox-custom"></span>
+                            <span class="label-text">
+                                <strong>Auto Skip Block</strong>
+                                <p class="setting-description">Automatically skip blocking phase if no blocks available</p>
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="setting-item">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="autoSkipTrigger" class="setting-checkbox" data-setting="autoSkipTrigger">
+                            <span class="checkbox-custom"></span>
+                            <span class="label-text">
+                                <strong>Auto Skip Trigger</strong>
+                                <p class="setting-description">Automatically skip trigger phase if no triggers available</p>
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="setting-item">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="autoSelectMaxValue" class="setting-checkbox" data-setting="autoSelectMaxValue">
+                            <span class="checkbox-custom"></span>
+                            <span class="label-text">
+                                <strong>Auto Select Max Value</strong>
+                                <p class="setting-description">Automatically select the highest value option when available</p>
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <div class="setting-item">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="confirmEndTurn" class="setting-checkbox" data-setting="confirmEndTurn">
+                            <span class="checkbox-custom"></span>
+                            <span class="label-text">
+                                <strong>Confirm End Turn</strong>
+                                <p class="setting-description">Ask for confirmation before ending your turn</p>
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="setting-item">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="confirmCounter" class="setting-checkbox" data-setting="confirmCounter">
+                            <span class="checkbox-custom"></span>
+                            <span class="label-text">
+                                <strong>Confirm Counter</strong>
+                                <p class="setting-description">Ask for confirmation before performing a counter action</p>
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="setting-item">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="confirmTrigger" class="setting-checkbox" data-setting="confirmTrigger">
+                            <span class="checkbox-custom"></span>
+                            <span class="label-text">
+                                <strong>Confirm Trigger</strong>
+                                <p class="setting-description">Ask for confirmation before triggering special abilities</p>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audio Tab -->
+            <div id="audio" class="tab-content">
+                <h2>Audio Settings</h2>
+
+                <div class="settings-section">
+                    <div class="setting-item toggle-setting">
+                        <span class="label-text">
+                            <strong>Sound Effects</strong>
+                            <p class="setting-description">Turn card, button, and game action sounds on or off</p>
+                        </span>
+
+                        <label class="switch">
+                            <input type="checkbox" id="soundEffects" class="setting-checkbox" data-setting="soundEffects" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="setting-item toggle-setting">
+                        <span class="label-text">
+                            <strong>Audio</strong>
+                            <p class="setting-description">Turn background music and general audio on or off</p>
+                        </span>
+
+                        <label class="switch">
+                            <input type="checkbox" id="audioEnabled" class="setting-checkbox" data-setting="audioEnabled" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Display Tab -->
+            <div id="display" class="tab-content">
+                <h2>Display Settings</h2>
+                <p class="placeholder-text">Display settings coming soon...</p>
+            </div>
+        </main>
+
+        <!-- Save Button -->
+        <footer class="settings-footer">
+            <button id="saveButton" class="btn btn-save">Save Settings</button>
+        </footer>
+    </div>
+
+    <script src="../js/pages/settings.js"></script>
+  <script src="../js/rotate-prompt.js"></script>
+
+  <script src="../js/version.js"></script>
+</body>
+</html>

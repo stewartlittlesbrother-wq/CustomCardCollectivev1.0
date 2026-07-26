@@ -1,0 +1,428 @@
+/* ── Root & background ─────────────────────────────── */
+.mp-root {
+    position: relative;
+    overflow: hidden;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+}
+
+/* Faded character artwork flanking the lobby, matching the home screen:
+   Perona down the left, Mihawk down the right. Purely decorative - both sit
+   behind the content, ignore pointer events, and simply don't paint if the
+   image file is absent.
+   Artwork lives at images/basic/perona-bg.jpg and images/basic/mihawk-bg.png */
+.mp-root::before,
+.mp-root::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: min(48%, 620px);
+    background-size: cover;
+    background-repeat: no-repeat;
+    opacity: .18;
+    filter: saturate(1.1);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.mp-root::before {
+    left: 0;
+    background-image: url("../images/basic/perona-bg.jpg");
+    background-position: left center;
+    -webkit-mask-image: linear-gradient(to right, rgba(0, 0, 0, 1) 45%, rgba(0, 0, 0, 0) 100%);
+    mask-image: linear-gradient(to right, rgba(0, 0, 0, 1) 45%, rgba(0, 0, 0, 0) 100%);
+}
+
+.mp-root::after {
+    right: 0;
+    background-image: url("../images/basic/mihawk-bg.png");
+    background-position: right center;
+    -webkit-mask-image: linear-gradient(to left, rgba(0, 0, 0, 1) 45%, rgba(0, 0, 0, 0) 100%);
+    mask-image: linear-gradient(to left, rgba(0, 0, 0, 1) 45%, rgba(0, 0, 0, 0) 100%);
+}
+
+/* Keep the lobby panels above the artwork */
+.mp-root > * {
+    position: relative;
+    z-index: 1;
+}
+
+/* Sits over the pale upper-left of the Perona artwork, where white text was
+   unreadable - so it's dark, on a light chip that keeps it legible over
+   whichever part of the art happens to be behind it. */
+.mp-back-link {
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    padding: .3rem .7rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .8);
+    border: 1px solid rgba(0, 0, 0, .18);
+    color: #0b0f16;
+    font-weight: 700;
+    text-decoration: none;
+    font-size: .9rem;
+    z-index: 10;
+    transition: background .15s, color .15s;
+}
+.mp-back-link:hover {
+    background: #fff;
+    color: #000;
+}
+
+/* ── Views ─────────────────────────────────────────── */
+.mp-view { display: none; width: 100%; justify-content: center; }
+.mp-view.active { display: flex; }
+
+/* ── Card container ────────────────────────────────── */
+.mp-card {
+    width: min(480px, 100%);
+    background: rgba(12, 20, 38, 0.92);
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 20px;
+    padding: 2rem 2rem 2.2rem;
+    box-shadow: 0 24px 80px rgba(0,0,0,.5);
+    color: #fff;
+}
+.mp-card-wide { width: min(700px, 100%); }
+
+/* ── Title ─────────────────────────────────────────── */
+.mp-title {
+    font-size: 2.2rem;
+    font-weight: 800;
+    margin: 0 0 1.2rem;
+    text-align: center;
+}
+
+/* ── Status badge ──────────────────────────────────── */
+.mp-status {
+    text-align: center;
+    font-size: .85rem;
+    padding: .35rem .9rem;
+    border-radius: 30px;
+    display: inline-block;
+    margin: 0 auto .9rem;
+    display: block;
+    width: fit-content;
+    margin: 0 auto 1rem;
+}
+.mp-status.connecting { background: rgba(255,200,50,.15); color: #4dff9e; }
+.mp-status.connected  { background: rgba(40,220,120,.15); color: #10b981; }
+.mp-status.error      { background: rgba(255,80,80,.15);  color: #ff5050; }
+
+/* ── Nickname row ──────────────────────────────────── */
+.mp-nickname-row {
+    display: flex;
+    flex-direction: column;
+    gap: .35rem;
+    margin-bottom: 1.2rem;
+}
+.mp-nickname-row label {
+    font-size: .8rem;
+    color: rgba(255,255,255,.55);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
+.mp-nickname-row input {
+    padding: .65rem .9rem;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.15);
+    background: rgba(255,255,255,.07);
+    color: #fff;
+    font-size: .95rem;
+}
+.mp-nickname-row input::placeholder { color: rgba(255,255,255,.3); }
+
+/* ── Landing grid ──────────────────────────────────── */
+.mp-landing-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .8rem;
+    margin-bottom: 1.2rem;
+}
+.mp-big-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .3rem;
+    padding: 1.3rem .8rem;
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.06);
+    color: #fff;
+    cursor: pointer;
+    transition: background .18s, border-color .18s, transform .15s;
+}
+.mp-big-btn:hover {
+    background: rgba(25,199,212,.14);
+    border-color: rgba(25,199,212,.45);
+    transform: translateY(-2px);
+}
+.mp-big-icon { font-size: 1.8rem; }
+.mp-big-label { font-weight: 700; font-size: .95rem; }
+.mp-big-sub { font-size: .75rem; color: rgba(255,255,255,.5); text-align: center; }
+
+/* ── Divider ───────────────────────────────────────── */
+.mp-divider {
+    display: flex; align-items: center; gap: .7rem;
+    color: rgba(255,255,255,.35); font-size: .8rem;
+    margin-bottom: 1rem;
+}
+.mp-divider::before, .mp-divider::after {
+    content: ""; flex: 1; height: 1px;
+    background: rgba(255,255,255,.12);
+}
+
+/* ── Code row ──────────────────────────────────────── */
+.mp-code-row {
+    display: flex; gap: .6rem;
+}
+.mp-code-row input {
+    flex: 1;
+    padding: .7rem 1rem;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.15);
+    background: rgba(255,255,255,.07);
+    color: #fff;
+    font-size: 1.1rem;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    text-align: center;
+}
+.mp-code-row input::placeholder { color: rgba(255,255,255,.25); letter-spacing: .15em; }
+
+/* ── Buttons ───────────────────────────────────────── */
+.mp-btn-primary {
+    width: 100%;
+    padding: .85rem;
+    border: none;
+    border-radius: 12px;
+    background: #10b981;
+    color: #fff;
+    font-weight: 700;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: opacity .15s, transform .15s;
+}
+.mp-btn-primary:hover  { opacity: .88; transform: translateY(-1px); }
+.mp-btn-primary:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
+.mp-btn-secondary {
+    padding: .7rem 1.1rem;
+    border: 1px solid rgba(255,255,255,.2);
+    border-radius: 10px;
+    background: rgba(255,255,255,.09);
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .15s;
+}
+.mp-btn-secondary:hover { background: rgba(255,255,255,.16); }
+
+.mp-btn-tiny {
+    padding: .3rem .7rem;
+    border: 1px solid rgba(255,255,255,.2);
+    border-radius: 6px;
+    background: rgba(255,255,255,.09);
+    color: rgba(255,255,255,.7);
+    font-size: .75rem;
+    cursor: pointer;
+}
+.mp-btn-tiny:hover { background: rgba(255,255,255,.16); color: #fff; }
+
+/* ── View header ───────────────────────────────────── */
+.mp-view-header {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+    margin-bottom: 1.4rem;
+}
+.mp-view-header h2 { margin: 0; font-size: 1.4rem; }
+.mp-back-btn {
+    padding: .35rem .7rem;
+    border: 1px solid rgba(255,255,255,.2);
+    border-radius: 8px;
+    background: rgba(255,255,255,.08);
+    color: rgba(255,255,255,.75);
+    cursor: pointer;
+    font-size: .9rem;
+    flex-shrink: 0;
+}
+.mp-back-btn:hover { background: rgba(255,255,255,.15); color: #fff; }
+
+/* ── Form ──────────────────────────────────────────── */
+.mp-form {
+    display: flex;
+    flex-direction: column;
+    gap: .8rem;
+}
+.mp-form label {
+    font-size: .8rem;
+    color: rgba(255,255,255,.55);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-bottom: -.3rem;
+}
+.mp-form input[type="text"],
+.mp-form select {
+    padding: .7rem .9rem;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.15);
+    background: rgba(255,255,255,.07);
+    color: #fff;
+    font-size: .95rem;
+    width: 100%;
+    box-sizing: border-box;
+}
+.mp-form input::placeholder { color: rgba(255,255,255,.3); }
+.mp-form select option { background: #0d1c30; }
+
+/* ── Toggle ────────────────────────────────────────── */
+.mp-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+    font-size: .9rem;
+}
+.mp-toggle { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+.mp-toggle input { opacity: 0; width: 0; height: 0; }
+.mp-toggle-slider {
+    position: absolute; inset: 0;
+    background: rgba(255,255,255,.2);
+    border-radius: 22px;
+    cursor: pointer;
+    transition: background .2s;
+}
+.mp-toggle-slider::before {
+    content: "";
+    position: absolute;
+    width: 16px; height: 16px;
+    left: 3px; top: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform .2s;
+}
+.mp-toggle input:checked + .mp-toggle-slider { background: #10b981; }
+.mp-toggle input:checked + .mp-toggle-slider::before { transform: translateX(18px); }
+.mp-toggle-hint { font-size: .75rem; color: rgba(255,255,255,.4); }
+
+/* ── Browser list ──────────────────────────────────── */
+.browser-list {
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+    min-height: 200px;
+    max-height: 55vh;
+    overflow-y: auto;
+}
+.browser-empty {
+    text-align: center;
+    color: rgba(255,255,255,.35);
+    padding: 3rem 0;
+    font-size: .9rem;
+}
+.browser-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .9rem 1rem;
+    border-radius: 12px;
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.09);
+    transition: background .15s;
+}
+.browser-row:hover { background: rgba(255,255,255,.1); }
+.browser-row-info { display: flex; flex-direction: column; gap: .15rem; }
+.browser-row-name { font-weight: 700; font-size: .95rem; }
+.browser-row-host { font-size: .78rem; color: rgba(255,255,255,.45); }
+.browser-row-join {
+    padding: .5rem 1rem;
+    border: none;
+    border-radius: 9px;
+    background: #10b981;
+    color: #fff;
+    font-weight: 700;
+    font-size: .85rem;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity .15s;
+}
+.browser-row-join:hover { opacity: .82; }
+
+/* ── Lobby code box ────────────────────────────────── */
+.lobby-code-box {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+    background: rgba(25,199,212,.1);
+    border: 1px solid rgba(25,199,212,.3);
+    border-radius: 12px;
+    padding: .7rem 1rem;
+    margin-bottom: .8rem;
+    flex-wrap: wrap;
+}
+.lobby-code-label { font-size: .78rem; color: rgba(255,255,255,.55); flex: 1 1 100%; }
+.lobby-code-value { font-size: 1.7rem; font-weight: 800; letter-spacing: .2em; color: #10b981; }
+
+/* ── Lobby players ─────────────────────────────────── */
+.lobby-players {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    margin-bottom: 1.2rem;
+    background: rgba(255,255,255,.05);
+    border-radius: 14px;
+    padding: 1rem;
+}
+.lobby-player {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .25rem;
+}
+.lobby-player-slot {
+    font-size: .7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: rgba(255,255,255,.4);
+}
+.lobby-player-name { font-weight: 700; font-size: .95rem; }
+.lobby-player-status {
+    font-size: .75rem;
+    padding: .2rem .55rem;
+    border-radius: 20px;
+}
+.lobby-player-status.waiting { background: rgba(255,200,50,.12); color: #4dff9e; }
+.lobby-player-status.ready   { background: rgba(40,220,120,.15); color: #10b981; }
+.lobby-vs {
+    font-weight: 800;
+    font-size: 1rem;
+    color: rgba(255,255,255,.3);
+    flex-shrink: 0;
+}
+
+/* ── Messages ──────────────────────────────────────── */
+.mp-error {
+    background: rgba(255,80,80,.12);
+    border: 1px solid rgba(255,80,80,.25);
+    border-radius: 9px;
+    padding: .6rem .9rem;
+    font-size: .85rem;
+    color: #ff7070;
+    text-align: center;
+}
+.mp-info {
+    text-align: center;
+    font-size: .85rem;
+    color: rgba(255,255,255,.5);
+    min-height: 1.2em;
+}
+.hidden { display: none !important; }

@@ -1,0 +1,155 @@
+/* =========================
+   Reset
+========================= */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* =========================
+   Page Setup
+========================= */
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    /* Brook theme base: black + dark gray with an emerald undertone */
+    background:
+        radial-gradient(circle at 15% 12%, rgba(16, 185, 129, .10), transparent 30%),
+        radial-gradient(circle at 85% 88%, rgba(77, 255, 158, .07), transparent 32%),
+        linear-gradient(135deg, #12181500 0%, #0a0e0c 55%, #060908 100%);
+    color: #f3f8f5;
+    overflow: hidden;
+}
+
+/* =========================
+   Main Menu Layout
+========================= */
+
+.main-menu {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+
+    padding: clamp(16px, 4vw, 40px);
+}
+
+/* =========================
+   Menu Header
+========================= */
+
+.menu-header {
+    text-align: center;
+    margin-bottom: clamp(22px, 4vw, 35px);
+}
+
+.menu-logo {
+    display: block;
+
+    width: min(600px, 80%);
+    max-height: 400px;
+    margin: 0 auto 12px;
+
+    object-fit: contain;
+}
+
+.menu-header p {
+    color: #d0d0d0;
+    font-size: clamp(0.9rem, 2vw, 1.1rem);
+}
+
+/* =========================
+   Menu Panel
+========================= */
+
+.menu-panel {
+    width: min(900px, 100%);
+
+    display: grid;
+    grid-template-columns: 1fr 2px 1fr;
+    gap: 30px;
+
+    background: rgba(255, 255, 255, 0.08);
+    border: 2px solid rgba(255, 255, 255, 0.16);
+    border-radius: 20px;
+
+    padding: clamp(24px, 4vw, 35px);
+
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+.menu-side {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.menu-side h2 {
+    margin-bottom: 8px;
+    font-size: clamp(1.2rem, 3vw, 1.5rem);
+}
+
+.menu-divider {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* =========================
+   Buttons
+========================= */
+
+.btn {
+    padding: 16px 24px;
+    border-radius: 12px;
+
+    text-align: center;
+    text-decoration: none;
+
+    font-weight: 800;
+    color: white;
+
+    transition: all 0.25s ease;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #4facfe 0%, #764ba2 100%);
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+/* =========================
+   Responsive Design
+========================= */
+
+@media (max-width: 700px) {
+    .menu-panel {
+        grid-template-columns: 1fr;
+        gap: 18px;
+    }
+
+    .menu-divider {
+        height: 2px;
+        width: 100%;
+    }
+}
