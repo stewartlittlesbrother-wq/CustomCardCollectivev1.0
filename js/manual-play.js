@@ -439,6 +439,12 @@ const manualPlay = {
         };
         // Exposed so other flows (e.g. re-renders) can drop a stale selection.
         this.clearDonSelection = clearDonSelection;
+        // The currently highlighted DON as {player, slot}, so double-clicking a
+        // DON can rest the whole selection at once.
+        this.getSelectedDonSlots = () => selectedDonCards.map(card => ({
+            player: card.dataset.player,
+            slot: Number(card.dataset.donSlot)
+        }));
 
         // Click a DON card to add/remove it from the selection
         document.addEventListener("click", (e) => {
@@ -1371,14 +1377,28 @@ const manualPlay = {
             if (key.startsWith("don:")) {
                 const [, playerKey, slotText] = key.split(":");
                 const player = gameState?.[playerKey];
-                // clearDonSelection is scoped to setupCardInteractions; reach it
-                // through the exposed object rather than closing over it.
-                window.manualPlay?.clearDonSelection?.();
-                if (player && window.toggleDonSlot?.(player, Number(slotText))) {
+                if (!player) return;
+
+                // Rest EVERY highlighted DON of this player (plus the one being
+                // double-clicked). With nothing highlighted this is just the
+                // one DON, toggling it like before.
+                const highlighted = (window.manualPlay?.getSelectedDonSlots?.() || [])
+                    .filter(s => s.player === playerKey)
+                    .map(s => s.slot);
+
+                if (highlighted.length) {
+                    const slots = new Set(highlighted);
+                    slots.add(Number(slotText));
+                    window.restDonSlots?.(player, [...slots]);
+                } else if (window.toggleDonSlot?.(player, Number(slotText))) {
                     window.updateDonDisplay?.();
                     window.scheduleOnlineBoardSync?.();
                     console.log("DON rested toggled at slot", slotText);
                 }
+
+                // clearDonSelection is scoped to setupCardInteractions; reach it
+                // through the exposed object rather than closing over it.
+                window.manualPlay?.clearDonSelection?.();
                 return;
             }
 

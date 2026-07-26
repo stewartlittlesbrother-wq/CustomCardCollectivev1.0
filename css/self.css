@@ -4247,3 +4247,81 @@ body {
 .extra-facedown-area.drop-zone-highlight {
     border-color: var(--sim-accent);
 }
+
+/* ── Spectator mode ────────────────────────────────────── */
+/* Watching a game: the board is read-only. Block every interaction on the
+   play field and hand rows so a spectator can never drag or click a card into
+   a different state. The sidebar log/chat stay usable. */
+body.spectator-mode .game-board,
+body.spectator-mode .play-area,
+body.spectator-mode .player-hand,
+body.spectator-mode .opponent-hand,
+body.spectator-mode #extraZonesColumn {
+    pointer-events: none !important;
+}
+
+.spectator-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 2147483000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: linear-gradient(90deg, rgba(120, 60, 10, .96), rgba(160, 90, 20, .96));
+    color: #fff;
+    font-weight: 800;
+    font-size: .82rem;
+    letter-spacing: .04em;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .6);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, .4);
+}
+
+.spectator-banner__dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: #ffd24a;
+    box-shadow: 0 0 8px #ffd24a;
+    animation: spectatorPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes spectatorPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: .4; transform: scale(.7); }
+}
+
+/* ── Opponent-disconnect banner ────────────────────────── */
+.disconnect-banner {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2147483200;
+    max-width: min(90vw, 460px);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 120, 120, .5);
+    background: rgba(40, 10, 12, .97);
+    color: #ffdede;
+    font-weight: 700;
+    font-size: .92rem;
+    line-height: 1.4;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .6);
+}
+
+.disconnect-banner.hidden {
+    display: none;
+}
+
+.disconnect-banner__icon {
+    font-size: 1.6rem;
+    line-height: 1;
+    color: #ff8a5c;
+}

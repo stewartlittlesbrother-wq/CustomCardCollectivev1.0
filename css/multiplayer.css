@@ -426,3 +426,92 @@
     min-height: 1.2em;
 }
 .hidden { display: none !important; }
+
+/* ── Spectate live games ───────────────────────────────── */
+.mp-spectate {
+    margin-top: 6px;
+    text-align: left;
+}
+
+.mp-spectate-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.mp-spectate-title {
+    font-weight: 800;
+    font-size: .95rem;
+    letter-spacing: .02em;
+    opacity: .9;
+}
+
+.mp-spectate-count {
+    min-width: 22px;
+    height: 22px;
+    padding: 0 7px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .12);
+    font-size: .78rem;
+    font-weight: 800;
+}
+
+.mp-spectate-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.mp-spectate-empty {
+    padding: 14px;
+    text-align: center;
+    opacity: .55;
+    font-size: .86rem;
+}
+
+.mp-spectate-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .06);
+    border: 1px solid rgba(255, 255, 255, .08);
+}
+
+.mp-spectate-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.mp-spectate-players {
+    font-weight: 700;
+    font-size: .9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mp-spectate-vs {
+    opacity: .5;
+    font-weight: 600;
+    font-size: .8rem;
+    margin: 0 2px;
+}
+
+.mp-spectate-meta {
+    font-size: .76rem;
+    opacity: .6;
+}
+
+.mp-spectate-watch {
+    flex: 0 0 auto;
+}

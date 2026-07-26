@@ -54,9 +54,13 @@ const urlParams = new URLSearchParams(window.location.search);
 
 const gameMode = urlParams.get("mode") || "local";
 const roomCode = urlParams.get("room");
+// Spectators connect with no player slot (?spectate=1). They only ever read the
+// public board of BOTH players and can never write to the match.
+const isSpectator = urlParams.get("spectate") === "1";
 const playerSlot = urlParams.get("player");
 
 const isOnlineMatch = gameMode === "online";
+window.isSpectatorMode = isSpectator;
 const onlinePlayerLabels = {
     p1: "Player 1",
     p2: "Player 2"
@@ -404,6 +408,50 @@ function applyOnlinePublicState(publicState = {}) {
     maybeRunOnlineTurnStart(turnStartKey);
     showOnlineRevealedCards();
     maybeAnnounceOwnTurn();
+    syncSpectateRegistry();
+}
+
+// Keep the public "active games" list (used by the Spectate menu) in step with
+// this match. Only players maintain it, never spectators. The entry is created
+// once the game is live, its phase/turn refreshed as play advances, and removed
+// when the game ends so it drops off the list.
+let activeGameRegistered = false;
+let lastActiveGameTouchKey = null;
+
+function syncSpectateRegistry() {
+    if (isSpectator || !onlineMultiplayerService || !onlinePublicState) return;
+
+    const phase = onlinePublicState.phase;
+
+    if (phase === "gameOver") {
+        if (activeGameRegistered) {
+            activeGameRegistered = false;
+            onlineMultiplayerService.removeActiveGame(roomCode).catch(() => {});
+        }
+        return;
+    }
+
+    // Only list games that have actually begun (past the waiting lobby).
+    if (phase === "waiting") return;
+
+    if (!activeGameRegistered) {
+        activeGameRegistered = true;
+        onlineMultiplayerService.registerActiveGame(roomCode, {
+            phase,
+            turnNumber: onlinePublicState.turnNumber,
+            status: "started"
+        }).catch(() => { activeGameRegistered = false; });
+        return;
+    }
+
+    const touchKey = `${phase}:${onlinePublicState.turnNumber}:${onlinePublicState.currentPlayer}`;
+    if (touchKey !== lastActiveGameTouchKey) {
+        lastActiveGameTouchKey = touchKey;
+        onlineMultiplayerService.touchActiveGame(roomCode, {
+            phase,
+            turnNumber: onlinePublicState.turnNumber
+        }).catch(() => {});
+    }
 }
 
 function removeOnlineTurnChoiceButtons() {
@@ -435,7 +483,9 @@ function buildSetupButton(label, onClick, variant = "primary") {
 }
 
 function renderOnlineSetupOverlay() {
-    if (!isOnlineMatch || !onlinePublicState) {
+    // Spectators never take part in setup (dice/turn choice/mulligan). Showing
+    // them the overlay would render buttons that write to the match.
+    if (!isOnlineMatch || !onlinePublicState || isSpectator) {
         removeOnlineSetupOverlay();
         return;
     }
@@ -608,14 +658,18 @@ function handleOnlineGameOver() {
     clearAttackArrow();
 
     // Show the result from THIS player's seat rather than naming the winner, so
-    // each side reads "You Won" or "You Lost" on their own screen.
-    const youWon = onlinePublicState.winner === playerSlot;
+    // each side reads "You Won" or "You Lost" on their own screen. Spectators
+    // aren't playing, so they just see who won.
+    const winnerLabel = onlinePlayerLabels[onlinePublicState.winner] || winnerPlayer.name;
+    const outcomeText = isSpectator
+        ? `${winnerLabel} Wins`
+        : (onlinePublicState.winner === playerSlot ? "You Won" : "You Lost");
 
     showGameOverPopup(
         winnerPlayer,
         onlinePublicState.gameOverReasonTitle || "Victory",
         onlinePublicState.gameOverReasonText || `${winnerPlayer.name} won the online match.`,
-        youWon ? "You Won" : "You Lost"
+        outcomeText
     );
 }
 
@@ -772,7 +826,7 @@ function safeParseJson(value, fallback) {
 }
 
 async function syncOnlineStateFromLocal() {
-    if (!isOnlineMatch || !onlineMultiplayerService || !onlineUser || !gameState) return;
+    if (!isOnlineMatch || !onlineMultiplayerService || !onlineUser || !gameState || isSpectator) return;
 
     const ownPlayerKey = getOwnOnlinePlayerKey();
     const ownPlayer = ownPlayerKey ? gameState[ownPlayerKey] : null;
@@ -815,7 +869,7 @@ async function syncOnlineStateFromLocal() {
 // No-ops entirely in local (non-online) play.
 let onlineBoardSyncTimer = null;
 function scheduleOnlineBoardSync() {
-    if (!isOnlineMatch || !onlineMultiplayerService || !onlineUser) return;
+    if (!isOnlineMatch || !onlineMultiplayerService || !onlineUser || isSpectator) return;
     clearTimeout(onlineBoardSyncTimer);
     onlineBoardSyncTimer = setTimeout(() => {
         syncOnlineStateFromLocal().catch(error => console.error("Online board sync failed:", error));
@@ -1080,15 +1134,21 @@ async function initializeOnlineMultiplayer() {
 
     applyOwnSidePerspective();
 
-    if (!roomCode || !playerSlot) {
-        addGameLog("Online match URL is missing room or player slot.");
+    if (!roomCode) {
+        addGameLog("Online match URL is missing the room code.");
         updateOnlinePhaseButton();
         return;
     }
 
-    if (playerSlot !== "p1" && playerSlot !== "p2") {
+    // Spectators have no player slot; players must have a valid one.
+    if (!isSpectator && playerSlot !== "p1" && playerSlot !== "p2") {
         addGameLog("Online match URL has an invalid player slot.");
         updateOnlinePhaseButton();
+        return;
+    }
+
+    if (isSpectator) {
+        await initializeSpectatorMatch();
         return;
     }
 
@@ -1107,6 +1167,7 @@ async function initializeOnlineMultiplayer() {
         await ensureOnlineMatchStarted();
 
         setupOnlineChat();
+        setupOnlinePresence();
 
         // Multiplayer code reads public board/count state plus this user's private zones only.
         onlineMatchUnsubscribe = onlineMultiplayerService.subscribeToPublicState(
@@ -1126,6 +1187,98 @@ async function initializeOnlineMultiplayer() {
         addGameLog(`Failed to connect online match: ${error.message}`);
         updateOnlinePhaseButton();
     }
+}
+
+// Spectator connect: read the public board of BOTH players, never write, never
+// touch private zones (a spectator can't see anyone's hand). All interactive
+// controls are disabled via the spectator-mode body class + guards elsewhere.
+async function initializeSpectatorMatch() {
+    document.body.classList.add("spectator-mode");
+    showSpectatorBanner();
+
+    try {
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js");
+        onlineFirebaseApp = await import("../firebase/firebaseApp.js");
+        await onlineFirebaseApp.signInGuest();
+        onlineUser = await onlineFirebaseApp.waitForUser();
+
+        onlineMatchUnsubscribe = onlineMultiplayerService.subscribeToPublicState(
+            roomCode,
+            (publicState) => applyOnlinePublicState(publicState || {})
+        );
+
+        addGameLog(`Spectating online room ${roomCode}.`);
+        updateOnlinePhaseButton();
+    } catch (error) {
+        console.error(error);
+        addGameLog(`Failed to spectate match: ${error.message}`);
+        updateOnlinePhaseButton();
+    }
+}
+
+function showSpectatorBanner() {
+    if (document.getElementById("spectatorBanner")) return;
+    const banner = document.createElement("div");
+    banner.id = "spectatorBanner";
+    banner.className = "spectator-banner";
+    banner.innerHTML = `<span class="spectator-banner__dot"></span>SPECTATING &mdash; you are watching this game and cannot make moves.`;
+    document.body.appendChild(banner);
+}
+
+// ── Presence / disconnect banner (players only) ──────────
+let onlinePresenceUnsubscribe = null;
+let onlinePresenceTeardown = null;
+
+function setupOnlinePresence() {
+    if (!onlineMultiplayerService || !onlineUser || isSpectator) return;
+
+    onlinePresenceTeardown = onlineMultiplayerService.setupPresence(roomCode, playerSlot, onlineUser);
+    onlinePresenceUnsubscribe = onlineMultiplayerService.subscribeToPresence(roomCode, (presence) => {
+        applyOpponentPresence(presence || {});
+    });
+
+    // A clean teardown (navigate away, tab close via bfcache) cancels the armed
+    // disconnect write and marks us offline so the opponent isn't told we
+    // "disconnected" when we left normally.
+    window.addEventListener("pagehide", () => onlinePresenceTeardown?.(), { once: true });
+}
+
+function applyOpponentPresence(presence) {
+    const opponentSlot = playerSlot === "p1" ? "p2" : "p1";
+    const entry = presence[opponentSlot];
+    const phase = onlinePublicState?.phase;
+
+    // Only meaningful once the game is actually running - during setup a slow
+    // second player hasn't armed presence yet, and once it's over the banner
+    // would just be noise on the game-over screen.
+    const inProgress = phase && phase !== "waiting" && phase !== "gameOver";
+    const opponentOffline = entry && entry.online === false;
+
+    if (opponentOffline && inProgress) {
+        showOpponentDisconnectBanner();
+    } else {
+        hideOpponentDisconnectBanner();
+    }
+}
+
+function showOpponentDisconnectBanner() {
+    let banner = document.getElementById("opponentDisconnectBanner");
+    if (!banner) {
+        banner = document.createElement("div");
+        banner.id = "opponentDisconnectBanner";
+        banner.className = "disconnect-banner";
+        banner.innerHTML = `<span class="disconnect-banner__icon">⚠</span>` +
+            `<span>Your opponent left the game (closed their tab or lost connection). ` +
+            `They may reconnect &mdash; or you can leave.</span>`;
+        document.body.appendChild(banner);
+        addGameLog("Opponent disconnected.");
+    }
+    banner.classList.remove("hidden");
+}
+
+function hideOpponentDisconnectBanner() {
+    const banner = document.getElementById("opponentDisconnectBanner");
+    if (banner) banner.classList.add("hidden");
 }
 
 async function handleOnlineDiceRoll() {
@@ -1438,7 +1591,48 @@ function resolveTokenTypes(tokenIds) {
     return tokenIds.map(id => database[id]).filter(Boolean);
 }
 
+// A blank player with every zone empty. Spectators own no deck, so their board
+// is built entirely from the match's public state (applyOnlinePlayerState) - this
+// just gives that state something to populate without requiring a saved deck.
+function createEmptyPlayerState(playerName) {
+    return {
+        name: playerName,
+        don: 0,
+        restedDon: 0,
+        donDeck: 10,
+        turns: 0,
+        deck: [],
+        deckName: playerName,
+        hasMulliganed: false,
+        hand: [],
+        life: [],
+        trash: [],
+        leader: null,
+        characters: [],
+        stage: null,
+        extraFaceUp: [],
+        extraFaceDown: [],
+        tokens: [],
+        tokenTypes: []
+    };
+}
+
 function createInitialGameState() {
+    // Spectators have no deck of their own - both sides come from public state.
+    if (isSpectator) {
+        return {
+            player1: createEmptyPlayerState("Player 1"),
+            player2: createEmptyPlayerState("Player 2"),
+
+            diceWinner: null,
+            firstPlayer: null,
+            secondPlayer: null,
+            currentPlayer: null,
+            turnNumber: 1,
+            currentPhase: "diceRoll"
+        };
+    }
+
     const practiceDecks = getPracticeSnapshotDecks();
 
     if (practiceDecks) {
@@ -1813,7 +2007,11 @@ function showGameOverPopup(winnerPlayer, reasonTitle = "Victory", reasonText = "
     popup.appendChild(reasonHeading);
     popup.appendChild(reasonMessage);
 
-    if (isOnlineMatch) {
+    if (isSpectator) {
+        // Spectators can't rematch - just send them back to the spectate list.
+        mainMenuButton.textContent = "Back to Games";
+        buttons.appendChild(mainMenuButton);
+    } else if (isOnlineMatch) {
         // Online: ready up (optionally with a different deck) and rematch in
         // place once BOTH players are ready. Handled by the rematch panel.
         popup.appendChild(buildRematchPanel());
@@ -1832,7 +2030,7 @@ function showGameOverPopup(winnerPlayer, reasonTitle = "Victory", reasonText = "
     overlay.appendChild(popup);
     document.body.appendChild(overlay);
 
-    if (isOnlineMatch) startRematchWatch();
+    if (isOnlineMatch && !isSpectator) startRematchWatch();
 }
 
 // ── Rematch panel (online game-over screen) ──────────────
@@ -2613,8 +2811,29 @@ function removeDonSlot(player, index) {
     return true;
 }
 
+// Rest several specific DON at once (set them to rested; already-rested ones are
+// left alone). Used by "double-click a DON to rest all highlighted DON".
+function restDonSlots(player, indices) {
+    const slots = getDonSlots(player);
+    let changed = 0;
+    indices.forEach(i => {
+        if (Number.isInteger(i) && i >= 0 && i < slots.length && slots[i] !== "rested") {
+            slots[i] = "rested";
+            changed++;
+        }
+    });
+    if (changed) {
+        setDonSlots(player, slots);
+        updateDonDisplay();
+        window.scheduleOnlineBoardSync?.();
+        addGameLog(`${player.name} rested ${changed} DON!!.`);
+    }
+    return changed;
+}
+
 window.toggleDonSlot = toggleDonSlot;
 window.removeDonSlot = removeDonSlot;
+window.restDonSlots = restDonSlots;
 
 // When a card with DON!! attached leaves the field, the DON returns to the
 // player's cost area RESTED (it was already tapped to attach). Adds the freed
@@ -3876,7 +4095,12 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
             hBtn.onclick = (e) => { e.stopPropagation(); const idx = player[pileKey].indexOf(card); if (idx===-1) return; player.hand.push(card); player[pileKey].splice(idx,1); window.renderHands?.(); renderPileSource(); buildGrid(); addGameLog(`Card moved to ${player.name}'s hand`); window.scheduleOnlineBoardSync?.(); };
 
             const botBtn = mkSmBtn("\u2193 Bottom", "#9C27B0");
-            botBtn.onclick = (e) => { e.stopPropagation(); const idx = player[pileKey].indexOf(card); if (idx===-1) return; player[pileKey].splice(idx,1); player[pileKey].unshift(card); renderPileSource(); buildGrid(); addGameLog(`Card moved to bottom of ${player.name}'s deck`); window.scheduleOnlineBoardSync?.(); };
+            botBtn.onclick = (e) => { e.stopPropagation(); const idx = player[pileKey].indexOf(card); if (idx===-1) return; player[pileKey].splice(idx,1); player[pileKey].unshift(card);
+                // The card stays in the deck (at the bottom), but it has left the
+                // top - so drop it from the peek snapshot too, or it would keep
+                // showing while hand/trash cards vanish.
+                if (peekIds) peekIds.delete(card.instanceId);
+                renderPileSource(); buildGrid(); addGameLog(`Card moved to bottom of ${player.name}'s deck`); window.scheduleOnlineBoardSync?.(); };
 
             const tBtn   = mkSmBtn("\uD83D\uDDD1 Trash", "#F44336");
             tBtn.onclick = (e) => { e.stopPropagation(); const idx = player[pileKey].indexOf(card); if (idx===-1) return; if (!player.trash) player.trash=[]; player.trash.push(card); player[pileKey].splice(idx,1); window.renderTrash?.(); renderPileSource(); buildGrid(); addGameLog(`Card moved to ${player.name}'s trash`); window.scheduleOnlineBoardSync?.(); };
@@ -4458,6 +4682,10 @@ function renderLeader(player, areaId) {
     leaderArea.innerHTML = "";
     leaderArea.classList.remove("don-attach-target");
     leaderArea.onclick = null;
+
+    // No leader yet (e.g. a spectator's empty board before the first public
+    // state update, or a side that hasn't been dealt): nothing to draw.
+    if (!player.leader) return;
 
     if (!player.leader.state) {
         player.leader.state = "active";
@@ -7899,6 +8127,23 @@ function updateOnlinePhaseButton() {
 
     // Conceding only means anything against a real opponent.
     concedeButton?.classList.toggle("hidden", !isOnlineMatch);
+
+    // Spectators never act: no End Turn, no Concede, just a static label.
+    if (isSpectator) {
+        concedeButton?.classList.add("hidden");
+        if (button) {
+            button.disabled = true;
+            button.classList.add("not-your-turn");
+            button.textContent = "Spectating";
+            button.title = "You are watching this game.";
+        }
+        if (phaseDisplay) {
+            phaseDisplay.textContent = onlinePublicState?.currentPlayer
+                ? `${onlinePlayerLabels[onlinePublicState.currentPlayer] || "Player"}'s Turn`
+                : "Spectating";
+        }
+        return;
+    }
 
     if (!isOnlineMatch) {
         if (button) {

@@ -8,6 +8,7 @@ import {
     query,
     limitToLast,
     onValue,
+    onDisconnect,
     runTransaction,
     serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -1018,4 +1019,129 @@ export async function startMatch(roomCode) {
         }
         throw error;
     }
+}
+
+// ── Presence / disconnect detection ──────────────────────
+// Each player writes a heartbeat flag under the match. onDisconnect() arms a
+// server-side write so that if the tab closes, the network drops, or the client
+// crashes, Firebase itself flips the flag to offline - the OTHER player then
+// gets a subscribeToPresence callback and can show a "they left" banner instead
+// of waiting forever. We re-arm on every reconnect via .info/connected so a
+// brief drop-and-return doesn't strand the flag as offline.
+export function setupPresence(roomCode, playerSlot, user) {
+    if ((playerSlot !== "p1" && playerSlot !== "p2") || !user?.uid) {
+        return () => {};
+    }
+
+    const code = cleanRoomCode(roomCode);
+    const presenceRef = ref(database, `matches/${code}/presence/${playerSlot}`);
+    const connectedRef = ref(database, ".info/connected");
+
+    const unsubscribe = onValue(connectedRef, (snapshot) => {
+        if (snapshot.val() !== true) return;
+
+        // Arm the server-side "offline" write FIRST so it is registered before we
+        // announce ourselves online - otherwise a crash in the gap would leave us
+        // marked online forever.
+        onDisconnect(presenceRef)
+            .set({ online: false, uid: user.uid, at: serverTimestamp() })
+            .then(() => set(presenceRef, {
+                online: true,
+                uid: user.uid,
+                at: serverTimestamp()
+            }))
+            .catch(() => {});
+    });
+
+    return () => {
+        unsubscribe();
+        // Cancel the armed disconnect and mark ourselves cleanly offline on a
+        // normal teardown (e.g. navigating back to the lobby).
+        onDisconnect(presenceRef).cancel().catch(() => {});
+        set(presenceRef, { online: false, uid: user.uid, at: serverTimestamp() }).catch(() => {});
+    };
+}
+
+export function subscribeToPresence(roomCode, callback) {
+    const presenceRef = ref(database, `matches/${cleanRoomCode(roomCode)}/presence`);
+    return onValue(presenceRef, (snapshot) => callback(snapshot.val() || {}));
+}
+
+// ── Active-games registry (spectating) ───────────────────
+// A lightweight public list of in-progress games so anyone can find and watch
+// them. The registry only holds enough to render the list (player names, phase,
+// turn); a spectator reads the live board straight from the match's /public
+// node. Entries carry a server timestamp so the list can hide games that went
+// stale (both players gone) without needing perfect cleanup.
+export async function registerActiveGame(roomCode, meta = {}) {
+    const code = cleanRoomCode(roomCode);
+
+    // Names come from the match itself so either player can register the entry
+    // with the same result (no need to pass both nicknames from the client).
+    let p1Name = meta.p1Name;
+    let p2Name = meta.p2Name;
+    if (!p1Name || !p2Name) {
+        try {
+            const playersSnap = await get(ref(database, `matches/${code}/players`));
+            const players = playersSnap.val() || {};
+            p1Name = p1Name || players.p1?.name;
+            p2Name = p2Name || players.p2?.name;
+        } catch {
+            // fall back to defaults below
+        }
+    }
+
+    await set(ref(database, `activeGames/${code}`), {
+        roomCode: code,
+        p1Name: String(p1Name || "Player 1").slice(0, 24),
+        p2Name: String(p2Name || "Player 2").slice(0, 24),
+        phase: meta.phase || "main",
+        turnNumber: Number(meta.turnNumber || 0),
+        status: meta.status || "started",
+        updatedAt: serverTimestamp()
+    });
+}
+
+export async function touchActiveGame(roomCode, meta = {}) {
+    const code = cleanRoomCode(roomCode);
+    const updates = { updatedAt: serverTimestamp() };
+    if (meta.phase !== undefined) updates.phase = meta.phase;
+    if (meta.turnNumber !== undefined) updates.turnNumber = Number(meta.turnNumber || 0);
+    if (meta.status !== undefined) updates.status = meta.status;
+    try {
+        await update(ref(database, `activeGames/${code}`), updates);
+    } catch {
+        // A touch failing (e.g. the entry was already removed) is not fatal.
+    }
+}
+
+export async function removeActiveGame(roomCode) {
+    try {
+        await remove(ref(database, `activeGames/${cleanRoomCode(roomCode)}`));
+    } catch {
+        // ignore - best effort cleanup
+    }
+}
+
+// Games older than this with no update are treated as abandoned and hidden from
+// the spectate list. A live game touches its entry on every turn, so this only
+// ever culls games whose players both vanished.
+const ACTIVE_GAME_STALE_MS = 6 * 60 * 1000;
+
+export function subscribeToActiveGames(callback) {
+    const gamesRef = ref(database, "activeGames");
+    return onValue(gamesRef, (snapshot) => {
+        const data = snapshot.val() || {};
+        const now = Date.now();
+        const games = Object.entries(data)
+            .map(([code, value]) => ({ roomCode: code, ...value }))
+            .filter(game => {
+                const updated = Number(game.updatedAt || 0);
+                // serverTimestamp resolves to a number once written; keep entries
+                // without a resolved timestamp (just-created) too.
+                return !updated || (now - updated) < ACTIVE_GAME_STALE_MS;
+            })
+            .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+        callback(games);
+    });
 }

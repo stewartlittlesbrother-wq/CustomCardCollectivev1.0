@@ -5329,3 +5329,31 @@ button.trash-area {
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* Large card preview shown on the left while hovering a card in the deck
+   builder. Fixed to the left edge, vertically centred, above the filters and
+   ignoring pointer events so it never blocks a click. */
+.builder-hover-preview {
+  position: fixed;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 55;
+  width: min(300px, 22vw);
+  pointer-events: none;
+  filter: drop-shadow(0 18px 40px rgba(0, 0, 0, .6));
+}
+
+.builder-hover-preview[hidden] { display: none; }
+
+.builder-hover-preview img {
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  display: block;
+}
+
+/* On narrow screens the left preview would cover the grid, so hide it. */
+@media (max-width: 1024px) {
+  .builder-hover-preview { display: none !important; }
+}

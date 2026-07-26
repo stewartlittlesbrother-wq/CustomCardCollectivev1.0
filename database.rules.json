@@ -19,6 +19,14 @@
       }
     },
 
+    "//activeGames": "Public list of in-progress games so anyone can find and spectate them. A player writes a lightweight entry (names, phase, turn) while their match runs and removes it when the game ends. Readable by anyone so the Spectate list loads.",
+    "activeGames": {
+      ".read": true,
+      "$roomCode": {
+        ".write": "auth != null"
+      }
+    },
+
     "//cards": "Shared card library. Readable by anyone so the pool loads before sign-in completes; writable by signed-in users only.",
     "cards": {
       ".read": true,

@@ -6,7 +6,7 @@
     <title>Multiplayer – Custom Cards Sim</title>
     <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
     <link rel="stylesheet" href="../css/style.css">
-    <link rel="stylesheet" href="../css/multiplayer.css?v=lobby-4">
+    <link rel="stylesheet" href="../css/multiplayer.css?v=lobby-5">
 </head>
 <body>
     <a href="../index.html" class="mp-back-link">← Back</a>
@@ -41,6 +41,18 @@
                 </div>
 
                 <div id="mpLandingError" class="mp-error hidden"></div>
+
+                <div class="mp-divider"><span>or watch a live game</span></div>
+
+                <div class="mp-spectate">
+                    <div class="mp-spectate-head">
+                        <span class="mp-spectate-title">Live games</span>
+                        <span id="spectateCount" class="mp-spectate-count">0</span>
+                    </div>
+                    <div id="spectateList" class="mp-spectate-list">
+                        <div class="mp-spectate-empty">No games in progress right now.</div>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -114,7 +126,7 @@
     <script src="../js/cards/cardDatabase.js?v=ry-ichigo-1"></script>
     <script src="../js/cards/decks.js?v=ry-ichigo-1"></script>
     <script src="../js/core/deckParser.js"></script>
-    <script type="module" src="../js/pages/multiplayer.js?v=lobby-4"></script>
+    <script type="module" src="../js/pages/multiplayer.js?v=lobby-5"></script>
   <script src="../js/rotate-prompt.js"></script>
 
   <script src="../js/version.js"></script>

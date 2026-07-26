@@ -71,6 +71,8 @@ const el = {
   deckShareLoad: document.querySelector("#deckShareLoad"),
   closeDeckShare: document.querySelector("#closeDeckShare"),
   cardGrid: document.querySelector("#cardGrid"),
+  builderHoverPreview: document.querySelector("#builderHoverPreview"),
+  builderHoverPreviewImg: document.querySelector("#builderHoverPreviewImg"),
   filteredCount: document.querySelector("#filteredCount"),
   collectionHint: document.querySelector("#collectionHint"),
   searchInput: document.querySelector("#searchInput"),
@@ -4581,6 +4583,27 @@ function bindEvents() {
     event.preventDefault();
     addFourToDeck(article.dataset.id);
   });
+
+  // Hovering a card in the collection shows a large preview on the left,
+  // so you don't have to click Inspect to read it. Delegated so it covers
+  // every tile without per-card listeners.
+  const showHoverPreview = (article) => {
+    if (!el.builderHoverPreview || !article) return;
+    const card = getCard(article.dataset.id);
+    if (!card?.imageUrl) { hideHoverPreview(); return; }
+    el.builderHoverPreviewImg.src = card.imageUrl;
+    el.builderHoverPreviewImg.alt = card.name || "";
+    el.builderHoverPreview.hidden = false;
+  };
+  function hideHoverPreview() {
+    if (el.builderHoverPreview) el.builderHoverPreview.hidden = true;
+  }
+  el.cardGrid.addEventListener("mouseover", event => {
+    showHoverPreview(event.target.closest(".card-tile"));
+  });
+  el.cardGrid.addEventListener("mouseleave", hideHoverPreview);
+  // Hide it when the deck grid (deck list) is hovered too, and on view change.
+  el.deckList?.addEventListener("mouseover", hideHoverPreview);
 
   el.deckList.addEventListener("click", event => {
     const addId = event.target.closest("[data-add]")?.dataset.add;

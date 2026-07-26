@@ -3,6 +3,7 @@ import {
     createRoom,
     joinRoom,
     subscribeToMatch,
+    subscribeToActiveGames,
     startMatch,
     setPlayerDeck,
     setPlayerReady,
@@ -318,9 +319,64 @@ async function init() {
         await signInGuest();
         currentUser = await waitForUser();
         setStatus("Connected", "connected");
+        watchActiveGames();
     } catch (e) {
         setStatus("Connection failed", "error");
     }
+}
+
+// ── Spectate list ─────────────────────────────────────
+// Live listing of in-progress games. Each game writes a lightweight entry to
+// /activeGames while it runs; anyone can pick one and open it as a read-only
+// spectator (self.html?...&spectate=1).
+const spectateList  = $("spectateList");
+const spectateCount = $("spectateCount");
+let unsubscribeActiveGames = null;
+
+function watchActiveGames() {
+    if (!spectateList || unsubscribeActiveGames) return;
+    unsubscribeActiveGames = subscribeToActiveGames(renderActiveGames);
+}
+
+function renderActiveGames(games) {
+    if (!spectateList) return;
+
+    // Don't offer to spectate your OWN game (you're already in it).
+    const others = (games || []).filter(g => g.roomCode !== currentRoomCode);
+
+    if (spectateCount) spectateCount.textContent = String(others.length);
+
+    if (!others.length) {
+        spectateList.innerHTML = `<div class="mp-spectate-empty">No games in progress right now.</div>`;
+        return;
+    }
+
+    spectateList.innerHTML = "";
+    others.forEach(game => {
+        const row = document.createElement("div");
+        row.className = "mp-spectate-row";
+
+        const turnLabel = Number(game.turnNumber) > 0 ? `Turn ${game.turnNumber}` : "Starting…";
+        row.innerHTML =
+            `<div class="mp-spectate-info">` +
+                `<span class="mp-spectate-players">` +
+                    `${escapeHtml(game.p1Name || "Player 1")} ` +
+                    `<span class="mp-spectate-vs">vs</span> ` +
+                    `${escapeHtml(game.p2Name || "Player 2")}` +
+                `</span>` +
+                `<span class="mp-spectate-meta">${escapeHtml(turnLabel)}</span>` +
+            `</div>`;
+
+        const watchBtn = document.createElement("button");
+        watchBtn.className = "mp-btn-tiny mp-spectate-watch";
+        watchBtn.textContent = "Watch";
+        watchBtn.addEventListener("click", () => {
+            window.location.href = `../html/self.html?mode=online&room=${encodeURIComponent(game.roomCode)}&spectate=1`;
+        });
+
+        row.appendChild(watchBtn);
+        spectateList.appendChild(row);
+    });
 }
 
 // ── Event listeners ───────────────────────────────────
