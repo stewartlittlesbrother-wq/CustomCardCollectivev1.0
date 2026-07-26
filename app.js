@@ -4397,8 +4397,16 @@ function bindEvents() {
 
   el.leaderSlot.addEventListener("click", event => {
     if (event.target.closest("[data-clear-leader]")) {
+      // Removing the leader clears the whole deck - its cards were chosen around
+      // that leader's colours, so they no longer belong. Confirm only when there
+      // is actually a deck to lose, so an empty builder just resets silently.
+      const hasCards = deckMainCount() > 0 || state.tokens.length > 0;
+      if (hasCards && !confirm("Remove the leader and clear the entire deck?")) return;
+
       state.leaderId = "";
-      saveDeck(false);
+      state.deck = {};
+      state.tokens = [];
+      saveDeck();
     }
     const inspectId = event.target.closest("[data-inspect]")?.dataset.inspect;
     if (inspectId) previewCard(getCard(inspectId));
