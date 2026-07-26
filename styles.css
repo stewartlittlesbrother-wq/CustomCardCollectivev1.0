@@ -3672,6 +3672,12 @@ main {
   color: #fff;
 }
 
+.deck-table .add-card-btn {
+  border-color: #0e7a49;
+  background: linear-gradient(#22c06f, #0f7a45);
+  color: #fff;
+}
+
 .deck-table .inspect-card-btn {
   border-color: #3b4758;
   background: linear-gradient(#303945, #171c24);
@@ -5283,4 +5289,43 @@ button.trash-area {
 
 .collection-hint:empty {
   display: none;
+}
+
+/* Share-deck panel (Export/Import). Mirrors the saved-decks overlay. */
+.deck-share-panel {
+  position: fixed;
+  z-index: 60;
+  inset: 86px 14px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 19, 24, .98);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .5);
+}
+
+.deck-share-panel[hidden] { display: none; }
+
+.deck-share-text {
+  flex: 1 1 auto;
+  min-height: 220px;
+  width: 100%;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #0c0f13;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .9rem;
+  line-height: 1.5;
+}
+
+.deck-share-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }

@@ -219,11 +219,29 @@
                 </div>
                 <div class="deck-tools">
                   <button class="red-button" type="button" id="saveDeckMini">Save</button>
+                  <button class="ghost" type="button" id="exportDeck">Export</button>
+                  <button class="ghost" type="button" id="importDeck">Import</button>
                   <button class="red-button" type="button" id="clearDeck">Clear</button>
                 </div>
               </div>
 
               <div id="deckWarnings" class="warnings"></div>
+
+              <!-- Share a deck as text: Export fills this and copies it; Import
+                   reads a pasted list and rebuilds the deck. -->
+              <section class="deck-share-panel" id="deckSharePanel" hidden>
+                <div class="saved-decks-header">
+                  <strong id="deckShareTitle">Share deck</strong>
+                  <button class="ghost" type="button" id="closeDeckShare">Close</button>
+                </div>
+                <textarea id="deckShareText" class="deck-share-text" spellcheck="false"
+                          placeholder="Paste a decklist here…"></textarea>
+                <div class="deck-share-actions">
+                  <button class="red-button" type="button" id="deckShareCopy" hidden>Copy to clipboard</button>
+                  <button class="red-button" type="button" id="deckShareLoad" hidden>Import this deck</button>
+                </div>
+              </section>
+
               <section class="saved-decks-panel" id="savedDecksPanel" hidden>
                 <div class="saved-decks-header">
                   <strong>Saved Decks</strong>

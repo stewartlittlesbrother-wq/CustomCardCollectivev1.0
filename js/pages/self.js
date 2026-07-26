@@ -2616,6 +2616,28 @@ function removeDonSlot(player, index) {
 window.toggleDonSlot = toggleDonSlot;
 window.removeDonSlot = removeDonSlot;
 
+// When a card with DON!! attached leaves the field, the DON returns to the
+// player's cost area RESTED (it was already tapped to attach). Adds the freed
+// DON as rested and clears the card's attachment. Returns how many were freed.
+function detachDonToRested(player, card) {
+    const amount = Number(card?.attachedDon || 0);
+    if (!player || amount <= 0) return 0;
+
+    card.attachedDon = 0;
+    player.restedDon = (Number(player.restedDon) || 0) + amount;
+    // Rebuild the visible order from the counts (see getDonSlots).
+    player.donOrder = null;
+
+    // Reflect the freed DON immediately, and sync it in online play.
+    updateDonDisplay();
+    window.scheduleOnlineBoardSync?.();
+
+    addGameLog(`${player.name} returned ${amount} DON!! (rested) as ${card.name || "a card"} left the field.`);
+    return amount;
+}
+
+window.detachDonToRested = detachDonToRested;
+
 function renderDonArea(player, areaId) {
     const donArea = document.getElementById(areaId);
 
@@ -3551,6 +3573,23 @@ function showDeckContextMenu(event, player, pileKey = "deck", pileLabel = "Deck"
         });
     });
 
+    // Trash the top X directly, without opening the viewer.
+    if (total > 0) {
+        addItem("Send top X → trash", () => {
+            window.showCustomPrompt?.(`Send top how many cards to trash? (1-${total})`, "1", (input) => {
+                const count = Math.max(1, Math.min(total, parseInt(input, 10) || 0));
+                if (count <= 0) return;
+                const moved = player[pileKey].splice(player[pileKey].length - count, count);
+                if (!player.trash) player.trash = [];
+                player.trash.push(...moved);
+                window.renderTrash?.();
+                if (pileKey === "deck") window.renderDecks?.(); else window.renderExtraPiles?.();
+                addGameLog(`${player.name} sent the top ${count} card${count === 1 ? "" : "s"} to trash.`);
+                window.scheduleOnlineBoardSync?.();
+            });
+        });
+    }
+
     document.body.appendChild(menu);
 
     // Keep the menu on screen when right-clicking near an edge.
@@ -3564,12 +3603,22 @@ function showDeckContextMenu(event, player, pileKey = "deck", pileLabel = "Deck"
     }, 0);
 }
 
-// peekCount limits the view to the TOP N cards ("look at the top 5"). Every
-// control still acts on the real pile, so a card can be sent to hand/trash/
-// bottom exactly as when browsing the whole deck - you just can't see past the
-// cards you're allowed to look at. 0 / omitted shows everything.
+// peekCount opens a "look at the top N" view. It is a FIXED SNAPSHOT: the exact
+// top N cards are captured when the viewer opens, and the view only ever shows
+// those specific cards. Removing one (to hand/trash/bottom) leaves the rest -
+// it does NOT slide the next deck card into view. 0 / omitted browses the whole
+// pile normally.
 function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount = 0) {
     if (!Array.isArray(player[pileKey])) player[pileKey] = [];
+
+    // Snapshot the peeked cards by identity, so the set can only shrink.
+    // Top of the pile is the END of the array (draws pop() off the end).
+    let peekIds = null;
+    if (peekCount > 0) {
+        peekIds = new Set(
+            player[pileKey].slice(-peekCount).map(card => card.instanceId).filter(Boolean)
+        );
+    }
     // Re-render whichever pile this viewer is showing (deck or an extra pile).
     const renderPileSource = () => {
         if (pileKey === "deck") window.renderDecks?.();
@@ -3647,17 +3696,54 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
         });
     }
 
-    const trashTopBtn = mkBtn("Send Top X \u2192 Trash", "#F44336");
-    trashTopBtn.onclick = () => sendTopCardsPrompt("trash", "trash");
-    toolbar.appendChild(trashTopBtn);
+    // Move every card still shown in a peek to a zone at once. Operates on the
+    // snapshot only, so it can't touch cards below the peek window.
+    function sendShownTo(destination, label) {
+        const shown = player[pileKey].filter(c => peekIds.has(c.instanceId));
+        if (!shown.length) { addGameLog(`Nothing left to send`); return; }
 
-    const lifeTopBtn = mkBtn("Send Top X \u2192 Life", "#00BCD4");
-    lifeTopBtn.onclick = () => sendTopCardsPrompt("life", "life");
-    toolbar.appendChild(lifeTopBtn);
+        for (let i = player[pileKey].length - 1; i >= 0; i--) {
+            if (peekIds.has(player[pileKey][i].instanceId)) player[pileKey].splice(i, 1);
+        }
 
-    const handTopBtn = mkBtn("Send Top X \u2192 Hand", "#FF9800");
-    handTopBtn.onclick = () => sendTopCardsPrompt("hand", "hand");
-    toolbar.appendChild(handTopBtn);
+        if (destination === "trash") {
+            if (!player.trash) player.trash = [];
+            player.trash.push(...shown); // topmost pushed last -> top of trash
+            window.renderTrash?.();
+        } else if (destination === "hand") {
+            player.hand.push(...shown);
+            window.renderHands?.();
+        }
+
+        peekIds.clear();
+        renderPileSource();
+        buildGrid();
+        addGameLog(`Sent ${shown.length} peeked card${shown.length === 1 ? "" : "s"} to ${label}`);
+        window.scheduleOnlineBoardSync?.();
+    }
+
+    if (peekIds) {
+        // Peek mode: act on exactly the cards being looked at.
+        const trashShownBtn = mkBtn("Send shown \u2192 Trash", "#F44336");
+        trashShownBtn.onclick = () => sendShownTo("trash", "trash");
+        toolbar.appendChild(trashShownBtn);
+
+        const handShownBtn = mkBtn("Send shown \u2192 Hand", "#FF9800");
+        handShownBtn.onclick = () => sendShownTo("hand", "hand");
+        toolbar.appendChild(handShownBtn);
+    } else {
+        const trashTopBtn = mkBtn("Send Top X \u2192 Trash", "#F44336");
+        trashTopBtn.onclick = () => sendTopCardsPrompt("trash", "trash");
+        toolbar.appendChild(trashTopBtn);
+
+        const lifeTopBtn = mkBtn("Send Top X \u2192 Life", "#00BCD4");
+        lifeTopBtn.onclick = () => sendTopCardsPrompt("life", "life");
+        toolbar.appendChild(lifeTopBtn);
+
+        const handTopBtn = mkBtn("Send Top X \u2192 Hand", "#FF9800");
+        handTopBtn.onclick = () => sendTopCardsPrompt("hand", "hand");
+        toolbar.appendChild(handTopBtn);
+    }
 
     const hint = document.createElement("span");
     hint.textContent = "Drag to reorder \u2022 Hover for actions";
@@ -3718,24 +3804,26 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
     }
 
     function buildGrid() {
-        // How many cards this view may show, clamped to what's actually left.
-        const visibleCount = peekCount > 0
-            ? Math.min(peekCount, player[pileKey].length)
-            : player[pileKey].length;
-
-        title.textContent = peekCount > 0
-            ? `${player.name}'s ${pileLabel} — top ${visibleCount} of ${player[pileKey].length}`
-            : `${player.name}'s ${pileLabel} (${player[pileKey].length} cards)`;
-
         cardGrid.innerHTML = "";
         frameRefs.length = 0;
         dragSrcIndex = null;
         dragSrcFrame = null;
         ghostTarget  = null;
         ghost.style.display = "none";
+
         // The pile stores bottom-first (draws pop() off the end), so reversing
-        // puts the top of the deck first; slicing then takes the top N.
-        const display = [...player[pileKey]].reverse().slice(0, visibleCount);
+        // puts the top of the deck first.
+        let display = [...player[pileKey]].reverse();
+
+        if (peekIds) {
+            // Fixed snapshot: only the cards captured when the peek opened, in
+            // deck order. As they're removed the set shrinks and never refills.
+            display = display.filter(card => peekIds.has(card.instanceId));
+            title.textContent =
+                `${player.name}'s ${pileLabel} — peeking ${display.length} card${display.length === 1 ? "" : "s"}`;
+        } else {
+            title.textContent = `${player.name}'s ${pileLabel} (${player[pileKey].length} cards)`;
+        }
 
         display.forEach((card, displayIndex) => {
             const frame = document.createElement("div");
@@ -3880,11 +3968,11 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
         });
 
         // newDisplay only covers the cards on screen. When peeking that's just
-        // the top N, so splice them back over the top of the pile instead of
-        // replacing it wholesale - assigning directly would delete every card
-        // below the peek window.
+        // the snapshot cards (still the top block of the pile), so splice them
+        // back over the top instead of replacing the whole pile - a direct
+        // assignment would delete everything below the peek window.
         const reordered = [...newDisplay].reverse();
-        if (peekCount > 0 && reordered.length < player[pileKey].length) {
+        if (peekIds && reordered.length < player[pileKey].length) {
             player[pileKey].splice(player[pileKey].length - reordered.length, reordered.length, ...reordered);
         } else {
             player[pileKey] = reordered;

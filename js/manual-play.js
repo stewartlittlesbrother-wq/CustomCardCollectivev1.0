@@ -700,12 +700,14 @@ const manualPlay = {
                     if (player.characters[i]?.instanceId === cardInstanceId) {
                         const c = player.characters[i];
                         player.characters[i] = null;
+                        window.detachDonToRested?.(player, c); // DON falls off, rested
                         return c;
                     }
                 }
                 if (player.stage?.instanceId === cardInstanceId) {
                     const c = player.stage;
                     player.stage = null;
+                    window.detachDonToRested?.(player, c);
                     return c;
                 }
                 return takeFrom(player.trash);
@@ -1152,15 +1154,17 @@ const manualPlay = {
                     if (player.characters[i]?.instanceId === cardInstanceId) {
                         card = player.characters[i];
                         player.characters[i] = null;
+                        window.detachDonToRested?.(player, card); // DON falls off, rested
                         console.log("✓ Removed from character slot", i);
                         break;
                     }
                 }
-                
+
                 // Check stage
                 if (!card && player.stage?.instanceId === cardInstanceId) {
                     card = player.stage;
                     player.stage = null;
+                    window.detachDonToRested?.(player, card);
                     console.log("✓ Removed from stage");
                 }
                 
@@ -1210,7 +1214,9 @@ const manualPlay = {
             let card = null;
             let fromZoneType = null; // Track where card came from
             
-            // Find card from board zones
+            // Find card from board zones. DON detaching is decided AFTER we know
+            // the destination (below), because a character dragged to another
+            // character slot has not left the field and keeps its DON.
             for (let i = 0; i < player.characters.length; i++) {
                 if (player.characters[i]?.instanceId === cardInstanceId) {
                     card = player.characters[i];
@@ -1240,7 +1246,17 @@ const manualPlay = {
                 console.log("✗ Card not found");
                 return;
             }
-            
+
+            // If a character (or stage) with DON!! attached is moving to a
+            // DIFFERENT field, its DON falls off and returns rested. Staying in
+            // the same field (e.g. shuffling character slots) keeps the DON.
+            const stayedInField =
+                (fromZoneType === "characters" && zone.classList.contains("character-area")) ||
+                (fromZoneType === "stage" && zone.classList.contains("stage-area"));
+            if ((fromZoneType === "characters" || fromZoneType === "stage") && !stayedInField) {
+                window.detachDonToRested?.(player, card);
+            }
+
             // Add to target zone
             if (zone.classList.contains("character-area")) {
                 const slotIndex = resolveCharacterSlot(player, charSlot);

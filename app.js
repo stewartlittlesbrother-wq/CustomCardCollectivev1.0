@@ -62,6 +62,14 @@ const el = {
   deckWarnings: document.querySelector("#deckWarnings"),
   leaderSlot: document.querySelector("#leaderSlot"),
   deckList: document.querySelector("#deckList"),
+  exportDeck: document.querySelector("#exportDeck"),
+  importDeck: document.querySelector("#importDeck"),
+  deckSharePanel: document.querySelector("#deckSharePanel"),
+  deckShareTitle: document.querySelector("#deckShareTitle"),
+  deckShareText: document.querySelector("#deckShareText"),
+  deckShareCopy: document.querySelector("#deckShareCopy"),
+  deckShareLoad: document.querySelector("#deckShareLoad"),
+  closeDeckShare: document.querySelector("#closeDeckShare"),
   cardGrid: document.querySelector("#cardGrid"),
   filteredCount: document.querySelector("#filteredCount"),
   collectionHint: document.querySelector("#collectionHint"),
@@ -2989,6 +2997,181 @@ function saveNamedDeck() {
   localStorage.setItem(SAVED_DECKS_KEY, JSON.stringify(decks.slice(0, 24)));
 }
 
+// ── Share a deck as text ─────────────────────────────────
+// Format is deliberately simple and human-readable so it survives being pasted
+// into chat/Discord and back out:
+//
+//   # Deck Name
+//   Leader: BLH1-002
+//   4x BLH1-036
+//   3x BLH1-010
+//   Token: JJBA-001
+//
+// Cards are referenced by card NUMBER, so importing works for anyone whose card
+// pool has those cards (which the shared library provides).
+
+function buildDeckText() {
+  const lines = [];
+  const name = state.deckName || el.deckName.value.trim();
+  if (name) lines.push(`# ${name}`);
+
+  if (state.leaderId) {
+    const leader = getCard(state.leaderId);
+    lines.push(`Leader: ${leader?.cardNumber || state.leaderId}`);
+  }
+
+  // Ordered the same way the deck list is shown, for a tidy paste.
+  deckEntries().forEach(({ card, qty }) => {
+    lines.push(`${qty}x ${card.cardNumber || card.id}`);
+  });
+
+  (state.tokens || []).forEach(id => {
+    const token = getCard(id);
+    lines.push(`Token: ${token?.cardNumber || id}`);
+  });
+
+  return lines.join("\n");
+}
+
+// Turn the exact card NUMBER from a decklist line into the id our deck uses.
+// Cards are keyed in state.deck by cardNumber, so this is mostly identity, but
+// it validates the card actually exists in the pool.
+function resolveDeckLineCard(rawNumber) {
+  const wanted = String(rawNumber || "").trim().toLowerCase();
+  if (!wanted) return null;
+  return state.cards.find(card =>
+    String(card.cardNumber || "").toLowerCase() === wanted ||
+    String(card.id || "").toLowerCase() === wanted) || null;
+}
+
+// Parse a pasted decklist into { name, leaderId, deck, tokens, missing }.
+// Lenient: accepts "4x NUM", "4 x NUM", "4 NUM", ignores blanks and # comments,
+// and collects any card numbers it couldn't find so the user can be told.
+function parseDeckShareText(text) {
+  const result = { name: "", leaderId: "", deck: {}, tokens: [], missing: [] };
+
+  String(text || "").split(/\r?\n/).forEach(rawLine => {
+    const line = rawLine.trim();
+    if (!line) return;
+
+    // Deck name comment
+    if (line.startsWith("#")) {
+      if (!result.name) result.name = line.replace(/^#+/, "").trim();
+      return;
+    }
+
+    const leaderMatch = line.match(/^leader\s*[:=]\s*(.+)$/i);
+    if (leaderMatch) {
+      const card = resolveDeckLineCard(leaderMatch[1]);
+      if (card) result.leaderId = card.cardNumber || card.id;
+      else result.missing.push(leaderMatch[1].trim());
+      return;
+    }
+
+    const tokenMatch = line.match(/^tokens?\s*[:=]\s*(.+)$/i);
+    if (tokenMatch) {
+      // Allow "Token: A, B, C" or one per line.
+      tokenMatch[1].split(/[,]/).forEach(part => {
+        const card = resolveDeckLineCard(part);
+        if (card) { const key = card.cardNumber || card.id; if (!result.tokens.includes(key)) result.tokens.push(key); }
+        else if (part.trim()) result.missing.push(part.trim());
+      });
+      return;
+    }
+
+    // "<qty> x <number>", "<qty>x<number>", or "<qty> <number>"
+    const qtyMatch = line.match(/^(\d+)\s*x?\s*[:\s]?\s*(.+)$/i);
+    if (qtyMatch) {
+      const qty = Math.max(1, parseInt(qtyMatch[1], 10));
+      const card = resolveDeckLineCard(qtyMatch[2]);
+      if (card) {
+        const key = card.cardNumber || card.id;
+        result.deck[key] = (result.deck[key] || 0) + qty;
+      } else {
+        result.missing.push(qtyMatch[2].trim());
+      }
+      return;
+    }
+
+    // A bare card number with no quantity = 1 copy.
+    const bare = resolveDeckLineCard(line);
+    if (bare) {
+      const key = bare.cardNumber || bare.id;
+      result.deck[key] = (result.deck[key] || 0) + 1;
+    } else {
+      result.missing.push(line);
+    }
+  });
+
+  return result;
+}
+
+function importDeckFromText(text) {
+  const parsed = parseDeckShareText(text);
+
+  const cardCount = Object.values(parsed.deck).reduce((sum, qty) => sum + qty, 0);
+  if (!parsed.leaderId && !cardCount && !parsed.tokens.length) {
+    toast("Nothing to import — paste a decklist first");
+    return false;
+  }
+
+  state.leaderId = parsed.leaderId || "";
+  state.deck = parsed.deck;
+  state.tokens = parsed.tokens;
+  state.deckName = parsed.name || state.deckName;
+  if (el.deckName) el.deckName.value = state.deckName;
+
+  saveDeck(); // persist as the working draft (not to the named list)
+
+  if (parsed.missing.length) {
+    const shown = parsed.missing.slice(0, 4).join(", ");
+    toast(`Imported. ${parsed.missing.length} card${parsed.missing.length === 1 ? "" : "s"} not in your pool: ${shown}${parsed.missing.length > 4 ? "…" : ""}`);
+  } else {
+    toast(`Imported ${cardCount} card${cardCount === 1 ? "" : "s"}`);
+  }
+  return true;
+}
+
+// Open the share panel in EXPORT mode: fill it with this deck's text and copy.
+function openDeckExport() {
+  closeDeckSharePanels();
+  const text = buildDeckText();
+  if (el.deckShareTitle) el.deckShareTitle.textContent = "Export deck — copy and share this";
+  if (el.deckShareText) { el.deckShareText.value = text; el.deckShareText.readOnly = true; }
+  el.deckShareCopy?.removeAttribute("hidden");
+  el.deckShareLoad?.setAttribute("hidden", "");
+  el.deckSharePanel?.removeAttribute("hidden");
+  el.deckShareText?.focus();
+  el.deckShareText?.select();
+}
+
+// Open the share panel in IMPORT mode: empty, ready to paste.
+function openDeckImport() {
+  closeDeckSharePanels();
+  if (el.deckShareTitle) el.deckShareTitle.textContent = "Import deck — paste a decklist, then Import";
+  if (el.deckShareText) { el.deckShareText.value = ""; el.deckShareText.readOnly = false; }
+  el.deckShareCopy?.setAttribute("hidden", "");
+  el.deckShareLoad?.removeAttribute("hidden");
+  el.deckSharePanel?.removeAttribute("hidden");
+  el.deckShareText?.focus();
+}
+
+function closeDeckSharePanels() {
+  el.deckSharePanel?.setAttribute("hidden", "");
+}
+
+async function copyDeckShareText() {
+  const text = el.deckShareText?.value || "";
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("Decklist copied");
+  } catch {
+    // Clipboard API can be blocked; the text is already selected to copy manually.
+    el.deckShareText?.select();
+    toast("Press Ctrl+C to copy");
+  }
+}
+
 function loadNamedDeck(index) {
   const deck = savedDecks()[index];
   if (!deck) return;
@@ -3484,16 +3667,20 @@ function renderTokenRow(card) {
 }
 
 function renderDeckRow(card, qty, isLeader = false) {
-  const removeButton = isLeader
+  // The leader has no quantity, so it only gets a remove button. Everything else
+  // gets +/- so copies can be adjusted without hunting for the card in the
+  // library again.
+  const controls = isLeader
     ? `<button class="deck-icon-btn remove-card-btn" type="button" data-clear-leader aria-label="Remove leader" title="Remove"><span aria-hidden="true">-</span></button>`
-    : `<button class="deck-icon-btn remove-card-btn" type="button" data-remove="${escapeAttr(card.id)}" aria-label="Remove one ${escapeAttr(card.name)}" title="Remove one"><span aria-hidden="true">-</span></button>`;
+    : `<button class="deck-icon-btn add-card-btn" type="button" data-add="${escapeAttr(card.id)}" aria-label="Add one ${escapeAttr(card.name)}" title="Add one"><span aria-hidden="true">+</span></button>
+       <button class="deck-icon-btn remove-card-btn" type="button" data-remove="${escapeAttr(card.id)}" aria-label="Remove one ${escapeAttr(card.name)}" title="Remove one"><span aria-hidden="true">-</span></button>`;
 
   return `
     <div class="deck-row" data-card-id="${escapeAttr(card.id)}">
       <div class="mini-card-art">${cardVisual(card)}</div>
       <span class="qty">${qty}</span>
       <div class="deck-row-actions">
-        ${removeButton}
+        ${controls}
         <button class="deck-icon-btn inspect-card-btn" type="button" data-inspect="${escapeAttr(card.id)}" aria-label="Inspect ${escapeAttr(card.name)}" title="Inspect">
           <span class="magnifier-icon" aria-hidden="true"></span>
         </button>
@@ -4396,8 +4583,10 @@ function bindEvents() {
   });
 
   el.deckList.addEventListener("click", event => {
+    const addId = event.target.closest("[data-add]")?.dataset.add;
+    if (addId) { addToDeck(addId); return; }
     const removeId = event.target.closest("[data-remove]")?.dataset.remove;
-    if (removeId) removeFromDeck(removeId);
+    if (removeId) { removeFromDeck(removeId); return; }
     const inspectId = event.target.closest("[data-inspect]")?.dataset.inspect;
     if (inspectId) previewCard(getCard(inspectId));
   });
@@ -4432,6 +4621,13 @@ function bindEvents() {
   el.quickBuild.addEventListener("click", autoFillDeck);
   el.saveDeck?.addEventListener("click", saveDeckToLibrary);
   el.saveDeckMini.addEventListener("click", saveDeckToLibrary);
+  el.exportDeck?.addEventListener("click", openDeckExport);
+  el.importDeck?.addEventListener("click", openDeckImport);
+  el.deckShareCopy?.addEventListener("click", copyDeckShareText);
+  el.deckShareLoad?.addEventListener("click", () => {
+    if (importDeckFromText(el.deckShareText?.value || "")) closeDeckSharePanels();
+  });
+  el.closeDeckShare?.addEventListener("click", closeDeckSharePanels);
   el.resetFilters.addEventListener("click", () => {
     el.searchInput.value = "";
     el.filterQuick.value = "";
