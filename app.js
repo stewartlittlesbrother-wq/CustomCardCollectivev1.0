@@ -14,11 +14,11 @@ const CARD_FILES = [
 // cards that predate this feature (bundled + previously-shared) default to
 // Goldrush717's Bleach - see COLLECTION_DEFAULT and normalizeCard.
 const CARD_COLLECTIONS = [
-  { slug: "golds-bleach", name: "Goldrush717's Bleach" },
+  { slug: "golds-bleach", name: "Goldrush717's Bleach", image: "images/basic/golds-bleach-set.jpg" },
   { slug: "strixs-set", name: "Strix's Set" },
   { slug: "gavilanterns-deltarune", name: "Gavilantern's Deltarune" },
   { slug: "rins-jojos", name: "Rin's Jojo's" },
-  { slug: "pigs-jjk", name: "Pig's JJk" },
+  { slug: "pigs-jjk", name: "Pig's JJk", image: "images/basic/750341.jpg.webp" },
   { slug: "ravens-jjk", name: "Raven's JJk" },
   { slug: "malices-cards", name: "Malice's cards" },
   { slug: "midevilgmers-cards", name: "Midevilgmer's Cards" },
