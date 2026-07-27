@@ -376,6 +376,15 @@ function applyOnlinePublicState(publicState = {}) {
         player2: publicState.player2 || null
     };
 
+    // Hide both hands during the dice-roll / turn-order-choice step. Hands are
+    // dealt at match start, but you shouldn't be looking at them while deciding
+    // who goes first - that's a mulligan-phase decision. The class is dropped
+    // once the match reaches mulligan/main.
+    document.body.classList.toggle(
+        "online-choosing-turn",
+        isOnlineMatch && onlinePublicState.phase === "diceRoll"
+    );
+
     const turnKey = `${onlinePublicState.currentPlayer}:${onlinePublicState.turnNumber}:${onlinePublicState.phase}`;
     const turnStartKey = `${onlinePublicState.currentPlayer}:${onlinePublicState.turnNumber}`;
 
@@ -1400,6 +1409,11 @@ async function handleOnlinePassTurn() {
         if (phaseButton) {
             phaseButton.disabled = true;
         }
+
+        // Clear any planning arrows the ending player drew - they belong to the
+        // turn that's finishing. resetArrows also wipes them on the opponent's
+        // screen, so no stale arrows carry into the next turn.
+        window.manualPlay?.resetArrows?.();
 
         const ownPlayer = gameState[getOwnOnlinePlayerKey()];
         const phaseInfo = createPhaseLogProxy();
