@@ -1128,7 +1128,7 @@ export async function removeActiveGame(roomCode) {
 // ever culls games whose players both vanished.
 const ACTIVE_GAME_STALE_MS = 6 * 60 * 1000;
 
-export function subscribeToActiveGames(callback) {
+export function subscribeToActiveGames(callback, onError) {
     const gamesRef = ref(database, "activeGames");
     return onValue(gamesRef, (snapshot) => {
         const data = snapshot.val() || {};
@@ -1143,5 +1143,11 @@ export function subscribeToActiveGames(callback) {
             })
             .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
         callback(games);
+    }, (error) => {
+        // The most common cause is the /activeGames rule not being published yet
+        // (Firebase denies reads by default). Surface it so the spectate list can
+        // explain the empty state instead of looking broken.
+        console.warn("Active games listener failed:", error);
+        if (typeof onError === "function") onError(error);
     });
 }

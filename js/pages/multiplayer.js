@@ -335,7 +335,15 @@ let unsubscribeActiveGames = null;
 
 function watchActiveGames() {
     if (!spectateList || unsubscribeActiveGames) return;
-    unsubscribeActiveGames = subscribeToActiveGames(renderActiveGames);
+    unsubscribeActiveGames = subscribeToActiveGames(renderActiveGames, (error) => {
+        const denied = /permission|denied/i.test(error?.message || "");
+        spectateList.innerHTML = `<div class="mp-spectate-empty">${
+            denied
+                ? "Can't load live games — the database rules for spectating haven't been published yet."
+                : "Couldn't load live games right now."
+        }</div>`;
+        if (spectateCount) spectateCount.textContent = "0";
+    });
 }
 
 function renderActiveGames(games) {

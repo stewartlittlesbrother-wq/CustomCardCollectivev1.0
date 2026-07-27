@@ -193,16 +193,23 @@
           <section class="builder-main">
             <section class="collection-panel">
               <div class="collection-top">
-                <div></div>
-                <h2>My Collection</h2>
+                <div class="collection-lead">
+                  <button type="button" class="ghost collection-back" id="collectionBack" hidden>← Collections</button>
+                </div>
+                <h2 id="collectionHeading">Collections</h2>
                 <div class="collection-actions">
                   <!-- Says WHY the grid is filtered (leader-first browsing),
                        so a small count never looks like missing cards. -->
                   <span class="collection-hint" id="collectionHint"></span>
-                  <span class="count-pill"><span id="filteredCount">0</span> shown</span>
+                  <span class="count-pill" id="collectionCountPill"><span id="filteredCount">0</span> shown</span>
                 </div>
               </div>
-              <div class="card-grid" id="cardGrid" aria-live="polite"></div>
+
+              <!-- Collection picker: shown until the user opens a collection.
+                   Choosing one filters the grid to just that group's cards. -->
+              <div class="collection-picker" id="collectionPicker"></div>
+
+              <div class="card-grid" id="cardGrid" aria-live="polite" hidden></div>
             </section>
 
             <section class="deck-table">
@@ -256,7 +263,10 @@
               <section class="card-creation-panel" id="cardCreationPanel" hidden>
                 <div class="saved-decks-header">
                   <strong>Card Creation</strong>
-                  <button class="ghost" type="button" id="closeCardCreation">Close</button>
+                  <div class="creation-header-actions">
+                    <button class="red-button" type="button" id="openUntapImport">Import JSON</button>
+                    <button class="ghost" type="button" id="closeCardCreation">Close</button>
+                  </div>
                 </div>
 
                 <div class="creation-layout">
@@ -291,6 +301,10 @@
                           <option value="stage">Stage</option>
                           <option value="token">Token</option>
                         </select>
+                      </label>
+                      <label>
+                        Collection
+                        <select id="creationCollection"></select>
                       </label>
                       <label>
                         Colors
@@ -489,6 +503,61 @@
     <p><strong>Examples:</strong></p>
     <p><code>luffy &amp;&amp; red</code>, <code>[animal]</code>, <code>2..4</code>, <code>(luffy &amp;&amp; 1..3) || (zoro &amp;&amp; red)</code></p>
     <button type="button" id="closeSearchTips">Close</button>
+  </dialog>
+
+  <!-- Untap custom-card JSON importer: pick a file, review/edit/deselect the
+       cards, choose a collection, handle duplicates, then import. -->
+  <dialog id="untapImportDialog" class="untap-dialog">
+    <div class="untap-import">
+      <div class="import-header">
+        <div>
+          <p class="eyebrow">Bulk import</p>
+          <h2>Import cards from JSON</h2>
+        </div>
+        <button class="ghost" type="button" id="closeUntapImport">Close</button>
+      </div>
+
+      <!-- Step 1: choose a file -->
+      <div class="untap-step untap-pick" id="untapPickStep">
+        <p class="untap-hint">Select an Untap custom-card export (<code>.json</code>). Every card in the file will be shown for review before anything is saved.</p>
+        <label class="untap-file-label">
+          <input id="untapFileInput" type="file" accept="application/json,.json">
+        </label>
+        <div id="untapPickError" class="mp-error" hidden></div>
+      </div>
+
+      <!-- Step 2: review + edit -->
+      <div class="untap-step untap-review" id="untapReviewStep" hidden>
+        <div class="untap-toolbar">
+          <div class="untap-toolbar-left">
+            <span id="untapSourceInfo" class="untap-source"></span>
+            <span id="untapSelCount" class="count-pill"></span>
+          </div>
+          <div class="untap-toolbar-right">
+            <label class="untap-batch">
+              Add all to
+              <select id="untapBatchCollection"></select>
+            </label>
+            <button class="ghost" type="button" id="untapSelectAll">All</button>
+            <button class="ghost" type="button" id="untapSelectNone">None</button>
+          </div>
+        </div>
+        <div id="untapReviewList" class="untap-review-list"></div>
+        <div class="untap-actions">
+          <button class="ghost" type="button" id="untapBackToPick">← Choose a different file</button>
+          <button class="red-button" type="button" id="untapDoImport">Import selected</button>
+        </div>
+      </div>
+
+      <!-- Step 3: summary -->
+      <div class="untap-step untap-summary" id="untapSummaryStep" hidden>
+        <h3>Import complete</h3>
+        <ul class="untap-summary-list" id="untapSummaryList"></ul>
+        <div class="untap-actions">
+          <button class="red-button" type="button" id="untapSummaryDone">Done</button>
+        </div>
+      </div>
+    </div>
   </dialog>
 
   <dialog id="cardImportDialog">

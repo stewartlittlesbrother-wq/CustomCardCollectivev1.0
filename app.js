@@ -9,6 +9,36 @@ const CARD_FILES = [
   { path: "data/cards/stages.json", category: "stage" },
   { path: "data/cards/custom-project-cards.json", optional: true, projectCards: true }
 ];
+// Card collections (sets/groups). Every card belongs to exactly one. The named
+// groups are fixed; anything that doesn't fit lands in "everything-else". All
+// cards that predate this feature (bundled + previously-shared) default to
+// Goldrush717's Bleach - see COLLECTION_DEFAULT and normalizeCard.
+const CARD_COLLECTIONS = [
+  { slug: "golds-bleach", name: "Goldrush717's Bleach" },
+  { slug: "strixs-set", name: "Strix's Set" },
+  { slug: "gavilanterns-deltarune", name: "Gavilantern's Deltarune" },
+  { slug: "rins-jojos", name: "Rin's Jojo's" },
+  { slug: "pigs-jjk", name: "Pig's JJk" },
+  { slug: "ravens-jjk", name: "Raven's JJk" },
+  { slug: "malices-cards", name: "Malice's cards" },
+  { slug: "everything-else", name: "Everything else" }
+];
+const COLLECTION_DEFAULT = "golds-bleach";
+
+function collectionName(slug) {
+  return CARD_COLLECTIONS.find(entry => entry.slug === slug)?.name || "Everything else";
+}
+
+function normalizeCollectionSlug(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return COLLECTION_DEFAULT;
+  const direct = CARD_COLLECTIONS.find(entry => entry.slug === text);
+  if (direct) return direct.slug;
+  // Allow matching by display name too (older imports may have stored the name).
+  const byName = CARD_COLLECTIONS.find(entry => entry.name.toLowerCase() === text);
+  return byName ? byName.slug : "everything-else";
+}
+
 const CARD_BACK_IMAGE = "images/basic/card-back-custom.png";
 const DON_CARD_IMAGE = "images/basic/don-card-custom.png";
 const DON_DECK_IMAGE = "images/basic/don-deck-custom.png";
@@ -42,7 +72,10 @@ const state = {
   rotationOnly: false,
   searchRenderTimer: null,
   editingCardId: "",
-  creationImageData: ""
+  creationImageData: "",
+  // Which collection the card browser is showing. null = show the collection
+  // picker screen instead of the card grid.
+  activeCollection: null
 };
 
 const el = {
@@ -75,6 +108,10 @@ const el = {
   builderHoverPreviewImg: document.querySelector("#builderHoverPreviewImg"),
   filteredCount: document.querySelector("#filteredCount"),
   collectionHint: document.querySelector("#collectionHint"),
+  collectionPicker: document.querySelector("#collectionPicker"),
+  collectionBack: document.querySelector("#collectionBack"),
+  collectionHeading: document.querySelector("#collectionHeading"),
+  collectionCountPill: document.querySelector("#collectionCountPill"),
   searchInput: document.querySelector("#searchInput"),
   filterQuick: document.querySelector("#filterQuick"),
   categoryFilter: document.querySelector("#categoryFilter"),
@@ -130,6 +167,7 @@ const el = {
   creationCardNumber: document.querySelector("#creationCardNumber"),
   creationName: document.querySelector("#creationName"),
   creationCategory: document.querySelector("#creationCategory"),
+  creationCollection: document.querySelector("#creationCollection"),
   creationColors: document.querySelector("#creationColors"),
   creationCost: document.querySelector("#creationCost"),
   creationPower: document.querySelector("#creationPower"),
@@ -258,11 +296,27 @@ function normalizeCard(raw, category) {
     customEffectV2,
     effectBlocks: blockEffects,
     imageUrl: normalizeImagePath(raw.image || ""),
+    // Which collection this card belongs to. Cards from before collections
+    // existed have no value and fall back to Goldrush717's Bleach.
+    collection: normalizeCollectionSlug(raw.collection),
     effectScript: raw.effectScript || raw.script || "",
     imported: Boolean(raw.imported || raw.needsCoding),
     needsCoding: Boolean(raw.needsCoding),
     importSource: raw.importSource || null,
-    effectStatus: raw.effectStatus || ""
+    effectStatus: raw.effectStatus || "",
+    // Imported-card metadata. Kept as concrete values (never undefined, which
+    // Firebase rejects) so JSON-imported cards preserve everything the source
+    // provided and can round-trip back through the shared library unchanged.
+    untapId: raw.untapId || "",
+    subtype: raw.subtype || "",
+    trigger: raw.trigger || "",
+    donEffect: raw.donEffect || "",
+    artist: raw.artist || "",
+    creator: raw.creator || "",
+    setName: raw.setName || "",
+    printType: raw.printType || "",
+    addedAt: raw.addedAt || raw.importedAt || "",
+    lastEditedAt: raw.lastEditedAt || ""
   };
 }
 
@@ -2199,6 +2253,11 @@ function creationCardFromForm(imageDataUrl) {
     keywords,
     effect: effectText,
     image: imageDataUrl,
+    // Which collection to file this card under. Defaults to the collection the
+    // browser is currently showing, then to Goldrush717's Bleach.
+    collection: normalizeCollectionSlug(
+      el.creationCollection?.value || state.activeCollection || COLLECTION_DEFAULT
+    ),
     imported: true,
     importedAt: new Date().toISOString()
   };
@@ -2790,6 +2849,7 @@ function openCardForEditing(card) {
   el.creationCardNumber.value = card.cardNumber || card.id;
   el.creationName.value = card.name || "";
   el.creationCategory.value = normalizeCategory(card.category || card.cardType);
+  if (el.creationCollection) el.creationCollection.value = normalizeCollectionSlug(card.collection);
   setSelectValueWithFallback(el.creationColors, (card.colors || []).join(", "));
   setSelectValueWithFallback(el.creationCost, card.category === "leader" ? card.life || "" : card.cost || "");
   el.creationPower.value = card.power || "";
@@ -3404,6 +3464,13 @@ function filteredCards() {
   const leaderColors = new Set(leader?.colors || []);
 
   return state.cards.filter(card => {
+    // Collections gate everything: the grid only ever shows the collection the
+    // user opened from the picker. With no collection chosen nothing shows (the
+    // picker screen is displayed in its place).
+    if (!state.activeCollection || (card.collection || COLLECTION_DEFAULT) !== state.activeCollection) {
+      return false;
+    }
+
     // Leader-first browsing: with no leader picked the grid shows ONLY leaders,
     // so the first decision is always "who am I building around". Once one is
     // chosen it drops out of the way and the grid shows just that leader's
@@ -3757,8 +3824,68 @@ function updateDeckTableHeight() {
   builderMain.style.setProperty("--deck-table-height", `${height}px`);
 }
 
+// Card count per collection, so the picker tiles show how much is in each.
+function collectionCounts() {
+  const counts = {};
+  CARD_COLLECTIONS.forEach(entry => { counts[entry.slug] = 0; });
+  state.cards.forEach(card => {
+    const slug = normalizeCollectionSlug(card.collection);
+    counts[slug] = (counts[slug] || 0) + 1;
+  });
+  return counts;
+}
+
+// The collection picker: one tile per group. Shown until a collection is opened.
+function renderCollectionPicker() {
+  if (!el.collectionPicker) return;
+  const counts = collectionCounts();
+  el.collectionPicker.innerHTML = "";
+
+  CARD_COLLECTIONS.forEach(entry => {
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "collection-tile";
+    tile.dataset.collection = entry.slug;
+    tile.innerHTML = `
+      <span class="collection-tile-name">${escapeHtml(entry.name)}</span>
+      <span class="collection-tile-count">${counts[entry.slug] || 0} cards</span>
+    `;
+    tile.addEventListener("click", () => openCollection(entry.slug));
+    el.collectionPicker.appendChild(tile);
+  });
+}
+
+function openCollection(slug) {
+  state.activeCollection = normalizeCollectionSlug(slug);
+  renderCardGrid();
+}
+
+function closeCollection() {
+  state.activeCollection = null;
+  renderCardGrid();
+}
+
 function renderCardGrid() {
   clearTimeout(state.searchRenderTimer);
+
+  // No collection open: show the picker in place of the card grid.
+  const browsing = Boolean(state.activeCollection);
+  if (el.collectionPicker) el.collectionPicker.hidden = browsing;
+  if (el.cardGrid) el.cardGrid.hidden = !browsing;
+  if (el.collectionBack) el.collectionBack.hidden = !browsing;
+  if (el.collectionCountPill) el.collectionCountPill.hidden = !browsing;
+  if (el.collectionHeading) {
+    el.collectionHeading.textContent = browsing
+      ? collectionName(state.activeCollection)
+      : "Collections";
+  }
+
+  if (!browsing) {
+    renderCollectionPicker();
+    if (el.collectionHint) el.collectionHint.textContent = "";
+    return;
+  }
+
   const cards = filteredCards();
   el.filteredCount.textContent = String(cards.length);
   el.cardGrid.innerHTML = "";
@@ -4651,6 +4778,7 @@ function bindEvents() {
     if (importDeckFromText(el.deckShareText?.value || "")) closeDeckSharePanels();
   });
   el.closeDeckShare?.addEventListener("click", closeDeckSharePanels);
+  el.collectionBack?.addEventListener("click", closeCollection);
   el.resetFilters.addEventListener("click", () => {
     el.searchInput.value = "";
     el.filterQuick.value = "";
@@ -4816,9 +4944,471 @@ function bindEvents() {
   });
 }
 
+// Fill every collection <select> (card creation, JSON import) with the fixed
+// set of collections. Called once at startup.
+function populateCollectionSelects() {
+  const options = CARD_COLLECTIONS
+    .map(entry => `<option value="${entry.slug}">${escapeHtml(entry.name)}</option>`)
+    .join("");
+  [
+    el.creationCollection,
+    document.querySelector("#untapBatchCollection")
+  ].forEach(select => {
+    if (select) select.innerHTML = options;
+  });
+}
+
+// =====================================================================
+// Untap custom-card JSON importer
+// =====================================================================
+// Reads an "untap-custom-card-import" export, maps each card in `cards[]`
+// into this sim's card schema, and lets the user review/edit/deselect before
+// anything is saved. The original Untap object is preserved verbatim under
+// importSource so no field is ever lost, and the Untap `id` is kept as a stable
+// external id (untapId) used for duplicate detection.
+
+const untapEl = {};
+let untapReview = { meta: null, entries: [] };
+
+function cacheUntapEls() {
+  [
+    "untapImportDialog", "openUntapImport", "closeUntapImport",
+    "untapPickStep", "untapReviewStep", "untapSummaryStep",
+    "untapFileInput", "untapPickError",
+    "untapSourceInfo", "untapSelCount", "untapBatchCollection",
+    "untapSelectAll", "untapSelectNone", "untapReviewList",
+    "untapBackToPick", "untapDoImport", "untapSummaryList", "untapSummaryDone"
+  ].forEach(id => { untapEl[id] = document.getElementById(id); });
+}
+
+// A readable, deterministic card number derived from the Untap id, so a
+// re-import of the same card yields the same number (which is what makes the
+// Replace path actually overwrite rather than duplicate).
+function makeUntapCardNumber(setCode, untapId) {
+  const prefix = String(setCode || "CUS").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6) || "CUS";
+  const short = String(untapId || "").replace(/[^a-fA-F0-9]/g, "").slice(0, 5).toUpperCase() || "00000";
+  return `${prefix}-${short}`;
+}
+
+function untapNumeric(value) {
+  if (value === "" || value == null) return "";
+  const n = Number(value);
+  return Number.isFinite(n) ? n : "";
+}
+
+function untapIsoDate(ms) {
+  const n = Number(ms);
+  if (!n) return "";
+  try { return new Date(n).toISOString(); } catch { return ""; }
+}
+
+// Map ONE raw Untap card into this sim's card shape (pre-normalizeCard).
+function mapUntapCardToSim(raw, sourceMeta) {
+  const fields = raw.fields || {};
+  const meta = raw.meta || {};
+  const images = raw.images || {};
+  const text = raw.text || {};
+
+  const untapId = String(raw.id || (crypto.randomUUID ? crypto.randomUUID() : Date.now()));
+  const setCode = String(raw.set || fields.setName || "").trim();
+  const category = normalizeCategory(meta.type || fields.cardType || raw.type);
+  // Prefer the stable Untap-rendered image. The Discord `front` URLs carry
+  // expiry params (ex/is/hm) and stop loading after a while, so they're only a
+  // fallback.
+  const image = images.untapRendered || images.front || images.back || "";
+  const effect = String(text.front || fields.effect || "").trim();
+  // meta.attribute is an array; fields.attribute is a single string.
+  const attribute = Array.isArray(meta.attribute)
+    ? meta.attribute.filter(Boolean).join(", ")
+    : String(fields.attribute || "");
+  const cardNumber = String(fields.cardNumber || "").trim() || makeUntapCardNumber(setCode, untapId);
+
+  return {
+    id: untapId,
+    cardNumber,
+    // Stable external id from Untap - used to detect duplicates on re-import.
+    untapId,
+    name: raw.name || "Unnamed Card",
+    category,
+    cardType: category,
+    // OPTCG "type" line is the subtype(s); Untap stores it in fields.subtype
+    // (fields.cardType is the GAME, "opcg", not the card's type).
+    type: String(fields.subtype || "").trim(),
+    subtype: String(fields.subtype || "").trim(),
+    color: String(fields.color || "").trim(),
+    cost: category === "leader" ? "" : untapNumeric(fields.cost),
+    life: category === "leader" ? untapNumeric(fields.life) : "",
+    power: untapNumeric(fields.power),
+    counter: untapNumeric(fields.counter),
+    attribute,
+    rarity: String(raw.rarity || fields.rarity || "").trim(),
+    effect,
+    trigger: String(fields.trigger || "").trim(),
+    donEffect: String(fields.donEffect || "").trim(),
+    artist: String(fields.artist || "").trim(),
+    creator: String(raw.creator || sourceMeta?.creator || "").trim(),
+    setName: String(fields.setName || setCode).trim(),
+    setCodeHint: setCode,
+    printType: String(raw.printType || "").trim(),
+    image,
+    imported: true,
+    importedAt: new Date().toISOString(),
+    addedAt: untapIsoDate(raw.timestamps?.added),
+    lastEditedAt: untapIsoDate(raw.timestamps?.lastEdited),
+    // Preserve EVERYTHING from the source so no unknown field is ever lost.
+    importSource: {
+      format: sourceMeta?.format || null,
+      formatVersion: sourceMeta?.formatVersion || null,
+      source: sourceMeta?.source || null,
+      exportedAt: sourceMeta?.exportedAt || null,
+      card: raw
+    }
+  };
+}
+
+// Parse the file text into { meta, cards[] }, tolerating a few shapes: the
+// documented { cards: [...] }, a bare array, or a single card object.
+function parseUntapFile(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (error) {
+    throw new Error("That file isn't valid JSON.");
+  }
+
+  let cards;
+  let meta = null;
+  if (Array.isArray(data)) {
+    cards = data;
+  } else if (Array.isArray(data.cards)) {
+    cards = data.cards;
+    meta = {
+      format: data.format,
+      formatVersion: data.formatVersion,
+      exportedAt: data.exportedAt,
+      source: data.source,
+      creator: data.source?.creator
+    };
+  } else if (data && (data.id || data.name || data.fields)) {
+    cards = [data];
+  } else {
+    throw new Error("No cards found in that file (expected a \"cards\" array).");
+  }
+
+  if (!cards.length) throw new Error("That file has an empty cards list.");
+  return { meta, cards };
+}
+
+// Does this mapped card already exist in the pool? Match on the Untap id first
+// (survives edits to the number), then on the sim card number.
+function findExistingCardForImport(card) {
+  const untapId = card.untapId;
+  const number = projectCardKey(card).toLowerCase();
+  return state.cards.find(existing => {
+    if (untapId && existing.untapId && existing.untapId === untapId) return true;
+    return projectCardKey(existing).toLowerCase() === number;
+  }) || null;
+}
+
+function untapEntryInvalid(entry) {
+  return !String(entry.card.name || "").trim() || !String(entry.card.image || "").trim();
+}
+
+function openUntapImport() {
+  cacheUntapEls();
+  if (!untapEl.untapImportDialog) return;
+  untapReview = { meta: null, entries: [] };
+  showUntapStep("pick");
+  if (untapEl.untapFileInput) untapEl.untapFileInput.value = "";
+  if (untapEl.untapPickError) untapEl.untapPickError.hidden = true;
+  // Default the batch collection to whatever the browser is currently showing.
+  if (untapEl.untapBatchCollection) {
+    untapEl.untapBatchCollection.value = state.activeCollection || COLLECTION_DEFAULT;
+  }
+  untapEl.untapImportDialog.showModal();
+}
+
+function showUntapStep(step) {
+  if (untapEl.untapPickStep) untapEl.untapPickStep.hidden = step !== "pick";
+  if (untapEl.untapReviewStep) untapEl.untapReviewStep.hidden = step !== "review";
+  if (untapEl.untapSummaryStep) untapEl.untapSummaryStep.hidden = step !== "summary";
+}
+
+async function handleUntapFile(file) {
+  if (!file) return;
+  if (untapEl.untapPickError) untapEl.untapPickError.hidden = true;
+
+  let parsed;
+  try {
+    const text = await file.text();
+    parsed = parseUntapFile(text);
+  } catch (error) {
+    if (untapEl.untapPickError) {
+      untapEl.untapPickError.textContent = error.message;
+      untapEl.untapPickError.hidden = false;
+    }
+    return;
+  }
+
+  const batchCollection = untapEl.untapBatchCollection?.value || state.activeCollection || COLLECTION_DEFAULT;
+  untapReview.meta = parsed.meta;
+  untapReview.entries = parsed.cards.map(raw => {
+    const card = mapUntapCardToSim(raw, parsed.meta);
+    card.collection = normalizeCollectionSlug(batchCollection);
+    const dup = findExistingCardForImport(card);
+    return { card, include: true, dup, action: dup ? "skip" : "add", editing: false };
+  });
+
+  if (untapEl.untapSourceInfo) {
+    const creator = parsed.meta?.creator || untapReview.entries[0]?.card.creator || "";
+    untapEl.untapSourceInfo.textContent =
+      `${parsed.cards.length} card${parsed.cards.length === 1 ? "" : "s"}` +
+      (creator ? ` from ${creator}` : "");
+  }
+  showUntapStep("review");
+  renderUntapReview();
+}
+
+function untapStatChips(card) {
+  const chips = [];
+  chips.push(card.category);
+  if (card.category === "leader") {
+    if (card.life !== "") chips.push(`${card.life} life`);
+  } else if (card.cost !== "") {
+    chips.push(`${card.cost} cost`);
+  }
+  if (card.power !== "") chips.push(`${card.power} power`);
+  if (card.counter !== "") chips.push(`+${card.counter}`);
+  if (card.color) chips.push(card.color);
+  return chips.filter(Boolean);
+}
+
+function renderUntapReview() {
+  const list = untapEl.untapReviewList;
+  if (!list) return;
+  list.innerHTML = "";
+
+  const collectionOptions = CARD_COLLECTIONS
+    .map(entry => `<option value="${entry.slug}">${escapeHtml(entry.name)}</option>`)
+    .join("");
+
+  untapReview.entries.forEach((entry, index) => {
+    const card = entry.card;
+    const invalid = untapEntryInvalid(entry);
+    const row = document.createElement("div");
+    row.className = "untap-card" + (entry.include ? "" : " is-excluded") + (invalid ? " is-invalid" : "");
+    row.dataset.index = String(index);
+
+    const setLabel = card.setName || card.setCodeHint || "—";
+    const chips = untapStatChips(card).map(chip => `<span class="untap-chip">${escapeHtml(String(chip))}</span>`).join("");
+
+    const dupBadge = entry.dup
+      ? `<div class="untap-dup">
+           <span class="untap-dup-tag">Already in pool</span>
+           <label><input type="radio" name="untap-dup-${index}" value="skip" ${entry.action === "skip" ? "checked" : ""}> Skip</label>
+           <label><input type="radio" name="untap-dup-${index}" value="replace" ${entry.action === "replace" ? "checked" : ""}> Replace</label>
+         </div>`
+      : "";
+
+    row.innerHTML = `
+      <label class="untap-include">
+        <input type="checkbox" class="untap-include-box" ${entry.include ? "checked" : ""} ${invalid ? "disabled" : ""}>
+      </label>
+      <div class="untap-thumb">
+        ${card.image
+          ? `<img src="${escapeAttr(card.image)}" alt="" loading="lazy" onerror="this.classList.add('untap-thumb-fail')">`
+          : `<span class="untap-thumb-none">No image</span>`}
+      </div>
+      <div class="untap-info">
+        <strong class="untap-name">${escapeHtml(card.name || "Unnamed Card")}</strong>
+        <span class="untap-set">${escapeHtml(setLabel)} · ${escapeHtml(card.cardNumber)}</span>
+        <div class="untap-chips">${chips}</div>
+        ${invalid ? `<span class="untap-invalid-note">Missing name or image — can't import</span>` : ""}
+        ${dupBadge}
+      </div>
+      <div class="untap-row-actions">
+        <label class="untap-col-select">Collection
+          <select class="untap-col">${collectionOptions}</select>
+        </label>
+        <button type="button" class="ghost untap-edit-btn">${entry.editing ? "Done" : "Edit"}</button>
+        <button type="button" class="ghost untap-del-btn" title="Remove from this import">✕</button>
+      </div>
+      <div class="untap-edit-panel" ${entry.editing ? "" : "hidden"}></div>
+    `;
+
+    row.querySelector(".untap-col").value = card.collection;
+    if (entry.editing) row.querySelector(".untap-edit-panel").innerHTML = untapEditFields(card);
+
+    list.appendChild(row);
+  });
+
+  updateUntapSelCount();
+}
+
+function untapEditFields(card) {
+  const field = (label, key, type = "text") =>
+    `<label>${label}<input data-edit="${key}" type="${type}" value="${escapeAttr(card[key] ?? "")}"></label>`;
+  return `
+    <div class="untap-edit-grid">
+      ${field("Name", "name")}
+      ${field("Card #", "cardNumber")}
+      <label>Type
+        <select data-edit="category">
+          ${["leader", "character", "event", "stage", "token"]
+            .map(cat => `<option value="${cat}" ${card.category === cat ? "selected" : ""}>${cat}</option>`).join("")}
+        </select>
+      </label>
+      ${field("Colors", "color")}
+      ${field(card.category === "leader" ? "Life" : "Cost", card.category === "leader" ? "life" : "cost", "number")}
+      ${field("Power", "power", "number")}
+      ${field("Counter", "counter", "number")}
+      ${field("Attribute", "attribute")}
+      ${field("Subtype", "subtype")}
+      ${field("Rarity", "rarity")}
+    </div>
+    <label class="untap-edit-effect">Effect<textarea data-edit="effect" rows="2">${escapeHtml(card.effect || "")}</textarea></label>
+  `;
+}
+
+function updateUntapSelCount() {
+  const selected = untapReview.entries.filter(e => e.include && !untapEntryInvalid(e)).length;
+  if (untapEl.untapSelCount) untapEl.untapSelCount.textContent = `${selected} selected`;
+}
+
+// One delegated handler for the whole review list (checkboxes, edits, buttons).
+function handleUntapReviewEvent(event) {
+  const row = event.target.closest(".untap-card");
+  if (!row) return;
+  const index = Number(row.dataset.index);
+  const entry = untapReview.entries[index];
+  if (!entry) return;
+
+  if (event.target.matches(".untap-include-box")) {
+    entry.include = event.target.checked;
+    row.classList.toggle("is-excluded", !entry.include);
+    updateUntapSelCount();
+  } else if (event.target.matches('input[type="radio"]')) {
+    entry.action = event.target.value;
+  } else if (event.target.matches(".untap-col")) {
+    entry.card.collection = normalizeCollectionSlug(event.target.value);
+  } else if (event.target.matches("[data-edit]")) {
+    applyUntapEdit(entry, event.target);
+  }
+}
+
+function applyUntapEdit(entry, input) {
+  const key = input.dataset.edit;
+  let value = input.value;
+  if (["cost", "life", "power", "counter"].includes(key)) {
+    value = value === "" ? "" : untapNumeric(value);
+  }
+  if (key === "category") {
+    entry.card.category = normalizeCategory(value);
+    entry.card.cardType = entry.card.category;
+    return;
+  }
+  entry.card[key] = value;
+}
+
+function handleUntapReviewClick(event) {
+  const row = event.target.closest(".untap-card");
+  if (!row) return;
+  const index = Number(row.dataset.index);
+  const entry = untapReview.entries[index];
+  if (!entry) return;
+
+  if (event.target.matches(".untap-edit-btn")) {
+    entry.editing = !entry.editing;
+    renderUntapReview();
+  } else if (event.target.matches(".untap-del-btn")) {
+    untapReview.entries.splice(index, 1);
+    renderUntapReview();
+  }
+}
+
+function setAllUntapIncluded(included) {
+  untapReview.entries.forEach(entry => {
+    entry.include = included && !untapEntryInvalid(entry);
+  });
+  renderUntapReview();
+}
+
+async function runUntapImport() {
+  const summary = { imported: 0, replaced: 0, skipped: 0, invalid: 0, failed: 0 };
+  const toImport = [];
+
+  untapReview.entries.forEach(entry => {
+    if (untapEntryInvalid(entry)) { summary.invalid++; return; }
+    if (!entry.include) { summary.skipped++; return; }
+    if (entry.dup && entry.action === "skip") { summary.skipped++; return; }
+    toImport.push(entry);
+  });
+
+  if (untapEl.untapDoImport) {
+    untapEl.untapDoImport.disabled = true;
+    untapEl.untapDoImport.textContent = "Importing…";
+  }
+
+  for (const entry of toImport) {
+    // Compress does nothing to remote URLs (only base64) but normalises shape.
+    const [card] = await compressImportedCardImages([entry.card]);
+    const ok = await publishSingleCard(card);
+    if (!ok) { summary.failed++; continue; }
+    if (entry.dup && entry.action === "replace") summary.replaced++;
+    else summary.imported++;
+  }
+
+  if (untapEl.untapDoImport) {
+    untapEl.untapDoImport.disabled = false;
+    untapEl.untapDoImport.textContent = "Import selected";
+  }
+
+  await loadCardPool();
+  showUntapSummary(summary);
+}
+
+function showUntapSummary(summary) {
+  const list = untapEl.untapSummaryList;
+  if (list) {
+    const rows = [
+      ["Imported", summary.imported],
+      ["Replaced", summary.replaced],
+      ["Skipped", summary.skipped],
+      ["Invalid", summary.invalid]
+    ];
+    if (summary.failed) rows.push(["Failed to save", summary.failed]);
+    list.innerHTML = rows
+      .map(([label, count]) => `<li><span>${label}</span><strong>${count}</strong></li>`)
+      .join("");
+  }
+  showUntapStep("summary");
+}
+
+function initUntapImporter() {
+  cacheUntapEls();
+  untapEl.openUntapImport?.addEventListener("click", openUntapImport);
+  untapEl.closeUntapImport?.addEventListener("click", () => untapEl.untapImportDialog?.close());
+  untapEl.untapSummaryDone?.addEventListener("click", () => untapEl.untapImportDialog?.close());
+  untapEl.untapFileInput?.addEventListener("change", event => handleUntapFile(event.target.files?.[0]));
+  untapEl.untapBackToPick?.addEventListener("click", () => showUntapStep("pick"));
+  untapEl.untapDoImport?.addEventListener("click", runUntapImport);
+  untapEl.untapSelectAll?.addEventListener("click", () => setAllUntapIncluded(true));
+  untapEl.untapSelectNone?.addEventListener("click", () => setAllUntapIncluded(false));
+  untapEl.untapBatchCollection?.addEventListener("change", () => {
+    const slug = normalizeCollectionSlug(untapEl.untapBatchCollection.value);
+    untapReview.entries.forEach(entry => { entry.card.collection = slug; });
+    renderUntapReview();
+  });
+  untapEl.untapReviewList?.addEventListener("input", handleUntapReviewEvent);
+  untapEl.untapReviewList?.addEventListener("change", handleUntapReviewEvent);
+  untapEl.untapReviewList?.addEventListener("click", handleUntapReviewClick);
+}
+
 loadSavedDeck();
 bindEvents();
 initializeCardCreation();
+populateCollectionSelects();
+initUntapImporter();
 loadCardPool();
 // Report shared-library connectivity in Settings without blocking startup.
 refreshLibraryStatus();
