@@ -54,8 +54,9 @@ class SettingsManager {
             soundEffects: true,
             audioEnabled: true,
 
-            // Show the extra stage-like board slots. On by default.
-            extraBoardSlots: true
+            // Show the extra stage-like board slots. Off by default - turn on in
+            // Settings > Display.
+            extraBoardSlots: false
         };
     }
 

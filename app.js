@@ -3471,17 +3471,11 @@ function filteredCards() {
       return false;
     }
 
-    // Leader-first browsing: with no leader picked the grid shows ONLY leaders,
-    // so the first decision is always "who am I building around". Once one is
-    // chosen it drops out of the way and the grid shows just that leader's
-    // colours. An explicit Type filter still overrides this, so you can go back
-    // and look at leaders again without clearing your deck.
-    if (!category) {
-      if (!leader) {
-        if (card.category !== "leader") return false;
-      } else if (card.category === "leader") {
-        return false;
-      }
+    // Opening a collection shows ALL of its cards - no "leaders only" gate. The
+    // only thing a chosen leader does is (a) hide the OTHER leaders so the grid
+    // isn't cluttered and (b) narrow the rest to that leader's colours (below).
+    if (!category && leader && card.category === "leader") {
+      return false;
     }
 
     return (!query || evaluateSearchQuery(query, card, state.searchMode))
@@ -3501,6 +3495,10 @@ function filteredCards() {
       && (!leader
         || card.category === "leader"
         || card.category === "token"
+        // Custom/imported cards frequently have no colour set - treat those as
+        // always visible rather than hiding them the moment a leader is picked.
+        || !card.colors.length
+        || card.colors.includes("colorless")
         || card.colors.some(cardColor => leaderColors.has(cardColor)));
   }).sort(compareCards);
 }

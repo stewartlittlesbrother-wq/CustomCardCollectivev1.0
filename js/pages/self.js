@@ -1766,12 +1766,13 @@ function applyCardAnimationClass(element, animationClass) {
 // localStorage 'gameSettings'). Right now this just controls whether the extra
 // stage-like slots are shown; on by default.
 function applyBoardDisplaySettings() {
-    let showExtraSlots = true;
+    // Off by default: the extra slots only show when the setting is explicitly on.
+    let showExtraSlots = false;
     try {
         const saved = JSON.parse(localStorage.getItem("gameSettings") || "{}");
-        if (saved && saved.extraBoardSlots === false) showExtraSlots = false;
+        if (saved && saved.extraBoardSlots === true) showExtraSlots = true;
     } catch {
-        // Corrupt settings JSON - fall back to showing the slots.
+        // Corrupt settings JSON - keep the slots hidden.
     }
     document.body.classList.toggle("extra-slots-off", !showExtraSlots);
 }
@@ -4430,6 +4431,11 @@ function renderPlayerHand(player, handElementId, hidden) {
                     btn.onmouseleave = () => btn.style.backgroundColor = "transparent";
                     btn.onclick = () => {
                         opt.action();
+                        // Push the change to the opponent - these hand actions
+                        // (send to top/bottom of deck, to life) moved a card and
+                        // changed this player's zone counts, but nothing was
+                        // syncing them, so the opponent never saw the update.
+                        window.scheduleOnlineBoardSync?.();
                         if (menu.parentNode) document.body.removeChild(menu);
                     };
                     menu.appendChild(btn);
@@ -5266,6 +5272,7 @@ function showTrashViewer(player) {
             window.renderTrash?.();
             removeTrashViewer();
             addGameLog(`Card moved to top of ${player.name}'s deck`);
+            window.scheduleOnlineBoardSync?.();
         };
         cardButtons.appendChild(topBtn);
 
@@ -5291,6 +5298,7 @@ function showTrashViewer(player) {
             window.renderTrash?.();
             removeTrashViewer();
             addGameLog(`Card moved to bottom of ${player.name}'s deck`);
+            window.scheduleOnlineBoardSync?.();
         };
         cardButtons.appendChild(bottomBtn);
 
