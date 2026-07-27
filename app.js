@@ -13,7 +13,9 @@ const CARD_FILES = [
 // groups are fixed; anything that doesn't fit lands in "everything-else". All
 // cards that predate this feature (bundled + previously-shared) default to
 // Goldrush717's Bleach - see COLLECTION_DEFAULT and normalizeCard.
-const CARD_COLLECTIONS = [
+// The shipped defaults. Users can add more (and override these) at runtime - see
+// loadCollections / saveCollection. The live list is CARD_COLLECTIONS below.
+const BUILTIN_COLLECTIONS = [
   { slug: "golds-bleach", name: "Goldrush717's Bleach", image: "images/basic/golds-bleach-set.jpg" },
   { slug: "strixs-set", name: "Strix's Set" },
   { slug: "gavilanterns-deltarune", name: "Gavilantern's Deltarune" },
@@ -25,6 +27,122 @@ const CARD_COLLECTIONS = [
   { slug: "everything-else", name: "Everything else" }
 ];
 const COLLECTION_DEFAULT = "golds-bleach";
+const CUSTOM_COLLECTIONS_KEY = "custom-card-collections-v1";
+
+// The LIVE collection list = built-ins + user-created ones (which may also
+// override a built-in's name/image). Rebuilt by applyCustomCollections. Kept as
+// a mutable array so every reader (picker, selects, normalize) sees new ones.
+let CARD_COLLECTIONS = [...BUILTIN_COLLECTIONS];
+
+// Merge a set of custom collections over the built-ins. Matching slugs override
+// name/image; new slugs are inserted just before "everything-else" so that stays
+// last. Called on load and after any add/edit.
+function applyCustomCollections(customList) {
+  const bySlug = new Map(BUILTIN_COLLECTIONS.map(entry => [entry.slug, { ...entry }]));
+  (customList || []).forEach(entry => {
+    const slug = String(entry.slug || "").trim();
+    if (!slug) return;
+    const existing = bySlug.get(slug) || { slug };
+    bySlug.set(slug, {
+      slug,
+      name: entry.name || existing.name || slug,
+      image: entry.image ?? existing.image ?? ""
+    });
+  });
+
+  const everythingElse = bySlug.get("everything-else");
+  bySlug.delete("everything-else");
+  CARD_COLLECTIONS = [...bySlug.values()];
+  if (everythingElse) CARD_COLLECTIONS.push(everythingElse);
+}
+
+// User-added collections stored in this browser (fallback / offline copy).
+function loadLocalCustomCollections() {
+  try {
+    const list = JSON.parse(localStorage.getItem(CUSTOM_COLLECTIONS_KEY) || "[]");
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalCustomCollections(list) {
+  try {
+    localStorage.setItem(CUSTOM_COLLECTIONS_KEY, JSON.stringify(list));
+  } catch (error) {
+    console.warn("Could not save collections locally:", error);
+  }
+}
+
+// Load custom collections from the shared library (with a local fallback) and
+// merge them into the live list. Safe to call before the card pool loads so a
+// card's collection slug resolves correctly.
+async function loadCollections() {
+  let shared = [];
+  try {
+    const library = await getCardLibrary();
+    if (library?.loadSharedCollections) {
+      shared = await library.loadSharedCollections();
+    }
+  } catch (error) {
+    console.warn("Shared collections unavailable:", error);
+  }
+
+  const local = loadLocalCustomCollections();
+  // Shared wins over local for the same slug; keep any purely-local ones too.
+  const merged = new Map(local.map(entry => [entry.slug, entry]));
+  shared.forEach(entry => merged.set(entry.slug, entry));
+
+  customCollections = [...merged.values()];
+  applyCustomCollections(customCollections);
+}
+
+// The user-created / user-edited collections currently in memory (upserted by
+// saveCollection). Persisted locally and to the shared library.
+let customCollections = [];
+
+// Create or update a collection (name + optional cover image), then refresh the
+// picker and the collection dropdowns. Writes to the shared library so everyone
+// gets it, with a local fallback when the library is unreachable.
+async function saveCollection({ slug, name, image }) {
+  const entry = {
+    slug: String(slug || "").trim(),
+    name: String(name || slug || "").trim(),
+    image: String(image || "")
+  };
+  if (!entry.slug) return;
+
+  const index = customCollections.findIndex(c => c.slug === entry.slug);
+  if (index === -1) customCollections.push(entry);
+  else customCollections[index] = entry;
+
+  applyCustomCollections(customCollections);
+  saveLocalCustomCollections(customCollections);
+
+  try {
+    const library = await getCardLibrary();
+    if (library?.saveSharedCollection) await library.saveSharedCollection(entry);
+  } catch (error) {
+    console.warn("Collection not saved to shared library:", error);
+    toast("Saved on this device only — shared library unreachable");
+  }
+
+  populateCollectionSelects();
+  renderCardGrid();
+}
+
+function collectionSlugFromName(name) {
+  const base = String(name || "").trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "collection";
+  let slug = base;
+  let n = 2;
+  while (CARD_COLLECTIONS.some(entry => entry.slug === slug)) {
+    slug = `${base}-${n++}`;
+  }
+  return slug;
+}
 
 function collectionName(slug) {
   return CARD_COLLECTIONS.find(entry => entry.slug === slug)?.name || "Everything else";
@@ -112,6 +230,7 @@ const el = {
   collectionPicker: document.querySelector("#collectionPicker"),
   collectionBack: document.querySelector("#collectionBack"),
   collectionClear: document.querySelector("#collectionClear"),
+  collectionEdit: document.querySelector("#collectionEdit"),
   collectionHeading: document.querySelector("#collectionHeading"),
   collectionCountPill: document.querySelector("#collectionCountPill"),
   searchInput: document.querySelector("#searchInput"),
@@ -533,7 +652,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-1")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -2885,6 +3004,79 @@ async function clearActiveCollection() {
     : `Cleared all cards from ${name}`);
 }
 
+// New / edit collection dialog. slug = null creates a new one; otherwise edits
+// the existing collection's name + cover image.
+function openCollectionEditor(slug = null) {
+  const existing = slug ? CARD_COLLECTIONS.find(entry => entry.slug === slug) : null;
+  document.getElementById("collectionEditorOverlay")?.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "collectionEditorOverlay";
+  overlay.className = "collection-editor-overlay";
+  overlay.innerHTML = `
+    <div class="collection-editor">
+      <h2>${existing ? "Edit collection" : "New collection"}</h2>
+      <label>Name
+        <input type="text" id="colEditName" maxlength="40" placeholder="e.g. My Custom Set" value="${escapeAttr(existing?.name || "")}">
+      </label>
+      <label>Cover image URL <small style="opacity:.6">(optional)</small>
+        <input type="url" id="colEditImageUrl" placeholder="https://…" value="${escapeAttr(existing?.image && !String(existing.image).startsWith("data:") ? existing.image : "")}">
+      </label>
+      <label>…or upload an image
+        <input type="file" id="colEditImageFile" accept="image/png,image/jpeg,image/webp">
+      </label>
+      <div class="collection-editor-preview" id="colEditPreview">${
+        existing?.image ? `<img src="${escapeAttr(existing.image)}" alt="">` : `<span>No image</span>`
+      }</div>
+      <div class="collection-editor-actions">
+        <button type="button" class="ghost" id="colEditCancel">Cancel</button>
+        <button type="button" class="red-button" id="colEditSave">${existing ? "Save changes" : "Create collection"}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  let uploadedDataUrl = "";
+  const preview = overlay.querySelector("#colEditPreview");
+  const urlInput = overlay.querySelector("#colEditImageUrl");
+  const fileInput = overlay.querySelector("#colEditImageFile");
+
+  const refreshPreview = (src) => {
+    preview.innerHTML = src ? `<img src="${escapeAttr(src)}" alt="">` : `<span>No image</span>`;
+  };
+
+  urlInput.addEventListener("input", () => { uploadedDataUrl = ""; refreshPreview(urlInput.value.trim()); });
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    try {
+      uploadedDataUrl = await compressImageDataUrl(await readFileAsDataUrl(file));
+      urlInput.value = "";
+      refreshPreview(uploadedDataUrl);
+    } catch (error) {
+      toast("Could not read that image");
+    }
+  });
+
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
+  overlay.querySelector("#colEditCancel").addEventListener("click", close);
+
+  overlay.querySelector("#colEditSave").addEventListener("click", async () => {
+    const name = overlay.querySelector("#colEditName").value.trim();
+    if (!name) { toast("Give the collection a name"); return; }
+    const image = uploadedDataUrl || urlInput.value.trim() || existing?.image || "";
+    const targetSlug = existing?.slug || collectionSlugFromName(name);
+    close();
+    await saveCollection({ slug: targetSlug, name, image });
+    toast(existing ? "Collection updated" : `Created "${name}"`);
+    // Jump straight into a brand-new collection so it's obvious it worked.
+    if (!existing) openCollection(targetSlug);
+  });
+
+  overlay.querySelector("#colEditName").focus();
+}
+
 function openCardForEditing(card) {
   if (!card?.imported) {
     toast("Only custom cards can be edited here");
@@ -3915,6 +4107,14 @@ function renderCollectionPicker() {
     tile.addEventListener("click", () => openCollection(entry.slug));
     el.collectionPicker.appendChild(tile);
   });
+
+  // "New collection" tile - anyone can add their own set.
+  const addTile = document.createElement("button");
+  addTile.type = "button";
+  addTile.className = "collection-tile collection-tile-add";
+  addTile.innerHTML = `<span class="collection-add-plus">+</span><span class="collection-tile-name">New collection</span>`;
+  addTile.addEventListener("click", () => openCollectionEditor(null));
+  el.collectionPicker.appendChild(addTile);
 }
 
 function openCollection(slug) {
@@ -3939,6 +4139,7 @@ function renderCardGrid() {
   if (el.cardGrid) el.cardGrid.style.display = browsing ? "" : "none";
   if (el.collectionBack) el.collectionBack.hidden = !browsing;
   if (el.collectionClear) el.collectionClear.hidden = !browsing;
+  if (el.collectionEdit) el.collectionEdit.hidden = !browsing;
   if (el.collectionCountPill) el.collectionCountPill.hidden = !browsing;
   if (el.collectionHeading) {
     el.collectionHeading.textContent = browsing
@@ -4853,6 +5054,7 @@ function bindEvents() {
   el.closeDeckShare?.addEventListener("click", closeDeckSharePanels);
   el.collectionBack?.addEventListener("click", closeCollection);
   el.collectionClear?.addEventListener("click", clearActiveCollection);
+  el.collectionEdit?.addEventListener("click", () => openCollectionEditor(state.activeCollection));
   el.resetFilters.addEventListener("click", () => {
     el.searchInput.value = "";
     el.filterQuick.value = "";
@@ -5483,7 +5685,12 @@ bindEvents();
 initializeCardCreation();
 populateCollectionSelects();
 initUntapImporter();
-loadCardPool();
+// Load custom collections first so a card's collection slug resolves against the
+// full list, then the pool. Falls straight through to loadCardPool if it fails.
+loadCollections()
+  .then(() => { populateCollectionSelects(); })
+  .catch(() => {})
+  .finally(() => { loadCardPool(); });
 // Report shared-library connectivity in Settings without blocking startup.
 refreshLibraryStatus();
 refreshRestoreHint();

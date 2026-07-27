@@ -309,6 +309,51 @@ export async function deleteSharedCard(cardNumber) {
     return { tombstoned: true };
 }
 
+// ── Shared collections ───────────────────────────────────
+// User-created card collections (name + optional cover image), shared with every
+// player through the same database. Small records, so we just fetch them all on
+// load - no index/cache dance like the heavy card bodies need.
+const COLLECTIONS_PATH = "collections";
+
+export async function loadSharedCollections() {
+    try {
+        const snap = await get(ref(database, COLLECTIONS_PATH));
+        const val = snap.val() || {};
+        return Object.entries(val)
+            .filter(([, entry]) => entry && !entry.deleted)
+            .map(([slug, entry]) => ({
+                slug,
+                name: entry.name || slug,
+                image: entry.image || ""
+            }));
+    } catch (error) {
+        console.warn("Shared collections not loaded:", error);
+        return [];
+    }
+}
+
+export async function saveSharedCollection(collection) {
+    await waitForUser();
+    const slug = String(collection?.slug || "").trim();
+    if (!slug) throw new Error("A collection needs a slug.");
+
+    await update(ref(database), {
+        [`${COLLECTIONS_PATH}/${slug}`]: {
+            name: String(collection.name || slug),
+            image: String(collection.image || ""),
+            updatedAt: serverTimestamp()
+        }
+    });
+    return { slug, name: collection.name || slug, image: collection.image || "" };
+}
+
+export async function deleteSharedCollection(slug) {
+    await waitForUser();
+    const key = String(slug || "").trim();
+    if (!key) return;
+    await remove(ref(database, `${COLLECTIONS_PATH}/${key}`));
+}
+
 // Used by the "clear editable cards" action.
 export async function clearSharedCards() {
     await waitForUser();

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Custom Cards Simulator</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=creation-12">
+  <link rel="stylesheet" href="styles.css?v=creation-14">
 </head>
 <body>
   <div class="app-shell">
@@ -208,14 +208,15 @@
             <section class="collection-panel">
               <div class="collection-top">
                 <div class="collection-lead">
+                  <button type="button" class="collection-clear" id="collectionClear" hidden>Clear Collection</button>
                   <button type="button" class="ghost collection-back" id="collectionBack" hidden>← Collections</button>
-                  <button type="button" class="red-button collection-clear" id="collectionClear" hidden>Clear Collection</button>
                 </div>
                 <h2 id="collectionHeading">Collections</h2>
                 <div class="collection-actions">
                   <!-- Says WHY the grid is filtered (leader-first browsing),
                        so a small count never looks like missing cards. -->
                   <span class="collection-hint" id="collectionHint"></span>
+                  <button type="button" class="ghost collection-edit" id="collectionEdit" hidden>Edit Collection</button>
                   <span class="count-pill" id="collectionCountPill"><span id="filteredCount">0</span> shown</span>
                 </div>
               </div>
@@ -672,7 +673,7 @@
   <script src="js/rotate-prompt.js"></script>
   <script src="js/cards/decks.js?v=creation-8"></script>
   <script src="js/manual-play.js?v=manual-3"></script>
-  <script src="app.js?v=creation-23"></script>
+  <script src="app.js?v=creation-24"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).

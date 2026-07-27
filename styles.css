@@ -5366,10 +5366,31 @@ button.trash-area {
   display: flex;
   align-items: center;
   min-width: 0;
+  /* Big gap so the destructive Clear button (far left) is nowhere near the
+     Back button you actually click. */
+  gap: 40px;
 }
 
 .collection-back {
   white-space: nowrap;
+}
+
+/* Clear Collection: deliberately bright red and set apart from Back so it's
+   hard to hit by accident. */
+.collection-clear {
+  white-space: nowrap;
+  background: #ff1717;
+  border: 1px solid #ff1717;
+  color: #fff;
+  font-weight: 800;
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.collection-clear:hover {
+  background: #ff3b3b;
+  border-color: #ff3b3b;
 }
 
 .collection-picker {
@@ -5606,3 +5627,75 @@ button.trash-area {
   background: rgba(255, 255, 255, .05);
 }
 .untap-summary-list strong { font-size: 1.1rem; }
+
+/* ── Collection editor + add tile ──────────────────────── */
+.collection-tile-add {
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-style: dashed;
+  opacity: .85;
+}
+.collection-tile-add:hover { opacity: 1; }
+.collection-add-plus {
+  font-size: 1.8rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.collection-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483200;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, .6);
+  padding: 16px;
+}
+
+.collection-editor {
+  width: min(440px, 96vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border-radius: 14px;
+  background: #171a21;
+  color: #f2f4f8;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .6);
+}
+.collection-editor h2 { margin: 0 0 4px; font-size: 1.1rem; }
+.collection-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: .82rem;
+  font-weight: 700;
+}
+.collection-editor input[type="text"],
+.collection-editor input[type="url"],
+.collection-editor input[type="file"] {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, .18);
+  background: rgba(0, 0, 0, .28);
+  color: inherit;
+  font-weight: 500;
+}
+.collection-editor-preview {
+  min-height: 120px;
+  border-radius: 10px;
+  border: 1px dashed rgba(255, 255, 255, .2);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: rgba(0, 0, 0, .25);
+}
+.collection-editor-preview img { width: 100%; height: 180px; object-fit: cover; }
+.collection-editor-preview span { opacity: .5; font-size: .85rem; }
+.collection-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
