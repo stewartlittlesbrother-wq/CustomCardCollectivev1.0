@@ -21,6 +21,7 @@ const CARD_COLLECTIONS = [
   { slug: "pigs-jjk", name: "Pig's JJk" },
   { slug: "ravens-jjk", name: "Raven's JJk" },
   { slug: "malices-cards", name: "Malice's cards" },
+  { slug: "midevilgmers-cards", name: "Midevilgmer's Cards" },
   { slug: "everything-else", name: "Everything else" }
 ];
 const COLLECTION_DEFAULT = "golds-bleach";
@@ -110,6 +111,7 @@ const el = {
   collectionHint: document.querySelector("#collectionHint"),
   collectionPicker: document.querySelector("#collectionPicker"),
   collectionBack: document.querySelector("#collectionBack"),
+  collectionClear: document.querySelector("#collectionClear"),
   collectionHeading: document.querySelector("#collectionHeading"),
   collectionCountPill: document.querySelector("#collectionCountPill"),
   searchInput: document.querySelector("#searchInput"),
@@ -2835,6 +2837,54 @@ async function deleteImportedCard(cardId) {
   toast(`${card.name} deleted`);
 }
 
+// Delete EVERY card in the currently-open collection from the shared library.
+// Guarded by a confirm because it affects all players and can't be undone.
+async function clearActiveCollection() {
+  const slug = state.activeCollection;
+  if (!slug) return;
+
+  const name = collectionName(slug);
+  const cards = state.cards.filter(card => (card.collection || COLLECTION_DEFAULT) === slug);
+
+  if (!cards.length) {
+    toast(`${name} is already empty`);
+    return;
+  }
+
+  if (!window.confirm(
+    `Are you sure you want to delete ALL ${cards.length} cards in "${name}"?\n\n` +
+    `This removes them from the shared library for everyone and can't be undone.`
+  )) return;
+
+  const library = await getCardLibrary();
+  let failed = 0;
+
+  if (library) {
+    for (const card of cards) {
+      try {
+        await library.deleteSharedCard(card.cardNumber || card.id);
+      } catch (error) {
+        console.error("Failed to delete", card.cardNumber, error);
+        failed++;
+      }
+      delete state.deck[card.id];
+      if (state.leaderId === card.id) state.leaderId = "";
+    }
+  } else {
+    // Offline / static-only fallback: drop them from the local project store.
+    const remaining = (await loadProjectCards())
+      .filter(existing => (existing.collection || COLLECTION_DEFAULT) !== slug);
+    await saveProjectCardsLocally(remaining);
+  }
+
+  saveDeck(false);
+  await loadCardPool();
+  closeCollection();
+  toast(failed
+    ? `Cleared ${name}, but ${failed} card${failed === 1 ? "" : "s"} may return (publish database.rules.json)`
+    : `Cleared all cards from ${name}`);
+}
+
 function openCardForEditing(card) {
   if (!card?.imported) {
     toast("Only custom cards can be edited here");
@@ -3463,6 +3513,14 @@ function filteredCards() {
   const leader = getCard(state.leaderId);
   const leaderColors = new Set(leader?.colors || []);
 
+  // Does the open collection contain any leaders? Leader-first browsing only
+  // makes sense when it does - a set with no leaders must still show its cards.
+  const collectionHasLeader = state.activeCollection
+    ? state.cards.some(card =>
+        (card.collection || COLLECTION_DEFAULT) === state.activeCollection &&
+        card.category === "leader")
+    : false;
+
   return state.cards.filter(card => {
     // Collections gate everything: the grid only ever shows the collection the
     // user opened from the picker. With no collection chosen nothing shows (the
@@ -3471,11 +3529,16 @@ function filteredCards() {
       return false;
     }
 
-    // Opening a collection shows ALL of its cards - no "leaders only" gate. The
-    // only thing a chosen leader does is (a) hide the OTHER leaders so the grid
-    // isn't cluttered and (b) narrow the rest to that leader's colours (below).
-    if (!category && leader && card.category === "leader") {
-      return false;
+    // Leader-first browsing: with no leader picked the grid shows ONLY leaders,
+    // so you choose who to build around first; once a leader is chosen it drops
+    // out and the grid shows just that leader's colours. Skipped for collections
+    // that have no leaders (otherwise they'd look empty).
+    if (!category && collectionHasLeader) {
+      if (!leader) {
+        if (card.category !== "leader") return false;
+      } else if (card.category === "leader") {
+        return false;
+      }
     }
 
     return (!query || evaluateSearchQuery(query, card, state.searchMode))
@@ -3489,16 +3552,10 @@ function filteredCards() {
       && (!el.blockFilter.value || card.block === el.blockFilter.value)
       && (!state.rotationOnly || !/^test/i.test(card.cardNumber))
       // Once a leader is picked the grid is restricted to its colours, so what
-      // you see is what you can actually play. Leaders and tokens are exempt -
-      // tokens aren't deck cards, and leaders only appear here via the Type
-      // filter, where hiding off-colour ones would stop you switching leader.
+      // you see is what you can actually play. Leaders and tokens are exempt.
       && (!leader
         || card.category === "leader"
         || card.category === "token"
-        // Custom/imported cards frequently have no colour set - treat those as
-        // always visible rather than hiding them the moment a leader is picked.
-        || !card.colors.length
-        || card.colors.includes("colorless")
         || card.colors.some(cardColor => leaderColors.has(cardColor)));
   }).sort(compareCards);
 }
@@ -3842,8 +3899,15 @@ function renderCollectionPicker() {
   CARD_COLLECTIONS.forEach(entry => {
     const tile = document.createElement("button");
     tile.type = "button";
-    tile.className = "collection-tile";
+    tile.className = "collection-tile" + (entry.image ? " has-art" : "");
     tile.dataset.collection = entry.slug;
+    // Optional cover art per collection - set `image` on the CARD_COLLECTIONS
+    // entry (a path under images/). Rendered behind a dark scrim so the name and
+    // count stay readable.
+    if (entry.image) {
+      tile.style.backgroundImage =
+        `linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.75)), url("${escapeAttr(entry.image)}")`;
+    }
     tile.innerHTML = `
       <span class="collection-tile-name">${escapeHtml(entry.name)}</span>
       <span class="collection-tile-count">${counts[entry.slug] || 0} cards</span>
@@ -3866,11 +3930,15 @@ function closeCollection() {
 function renderCardGrid() {
   clearTimeout(state.searchRenderTimer);
 
-  // No collection open: show the picker in place of the card grid.
+  // No collection open: show the picker in place of the card grid. Toggle with
+  // inline display (not the [hidden] attribute) - the .collection-picker /
+  // .card-grid CSS sets `display`, which overrides [hidden], so relying on the
+  // attribute left both panels stuck until a full page reload.
   const browsing = Boolean(state.activeCollection);
-  if (el.collectionPicker) el.collectionPicker.hidden = browsing;
-  if (el.cardGrid) el.cardGrid.hidden = !browsing;
+  if (el.collectionPicker) el.collectionPicker.style.display = browsing ? "none" : "grid";
+  if (el.cardGrid) el.cardGrid.style.display = browsing ? "" : "none";
   if (el.collectionBack) el.collectionBack.hidden = !browsing;
+  if (el.collectionClear) el.collectionClear.hidden = !browsing;
   if (el.collectionCountPill) el.collectionCountPill.hidden = !browsing;
   if (el.collectionHeading) {
     el.collectionHeading.textContent = browsing
@@ -4712,19 +4780,26 @@ function bindEvents() {
   // Hovering a card in the collection shows a large preview on the left,
   // so you don't have to click Inspect to read it. Delegated so it covers
   // every tile without per-card listeners.
-  const showHoverPreview = (article) => {
+  const showHoverPreview = (article, pointerX) => {
     if (!el.builderHoverPreview || !article) return;
     const card = getCard(article.dataset.id);
     if (!card?.imageUrl) { hideHoverPreview(); return; }
     el.builderHoverPreviewImg.src = card.imageUrl;
     el.builderHoverPreviewImg.alt = card.name || "";
+    // Show the big preview on the side AWAY from the card you're hovering, so it
+    // never sits on top of that card's Edit / + buttons. Left-side cards -> preview
+    // on the right; right-side cards -> preview on the left.
+    const cardX = pointerX ?? article.getBoundingClientRect().left;
+    const onLeftHalf = cardX < window.innerWidth / 2;
+    el.builderHoverPreview.style.left = onLeftHalf ? "auto" : "16px";
+    el.builderHoverPreview.style.right = onLeftHalf ? "16px" : "auto";
     el.builderHoverPreview.hidden = false;
   };
   function hideHoverPreview() {
     if (el.builderHoverPreview) el.builderHoverPreview.hidden = true;
   }
   el.cardGrid.addEventListener("mouseover", event => {
-    showHoverPreview(event.target.closest(".card-tile"));
+    showHoverPreview(event.target.closest(".card-tile"), event.clientX);
   });
   el.cardGrid.addEventListener("mouseleave", hideHoverPreview);
   // Hide it when the deck grid (deck list) is hovered too, and on view change.
@@ -4777,6 +4852,7 @@ function bindEvents() {
   });
   el.closeDeckShare?.addEventListener("click", closeDeckSharePanels);
   el.collectionBack?.addEventListener("click", closeCollection);
+  el.collectionClear?.addEventListener("click", clearActiveCollection);
   el.resetFilters.addEventListener("click", () => {
     el.searchInput.value = "";
     el.filterQuick.value = "";

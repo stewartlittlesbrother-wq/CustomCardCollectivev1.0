@@ -4104,12 +4104,16 @@ body {
     justify-content: center;
     gap: 14px;
     padding: 6px 4px;
-    width: calc(var(--zone-card-w) + 20px);
+    /* Wide enough to fit the two extra slots side by side without cutting them
+       off, while still leaving the single piles centred. */
+    width: calc(var(--zone-card-w) * 1.65 + 22px);
     z-index: 4;
     /* Never let the column grow past the viewport and shove a pile out of sight -
-       if it somehow gets too tall it scrolls internally instead. */
+       if it somehow gets too tall it scrolls internally instead. Horizontal is
+       hidden so a slot can never spill out into a sideways scrollbar. */
     max-height: 96vh;
     overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .extra-zones-group {

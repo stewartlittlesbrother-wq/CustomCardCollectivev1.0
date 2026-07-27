@@ -5399,7 +5399,7 @@ function setupDeckViewerInspect() {
             el.id = "deckViewerInspect";
             el.alt = "";
             el.style.cssText = [
-                "position:fixed", "top:50%", "left:24px", "transform:translateY(-50%)",
+                "position:fixed", "top:50%", "transform:translateY(-50%)",
                 "height:min(78vh,760px)", "width:auto", "border-radius:14px",
                 "box-shadow:0 20px 60px rgba(0,0,0,.7)", "z-index:2147483000",
                 "pointer-events:none", "display:none"
@@ -5409,18 +5409,36 @@ function setupDeckViewerInspect() {
         return el;
     };
 
+    // Find the card image the pointer is over inside any viewer overlay (deck /
+    // peek / trash / pile viewer). Those viewers all live inside .look-top-overlay
+    // and render each card as an <img> in a frame (a draggable div, a
+    // .look-top-card-button, or a .trash-viewer-card).
+    const viewerImageFor = (target) => {
+        if (!target.closest?.(".look-top-overlay")) return null;
+        if (target.tagName === "IMG") return target;
+        const frame = target.closest(
+            "div[draggable='true'], .look-top-card-button, .trash-viewer-card, .bottom-order-card-button"
+        );
+        return frame?.querySelector?.("img") || null;
+    };
+
     document.addEventListener("mouseover", (event) => {
-        const img = event.target.closest?.(".look-top-card-img, .trash-viewer-card img");
+        const img = viewerImageFor(event.target);
         if (!img) return;
         const src = img.currentSrc || img.src;
         if (!src) return;
         const preview = getPreview();
         preview.src = src;
+        // Show it on the side away from the pointer so it never sits under the
+        // cursor or hides the card being inspected.
+        const onLeftHalf = event.clientX < window.innerWidth / 2;
+        preview.style.left = onLeftHalf ? "auto" : "24px";
+        preview.style.right = onLeftHalf ? "24px" : "auto";
         preview.style.display = "block";
     });
 
     document.addEventListener("mouseout", (event) => {
-        if (!event.target.closest?.(".look-top-card-img, .trash-viewer-card img")) return;
+        if (!viewerImageFor(event.target)) return;
         const preview = document.getElementById("deckViewerInspect");
         if (preview) preview.style.display = "none";
     });
@@ -6095,13 +6113,17 @@ function setupBoardContextMenus() {
                 btn.onmouseleave = () => btn.style.backgroundColor = "transparent";
                 btn.onclick = () => {
                     opt.action();
+                    // These field actions (to deck / trash) move a card between
+                    // zones, so push the new state to the opponent - previously
+                    // only the acting player saw the change.
+                    window.scheduleOnlineBoardSync?.();
                     document.body.removeChild(menu);
                 };
                 menu.appendChild(btn);
             });
-            
+
             document.body.appendChild(menu);
-            
+
             // Close menu when clicking elsewhere
             const closeMenu = () => {
                 if (menu.parentNode) document.body.removeChild(menu);
