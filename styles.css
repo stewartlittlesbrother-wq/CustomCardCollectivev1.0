@@ -5699,3 +5699,54 @@ button.trash-area {
   gap: 10px;
   margin-top: 4px;
 }
+
+/* ── Card loading state ────────────────────────────────── */
+.collection-loading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 220px;
+  font-size: 1rem;
+  font-weight: 700;
+  opacity: .8;
+}
+.collection-loading-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, .2);
+  border-top-color: var(--accent, #e23b4e);
+  animation: collectionSpin .8s linear infinite;
+}
+@keyframes collectionSpin { to { transform: rotate(360deg); } }
+
+/* Collection management buttons (Settings) */
+.collection-manage-unlock {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.collection-manage-unlock input {
+  width: 100px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  background: rgba(0, 0, 0, .25);
+  color: inherit;
+}
+.collection-manage-buttons {
+  gap: 10px;
+}
+.collection-manage-buttons .red-button {
+  background: #ff1717;
+  border-color: #ff1717;
+  color: #fff;
+}
+.collection-manage-buttons .red-button:hover { background: #ff3b3b; }
+#collectionManageSelect {
+  padding: 7px 10px;
+  border-radius: 8px;
+  min-width: 180px;
+}

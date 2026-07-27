@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Custom Cards Simulator</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=creation-14">
+  <link rel="stylesheet" href="styles.css?v=creation-15">
 </head>
 <body>
   <div class="app-shell">
@@ -113,6 +113,39 @@
             </label>
           </section>
 
+          <section class="settings-group" aria-label="Collection management">
+            <h2>Manage Collections</h2>
+            <p class="settings-group-note">
+              Clear a collection's cards or remove a collection entirely. Locked
+              behind a code because it deletes cards for everyone.
+            </p>
+
+            <div class="settings-row" id="collectionManageLocked">
+              <span class="label-text">
+                <strong>Enter code to unlock</strong>
+                <small>Ask an admin for the collection-management code.</small>
+              </span>
+              <div class="collection-manage-unlock">
+                <input type="password" id="collectionManageCode" inputmode="numeric" placeholder="Code" maxlength="8">
+                <button type="button" class="red-button" id="collectionManageUnlock">Unlock</button>
+              </div>
+            </div>
+
+            <div id="collectionManagePanel" hidden>
+              <div class="settings-row">
+                <span class="label-text">
+                  <strong>Collection</strong>
+                  <small>Pick which collection to manage.</small>
+                </span>
+                <select id="collectionManageSelect"></select>
+              </div>
+              <div class="settings-row settings-row-actions collection-manage-buttons">
+                <button type="button" class="red-button" id="collectionClearContents">Clear Contents</button>
+                <button type="button" class="red-button" id="collectionRemove">Remove Collection</button>
+              </div>
+            </div>
+          </section>
+
           <section class="settings-group" aria-label="Card importer settings">
             <h2>Card Importer</h2>
             <p class="settings-group-note">
@@ -208,7 +241,6 @@
             <section class="collection-panel">
               <div class="collection-top">
                 <div class="collection-lead">
-                  <button type="button" class="collection-clear" id="collectionClear" hidden>Clear Collection</button>
                   <button type="button" class="ghost collection-back" id="collectionBack" hidden>← Collections</button>
                 </div>
                 <h2 id="collectionHeading">Collections</h2>
@@ -673,7 +705,7 @@
   <script src="js/rotate-prompt.js"></script>
   <script src="js/cards/decks.js?v=creation-8"></script>
   <script src="js/manual-play.js?v=manual-3"></script>
-  <script src="app.js?v=creation-24"></script>
+  <script src="app.js?v=creation-25"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).

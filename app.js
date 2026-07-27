@@ -172,6 +172,9 @@ function initialView() {
 
 const state = {
   cards: [],
+  // True until the first card-pool load finishes, so the collection screen can
+  // show a "Loading…" message instead of an empty grid / "0 cards".
+  cardsLoading: true,
   leaderId: "",
   deck: {},
   // Token types this deck makes available in game. Deliberately a separate list
@@ -229,7 +232,6 @@ const el = {
   collectionHint: document.querySelector("#collectionHint"),
   collectionPicker: document.querySelector("#collectionPicker"),
   collectionBack: document.querySelector("#collectionBack"),
-  collectionClear: document.querySelector("#collectionClear"),
   collectionEdit: document.querySelector("#collectionEdit"),
   collectionHeading: document.querySelector("#collectionHeading"),
   collectionCountPill: document.querySelector("#collectionCountPill"),
@@ -560,10 +562,13 @@ async function loadCardPool() {
       ...pooledCards,
       ...legacyCards
     ]).sort((a, b) => a.cardNumber.localeCompare(b.cardNumber));
+    state.cardsLoading = false;
     populateFilterOptions();
     renderAll();
     updateImportStatus();
   } catch (error) {
+    state.cardsLoading = false;
+    el.cardGrid.style.display = "";
     el.cardGrid.innerHTML = `<div class="empty">Card data could not be loaded. Run this through the included local server, then refresh.</div>`;
     if (el.phaseLog) el.phaseLog.textContent = error.message;
     setGameLog(error.message);
@@ -2956,24 +2961,24 @@ async function deleteImportedCard(cardId) {
   toast(`${card.name} deleted`);
 }
 
-// Delete EVERY card in the currently-open collection from the shared library.
-// Guarded by a confirm because it affects all players and can't be undone.
-async function clearActiveCollection() {
-  const slug = state.activeCollection;
-  if (!slug) return;
+// Delete EVERY card in a collection from the shared library. Guarded by a
+// confirm because it affects all players and can't be undone. Used by the
+// code-locked collection tools in Settings.
+async function clearCollectionCards(slug) {
+  if (!slug) return true;
 
   const name = collectionName(slug);
   const cards = state.cards.filter(card => (card.collection || COLLECTION_DEFAULT) === slug);
 
   if (!cards.length) {
     toast(`${name} is already empty`);
-    return;
+    return true;
   }
 
   if (!window.confirm(
     `Are you sure you want to delete ALL ${cards.length} cards in "${name}"?\n\n` +
     `This removes them from the shared library for everyone and can't be undone.`
-  )) return;
+  )) return false;
 
   const library = await getCardLibrary();
   let failed = 0;
@@ -2998,10 +3003,89 @@ async function clearActiveCollection() {
 
   saveDeck(false);
   await loadCardPool();
-  closeCollection();
   toast(failed
     ? `Cleared ${name}, but ${failed} card${failed === 1 ? "" : "s"} may return (publish database.rules.json)`
     : `Cleared all cards from ${name}`);
+  return true;
+}
+
+// Remove a collection entirely: clear its cards, then delete the collection
+// entry itself. Built-in collections can't be deleted (they're shipped in code)
+// so they just end up empty.
+async function removeCollectionEntirely(slug) {
+  if (!slug) return;
+  const name = collectionName(slug);
+  const isBuiltIn = BUILTIN_COLLECTIONS.some(entry => entry.slug === slug);
+
+  if (!window.confirm(
+    `Remove the collection "${name}"?\n\n` +
+    `This deletes all of its cards AND the collection itself for everyone.` +
+    (isBuiltIn ? `\n\n(This is a built-in set, so its tile stays but will be empty.)` : ``)
+  )) return;
+
+  // clearCollectionCards has its own confirm; skip a double prompt by clearing
+  // directly here.
+  const cards = state.cards.filter(card => (card.collection || COLLECTION_DEFAULT) === slug);
+  const library = await getCardLibrary();
+  if (library) {
+    for (const card of cards) {
+      try { await library.deleteSharedCard(card.cardNumber || card.id); } catch {}
+      delete state.deck[card.id];
+    }
+    try { if (library.deleteSharedCollection) await library.deleteSharedCollection(slug); } catch {}
+  }
+
+  // Drop it from the in-memory + local custom list (built-ins persist in code).
+  customCollections = customCollections.filter(entry => entry.slug !== slug);
+  saveLocalCustomCollections(customCollections);
+  applyCustomCollections(customCollections);
+
+  saveDeck(false);
+  await loadCardPool();
+  populateCollectionSelects();
+  populateCollectionManageSelect();
+  toast(isBuiltIn ? `Emptied ${name}` : `Removed ${name}`);
+}
+
+// ── Code-locked collection management (Settings) ─────────
+const COLLECTION_MANAGE_CODE = "5433";
+
+function populateCollectionManageSelect() {
+  const select = document.getElementById("collectionManageSelect");
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = CARD_COLLECTIONS
+    .map(entry => `<option value="${entry.slug}">${escapeHtml(entry.name)}</option>`)
+    .join("");
+  if (previous && CARD_COLLECTIONS.some(entry => entry.slug === previous)) {
+    select.value = previous;
+  }
+}
+
+function setupCollectionManagement() {
+  const codeInput = document.getElementById("collectionManageCode");
+  const unlockBtn = document.getElementById("collectionManageUnlock");
+  const lockedRow = document.getElementById("collectionManageLocked");
+  const panel = document.getElementById("collectionManagePanel");
+  const select = document.getElementById("collectionManageSelect");
+  const clearBtn = document.getElementById("collectionClearContents");
+  const removeBtn = document.getElementById("collectionRemove");
+  if (!unlockBtn || !panel) return;
+
+  const unlock = () => {
+    if (String(codeInput?.value || "").trim() !== COLLECTION_MANAGE_CODE) {
+      toast("Wrong code");
+      return;
+    }
+    if (lockedRow) lockedRow.hidden = true;
+    panel.hidden = false;
+    populateCollectionManageSelect();
+  };
+  unlockBtn.addEventListener("click", unlock);
+  codeInput?.addEventListener("keydown", event => { if (event.key === "Enter") unlock(); });
+
+  clearBtn?.addEventListener("click", () => clearCollectionCards(select?.value));
+  removeBtn?.addEventListener("click", () => removeCollectionEntirely(select?.value));
 }
 
 // New / edit collection dialog. slug = null creates a new one; otherwise edits
@@ -4130,6 +4214,21 @@ function closeCollection() {
 function renderCardGrid() {
   clearTimeout(state.searchRenderTimer);
 
+  // Still fetching the shared library: show a friendly loading state instead of
+  // an empty grid and "0 cards".
+  if (state.cardsLoading) {
+    if (el.collectionBack) el.collectionBack.hidden = true;
+    if (el.collectionEdit) el.collectionEdit.hidden = true;
+    if (el.collectionCountPill) el.collectionCountPill.hidden = true;
+    if (el.collectionHeading) el.collectionHeading.textContent = "Collections";
+    if (el.cardGrid) el.cardGrid.style.display = "none";
+    if (el.collectionPicker) {
+      el.collectionPicker.style.display = "grid";
+      el.collectionPicker.innerHTML = `<div class="collection-loading"><span class="collection-loading-spinner"></span>Loading cards…</div>`;
+    }
+    return;
+  }
+
   // No collection open: show the picker in place of the card grid. Toggle with
   // inline display (not the [hidden] attribute) - the .collection-picker /
   // .card-grid CSS sets `display`, which overrides [hidden], so relying on the
@@ -4138,7 +4237,6 @@ function renderCardGrid() {
   if (el.collectionPicker) el.collectionPicker.style.display = browsing ? "none" : "grid";
   if (el.cardGrid) el.cardGrid.style.display = browsing ? "" : "none";
   if (el.collectionBack) el.collectionBack.hidden = !browsing;
-  if (el.collectionClear) el.collectionClear.hidden = !browsing;
   if (el.collectionEdit) el.collectionEdit.hidden = !browsing;
   if (el.collectionCountPill) el.collectionCountPill.hidden = !browsing;
   if (el.collectionHeading) {
@@ -5053,8 +5151,8 @@ function bindEvents() {
   });
   el.closeDeckShare?.addEventListener("click", closeDeckSharePanels);
   el.collectionBack?.addEventListener("click", closeCollection);
-  el.collectionClear?.addEventListener("click", clearActiveCollection);
   el.collectionEdit?.addEventListener("click", () => openCollectionEditor(state.activeCollection));
+  setupCollectionManagement();
   el.resetFilters.addEventListener("click", () => {
     el.searchInput.value = "";
     el.filterQuick.value = "";
@@ -5685,6 +5783,10 @@ bindEvents();
 initializeCardCreation();
 populateCollectionSelects();
 initUntapImporter();
+// Paint the current view + the "Loading cards…" state right away so the builder
+// never shows an empty "0 cards" grid while the shared library downloads.
+showView(state.activeView);
+renderCardGrid();
 // Load custom collections first so a card's collection slug resolves against the
 // full list, then the pool. Falls straight through to loadCardPool if it fails.
 loadCollections()
