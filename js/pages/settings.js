@@ -50,9 +50,12 @@ class SettingsManager {
             confirmEndTurn: true,
             confirmCounter: true,
             confirmTrigger: true,
-    
+
             soundEffects: true,
-            audioEnabled: true
+            audioEnabled: true,
+
+            // Show the extra stage-like board slots. On by default.
+            extraBoardSlots: true
         };
     }
 

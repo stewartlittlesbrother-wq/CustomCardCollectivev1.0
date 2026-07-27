@@ -137,7 +137,7 @@ const manualPlay = {
         
         // Helper to highlight all zones
         const highlightAllZones = () => {
-            document.querySelectorAll(".character-area, .stage-area, .trash-area, .hand, .life-area, .deck-area, .extra-faceup-area, .extra-facedown-area").forEach(zone => {
+            document.querySelectorAll(".character-area, .stage-area, .trash-area, .hand, .life-area, .deck-area, .extra-faceup-area, .extra-facedown-area, .extra-slot-area").forEach(zone => {
                 zone.classList.add(highlightClass);
                 zone.style.background = "#4a90e2";
                 zone.style.border = "3px solid #2563eb";
@@ -609,7 +609,7 @@ const manualPlay = {
         // dragover - allow zones for regular cards and show top/bottom split for piles
         document.addEventListener("dragover", (e) => {
             if (!e.target || typeof e.target.closest !== "function") return;
-            const zone = e.target.closest(".character-area, .stage-area, .trash-area, .hand, .don-area, .life-area, .deck-area, .extra-faceup-area, .extra-facedown-area");
+            const zone = e.target.closest(".character-area, .stage-area, .trash-area, .hand, .don-area, .life-area, .deck-area, .extra-faceup-area, .extra-facedown-area, .extra-slot-area");
             if (zone) {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "move";
@@ -629,13 +629,23 @@ const manualPlay = {
         // Which extra pile (if any) a drop landed on.
         const getExtraDropTarget = (e) => {
             if (!e.target || typeof e.target.closest !== "function") return null;
-            const el = e.target.closest(".extra-faceup-area, .extra-facedown-area");
+            const el = e.target.closest(".extra-faceup-area, .extra-facedown-area, .extra-slot-area");
             if (!el) return null;
             const playerKey = el.getAttribute("data-player");
+            const player = gameState[playerKey];
+            const pileKey = el.getAttribute("data-pile");
+            // Extra slots act like the stage: they hold ONE card. Reject the drop
+            // (return null) when the slot is already occupied so a second card
+            // can't stack on top of it.
+            if (el.classList.contains("extra-slot-area") &&
+                Array.isArray(player?.[pileKey]) && player[pileKey].length > 0) {
+                return null;
+            }
             return {
-                player: gameState[playerKey],
-                pileKey: el.getAttribute("data-pile"),
-                faceUp: el.classList.contains("extra-faceup-area")
+                player,
+                pileKey,
+                // Slots show their card face-up, like the stage.
+                faceUp: el.classList.contains("extra-faceup-area") || el.classList.contains("extra-slot-area")
             };
         };
 
@@ -729,6 +739,7 @@ const manualPlay = {
             window.renderStages?.();
             window.renderTrash?.();
             window.renderExtraPiles?.();
+            window.renderExtraSlots?.();
         };
 
         // Place a card into whatever standard zone the drop event points at.
@@ -812,6 +823,7 @@ const manualPlay = {
                 pile.push(card); // no valid drop target - put it back
             }
             window.renderExtraPiles?.();
+            window.renderExtraSlots?.();
         };
 
         // Handler for deck card drops

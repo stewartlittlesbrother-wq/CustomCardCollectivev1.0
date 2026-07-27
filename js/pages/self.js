@@ -187,6 +187,8 @@ function applyBoardToPlayer(player, boardJson) {
     player.trash = hydrateCards(board.trash || []);
     player.extraFaceUp = hydrateCards(board.extraFaceUp || []);
     player.extraFaceDown = hydrateCards(board.extraFaceDown || []);
+    player.extraSlotA = hydrateCards(board.extraSlotA || []);
+    player.extraSlotB = hydrateCards(board.extraSlotB || []);
     player.tokens = hydrateCards(board.tokens || []);
     // Annotations carry no card data, so they need no hydration - just keep them
     // on the player so renderOnlineGameState can hand the opponent's to
@@ -780,6 +782,9 @@ function createPublicPlayerStateFromLocal(player) {
         trash: stripCards(player.trash || []),
         extraFaceUp: stripCards(player.extraFaceUp || []),
         extraFaceDown: stripCards(player.extraFaceDown || []),
+        // Extra stage-like single-card slots (0 or 1 card each).
+        extraSlotA: stripCards(player.extraSlotA || []),
+        extraSlotB: stripCards(player.extraSlotB || []),
         tokens: stripCards(player.tokens || []),
         // Which DON!! are rested, left to right (see getDonSlots).
         donOrder: Array.isArray(player.donOrder) ? player.donOrder : null,
@@ -1582,6 +1587,9 @@ function createInitialPlayerState(playerName, deckDefinition) {
         // Extra utility piles (custom zones for leader-effect ideas)
         extraFaceUp: [],
         extraFaceDown: [],
+        // Extra stage-like single-card slots (hold 0 or 1 card each).
+        extraSlotA: [],
+        extraSlotB: [],
         // Face-up pile of token copies created during the match.
         tokens: [],
         // Token TYPES this deck makes available. Copies are created and removed
@@ -1626,6 +1634,8 @@ function createEmptyPlayerState(playerName) {
         stage: null,
         extraFaceUp: [],
         extraFaceDown: [],
+        extraSlotA: [],
+        extraSlotB: [],
         tokens: [],
         tokenTypes: []
     };
@@ -1752,7 +1762,22 @@ function applyCardAnimationClass(element, animationClass) {
     element.classList.add(animationClass);
 }
 
+// Apply board display preferences from the Settings page (stored in
+// localStorage 'gameSettings'). Right now this just controls whether the extra
+// stage-like slots are shown; on by default.
+function applyBoardDisplaySettings() {
+    let showExtraSlots = true;
+    try {
+        const saved = JSON.parse(localStorage.getItem("gameSettings") || "{}");
+        if (saved && saved.extraBoardSlots === false) showExtraSlots = false;
+    } catch {
+        // Corrupt settings JSON - fall back to showing the slots.
+    }
+    document.body.classList.toggle("extra-slots-off", !showExtraSlots);
+}
+
 async function initializeGamePage() {
+    applyBoardDisplaySettings();
     try {
         await loadCardDatabase();
 
@@ -3501,6 +3526,7 @@ function renderExtraPiles() {
     renderExtraPile(gameState.player1, "player1", "extraFaceDown", "player1ExtraFaceDownArea", false);
     renderExtraPile(gameState.player2, "player2", "extraFaceUp", "player2ExtraFaceUpArea", true);
     renderExtraPile(gameState.player2, "player2", "extraFaceDown", "player2ExtraFaceDownArea", false);
+    renderExtraSlots();
     renderTokenZones();
 }
 
@@ -5008,6 +5034,87 @@ function renderPlayerStage(player, stageAreaId) {
 
     setupCardPreview();
     setupBoardStageSelection();
+}
+
+// ── Extra stage-like slots ───────────────────────────────
+// Optional single-card slots that behave like the Stage: drop one card in, drag
+// it out, rest it (double-click), and attach/detach DON!!. Each slot holds 0 or
+// 1 card in player[slotKey] (a length-capped array so it reuses the generic
+// extra-pile drag/drop + sync machinery). Toggled on/off in Settings.
+const EXTRA_SLOT_KEYS = ["extraSlotA", "extraSlotB"];
+
+function renderExtraSlots() {
+    renderExtraSlot(gameState.player1, "player1", "extraSlotA", "player1ExtraSlotAArea");
+    renderExtraSlot(gameState.player1, "player1", "extraSlotB", "player1ExtraSlotBArea");
+    renderExtraSlot(gameState.player2, "player2", "extraSlotA", "player2ExtraSlotAArea");
+    renderExtraSlot(gameState.player2, "player2", "extraSlotB", "player2ExtraSlotBArea");
+}
+window.renderExtraSlots = renderExtraSlots;
+
+function renderExtraSlot(player, playerKey, slotKey, areaId) {
+    const area = document.getElementById(areaId);
+    if (!area || !player) return;
+
+    if (!Array.isArray(player[slotKey])) player[slotKey] = [];
+    const card = player[slotKey][0] || null;
+
+    area.innerHTML = "";
+    area.dataset.state = card ? "occupied" : "empty";
+
+    if (!card) return;
+
+    const img = document.createElement("img");
+    img.src = cardArtSrc(card);
+    img.alt = card.name || "Card";
+    img.className = "deck-card-img board-card-img extra-slot-card";
+    img.draggable = true;
+    // Reuse the generic extra-pile drag path (data-card-source="extra").
+    img.setAttribute("data-card-source", "extra");
+    img.setAttribute("data-player", playerKey);
+    img.setAttribute("data-pile", slotKey);
+    img.setAttribute("data-card-image", card.image || "");
+
+    const state = card.state || "active";
+    img.dataset.cardState = state;
+    if (state === "rested") img.classList.add("board-card-rested");
+
+    // Double-click rests / restands the card, just like tapping the stage.
+    img.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        card.state = card.state === "rested" ? "active" : "rested";
+        renderExtraSlots();
+        window.scheduleOnlineBoardSync?.();
+    });
+
+    area.classList.toggle("don-attach-target", isDonAttachmentTarget(playerKey, card));
+    area.onclick = async (event) => {
+        if (selectedDonAttachment) {
+            event.stopPropagation();
+            await attachSelectedDonToBoardCard(playerKey, card);
+            return;
+        }
+        if (card.attachedDon && card.attachedDon > 0) {
+            const detachButton = document.createElement("button");
+            detachButton.textContent = `Detach ${card.attachedDon} DON!!`;
+            detachButton.className = "tool-btn secondary";
+            detachButton.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10000";
+            detachButton.onclick = () => {
+                gameState[playerKey].don += card.attachedDon;
+                card.attachedDon = 0;
+                document.body.removeChild(detachButton);
+                updateDonDisplay();
+                renderExtraSlots();
+                window.scheduleOnlineBoardSync?.();
+            };
+            document.body.appendChild(detachButton);
+        }
+    };
+
+    area.appendChild(img);
+    renderKeywordTags(card, area);
+    renderAttachedDonBadge(card, area);
+    setupCardPreview();
 }
 
 // =========================
