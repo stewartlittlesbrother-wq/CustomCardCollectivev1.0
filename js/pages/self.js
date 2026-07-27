@@ -1765,20 +1765,41 @@ function applyCardAnimationClass(element, animationClass) {
 // Apply board display preferences from the Settings page (stored in
 // localStorage 'gameSettings'). Right now this just controls whether the extra
 // stage-like slots are shown; on by default.
-function applyBoardDisplaySettings() {
-    // Off by default: the extra slots only show when the setting is explicitly on.
-    let showExtraSlots = false;
+function extraSlotsEnabled() {
     try {
         const saved = JSON.parse(localStorage.getItem("gameSettings") || "{}");
-        if (saved && saved.extraBoardSlots === true) showExtraSlots = true;
+        return saved && saved.extraBoardSlots === true;
     } catch {
-        // Corrupt settings JSON - keep the slots hidden.
+        return false;
     }
+}
+
+function applyBoardDisplaySettings() {
+    // Off by default: the extra slots only show when the setting is explicitly on.
+    const showExtraSlots = extraSlotsEnabled();
     document.body.classList.toggle("extra-slots-off", !showExtraSlots);
+
+    // Keep the on-board toggle button's label in step with the current state.
+    const btn = document.getElementById("toggleExtraSlotsTool");
+    if (btn) btn.textContent = `▦ Extra Slots: ${showExtraSlots ? "On" : "Off"}`;
+}
+
+function setupExtraSlotsToggle() {
+    const btn = document.getElementById("toggleExtraSlotsTool");
+    if (!btn) return;
+    btn.addEventListener("click", () => {
+        let saved = {};
+        try { saved = JSON.parse(localStorage.getItem("gameSettings") || "{}") || {}; } catch { saved = {}; }
+        saved.extraBoardSlots = !extraSlotsEnabled();
+        localStorage.setItem("gameSettings", JSON.stringify(saved));
+        applyBoardDisplaySettings();
+        renderExtraSlots();
+    });
 }
 
 async function initializeGamePage() {
     applyBoardDisplaySettings();
+    setupExtraSlotsToggle();
     try {
         await loadCardDatabase();
 
