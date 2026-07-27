@@ -99,6 +99,20 @@
             </label>
           </section>
 
+          <section class="settings-group" aria-label="Board display settings">
+            <h2>Board Display</h2>
+            <p class="settings-group-note">
+              Optional zones shown on the game board.
+            </p>
+            <label class="settings-row">
+              <input type="checkbox" id="setExtraSlots">
+              <span>
+                <strong>Extra Board Slots</strong>
+                <small>Show two extra single-card slots on the board that act like the Stage slot. You can also toggle these with the "Extra Slots" button in the game's Tools panel.</small>
+              </span>
+            </label>
+          </section>
+
           <section class="settings-group" aria-label="Card importer settings">
             <h2>Card Importer</h2>
             <p class="settings-group-note">
@@ -689,6 +703,18 @@
           settings[key] = el.checked;
           localStorage.setItem(KEY, JSON.stringify(settings));
         });
+      });
+    })();
+
+    // Board Display: extra stage-like slots. Default OFF. self.js reads this key
+    // (extraSlotsEnabled) to show/hide the slots on the game board.
+    (function () {
+      const KEY = "optcgExtraSlots";
+      const box = document.getElementById("setExtraSlots");
+      if (!box) return;
+      box.checked = localStorage.getItem(KEY) === "true";
+      box.addEventListener("change", () => {
+        localStorage.setItem(KEY, String(box.checked));
       });
     })();
 

@@ -52,11 +52,7 @@ class SettingsManager {
             confirmTrigger: true,
 
             soundEffects: true,
-            audioEnabled: true,
-
-            // Show the extra stage-like board slots. Off by default - turn on in
-            // Settings > Display.
-            extraBoardSlots: false
+            audioEnabled: true
         };
     }
 

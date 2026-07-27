@@ -1765,13 +1765,10 @@ function applyCardAnimationClass(element, animationClass) {
 // Apply board display preferences from the Settings page (stored in
 // localStorage 'gameSettings'). Right now this just controls whether the extra
 // stage-like slots are shown; on by default.
+// Extra board slots on/off. Stored under optcgExtraSlots so the home Settings
+// page and the on-board toggle button share one source of truth. Off by default.
 function extraSlotsEnabled() {
-    try {
-        const saved = JSON.parse(localStorage.getItem("gameSettings") || "{}");
-        return saved && saved.extraBoardSlots === true;
-    } catch {
-        return false;
-    }
+    return localStorage.getItem("optcgExtraSlots") === "true";
 }
 
 function applyBoardDisplaySettings() {
@@ -1788,10 +1785,7 @@ function setupExtraSlotsToggle() {
     const btn = document.getElementById("toggleExtraSlotsTool");
     if (!btn) return;
     btn.addEventListener("click", () => {
-        let saved = {};
-        try { saved = JSON.parse(localStorage.getItem("gameSettings") || "{}") || {}; } catch { saved = {}; }
-        saved.extraBoardSlots = !extraSlotsEnabled();
-        localStorage.setItem("gameSettings", JSON.stringify(saved));
+        localStorage.setItem("optcgExtraSlots", String(!extraSlotsEnabled()));
         applyBoardDisplaySettings();
         renderExtraSlots();
     });
@@ -1800,6 +1794,7 @@ function setupExtraSlotsToggle() {
 async function initializeGamePage() {
     applyBoardDisplaySettings();
     setupExtraSlotsToggle();
+    setupDeckViewerInspect();
     try {
         await loadCardDatabase();
 
@@ -5385,6 +5380,49 @@ function setupCardPreview() {
 
             clearCardPreview();
         };
+    });
+}
+
+// Inspect-on-hover for the deck/peek viewers (Look at Top X, trash, etc). Those
+// open as a full-screen overlay that covers the sidebar preview panel, so the
+// normal hover preview can't be seen. This shows a big floating card above the
+// overlay whenever you hover a card inside one of those viewers.
+let deckViewerInspectWired = false;
+function setupDeckViewerInspect() {
+    if (deckViewerInspectWired) return;
+    deckViewerInspectWired = true;
+
+    const getPreview = () => {
+        let el = document.getElementById("deckViewerInspect");
+        if (!el) {
+            el = document.createElement("img");
+            el.id = "deckViewerInspect";
+            el.alt = "";
+            el.style.cssText = [
+                "position:fixed", "top:50%", "left:24px", "transform:translateY(-50%)",
+                "height:min(78vh,760px)", "width:auto", "border-radius:14px",
+                "box-shadow:0 20px 60px rgba(0,0,0,.7)", "z-index:2147483000",
+                "pointer-events:none", "display:none"
+            ].join(";");
+            document.body.appendChild(el);
+        }
+        return el;
+    };
+
+    document.addEventListener("mouseover", (event) => {
+        const img = event.target.closest?.(".look-top-card-img, .trash-viewer-card img");
+        if (!img) return;
+        const src = img.currentSrc || img.src;
+        if (!src) return;
+        const preview = getPreview();
+        preview.src = src;
+        preview.style.display = "block";
+    });
+
+    document.addEventListener("mouseout", (event) => {
+        if (!event.target.closest?.(".look-top-card-img, .trash-viewer-card img")) return;
+        const preview = document.getElementById("deckViewerInspect");
+        if (preview) preview.style.display = "none";
     });
 }
 
