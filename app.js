@@ -2404,6 +2404,13 @@ async function saveCreatedCard(event) {
     return;
   }
 
+  // A colour is required (there's no "colorless" any more) - a card with no
+  // colour would be hidden the moment a leader is picked.
+  if (!csvValues(el.creationColors.value).length) {
+    toast("Choose a color for the card");
+    return;
+  }
+
   // Prefer an image URL - stores only the link, not a base64 PNG blob. Fall
   // back to the uploaded file (compressed base64) only when no URL is given.
   let imageSource;
@@ -2436,9 +2443,14 @@ async function saveCreatedCard(event) {
     saveDeck(false);
   }
 
-  clearCreationForm(true);
+  // Reload the pool FIRST so the just-saved card is in state.cards, THEN clear
+  // the form. clearCreationForm auto-fills the next card number via
+  // nextImportedCardNumber(), which scans state.cards - if we cleared before the
+  // reload it would hand out the SAME number again and the next save would
+  // overwrite this card. (That's the "new card replaces the last one" bug.)
   toast(`${card.name} saved`);
   await loadCardPool();
+  clearCreationForm(true);
 }
 
 function clearCreationForm(resetNumber = true) {
