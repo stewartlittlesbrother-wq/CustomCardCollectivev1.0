@@ -2461,6 +2461,16 @@ function clearCreationForm(resetNumber = true) {
   if (resetNumber && el.creationCardNumber) el.creationCardNumber.value = nextImportedCardNumber();
   if (el.creationImagePreview) el.creationImagePreview.innerHTML = `<span>No image yet</span>`;
   if (el.creationStatus) el.creationStatus.textContent = "Ready";
+  // Keep filing new cards into whatever collection you're browsing.
+  preselectCreationCollection();
+}
+
+// Default the creation form's Collection dropdown to the collection currently
+// open in the browser (if any), so cards you add while inside a collection go
+// straight into it.
+function preselectCreationCollection() {
+  if (!el.creationCollection || !state.activeCollection) return;
+  el.creationCollection.value = state.activeCollection;
 }
 
 function previewCreationImageUrl() {
@@ -5243,6 +5253,8 @@ function bindEvents() {
     initializeCardCreation();
     el.savedDecksPanel.hidden = true;
     el.cardCreationPanel.hidden = false;
+    // If you're browsing a collection, new cards default into it.
+    preselectCreationCollection();
   });
   el.closeCardCreation?.addEventListener("click", () => {
     el.cardCreationPanel.hidden = true;
