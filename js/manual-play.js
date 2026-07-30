@@ -967,6 +967,7 @@ const manualPlay = {
                 
                 window.renderLifeCards?.();
             } else if (handArea) {
+                card.fromLife = true; // highlight it in hand (both players see it)
                 player.hand.push(card);
                 console.log("✓ Added to hand");
                 window.renderHands?.();

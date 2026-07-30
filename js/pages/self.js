@@ -271,6 +271,13 @@ function applyOnlinePlayerState(playerKey) {
     player.deck = createHiddenCards(publicPlayer.deckCount);
     player.life = createHiddenCards(publicPlayer.lifeCount);
 
+    // Highlight the opponent's just-from-Life cards. We only know HOW MANY (the
+    // hand is hidden), so flag that many backs at the end of the hand.
+    const lifeTriggers = Number(publicPlayer.lifeTriggerCount || 0);
+    for (let i = 0; i < lifeTriggers && i < player.hand.length; i++) {
+        player.hand[player.hand.length - 1 - i].fromLife = true;
+    }
+
     (publicPlayer.faceUpLifeCards || []).forEach(entry => {
         const index = Number(entry.index);
         if (index >= 0 && index < player.life.length && entry.card) {
@@ -624,11 +631,31 @@ function showOnlineRevealedCards() {
 
     onlineLastRevealKey = revealKey;
 
+    // Card names render as hoverable chips (preview on hover) via addGameLog.
     addGameLog(
-        `${onlinePlayerLabels[latestReveal.player] || "Player"} revealed: ` +
-        cards.map(card => card.name).join(", ")
+        `${onlinePlayerLabels[latestReveal.player] || "Player"} revealed:`,
+        cards.map(card => ({ name: card.name, image: card.image }))
     );
 }
+
+// Reveal a card to the opponent (from a deck/peek/trash viewer). Online: writes
+// to the shared reveal log so BOTH players get the "revealed X" entry (with a
+// hover preview). Solo: just logs it locally.
+// Drop the "just from Life" highlight from a player's hand cards (called when
+// that player ends their turn).
+function clearFromLifeHighlights(player) {
+    (player?.hand || []).forEach(card => { if (card) delete card.fromLife; });
+}
+
+function revealCardToOpponent(card) {
+    if (!card) return;
+    if (isOnlineMatch) {
+        publishOnlineReveal([card]);
+    } else {
+        addGameLog("You revealed:", [{ name: card.name, image: card.image }]);
+    }
+}
+window.revealCardToOpponent = revealCardToOpponent;
 
 function handleOnlineGameOver() {
     if (!isOnlineMatch || !gameState || onlinePublicState?.phase !== "gameOver" || !onlinePublicState?.winner) {
@@ -805,6 +832,10 @@ function createPublicPlayerStateFromLocal(player) {
     return {
         boardJson: JSON.stringify(board),
         handCount: player.hand?.length || 0,
+        // How many cards in hand are freshly-taken Life cards (highlighted for
+        // both players). The opponent can't see the hand, but can see how many
+        // backs to highlight.
+        lifeTriggerCount: (player.hand || []).filter(card => card?.fromLife).length,
         deckCount: player.deck?.length || 0,
         lifeCount: player.life?.length || 0,
         activeTokens: Number(player.don || 0),
@@ -1167,7 +1198,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-1");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1211,7 +1242,7 @@ async function initializeSpectatorMatch() {
     showSpectatorBanner();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-1");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1424,6 +1455,9 @@ async function handleOnlinePassTurn() {
         const phaseInfo = createPhaseLogProxy();
 
         if (ownPlayer) {
+            // Ending your turn clears the "from Life" highlight on your hand cards.
+            clearFromLifeHighlights(ownPlayer);
+
             const endOfTurnResults = resolveEndOfTurnEffects(ownPlayer, ui);
 
             endOfTurnResults.forEach(result => addGameLog(result.message));
@@ -2778,7 +2812,9 @@ function removeChoiceButtons() {
 // Game Log
 // =========================
 
-function addGameLog(message) {
+// `previewCards` (optional): [{ name, image }]. When given, each card's name is
+// appended as a hoverable chip that shows a big preview (see setupDeckViewerInspect).
+function addGameLog(message, previewCards = null) {
     const gameLogMessages = document.getElementById("gameLogMessages");
 
     if (!gameLogMessages) return;
@@ -2794,6 +2830,15 @@ function addGameLog(message) {
 
     logMessage.className = "log-message";
     logMessage.innerHTML = cleanMessage;
+
+    (previewCards || []).forEach(card => {
+        if (!card?.name) return;
+        const chip = document.createElement("span");
+        chip.className = "log-card";
+        chip.textContent = ` ${card.name}`;
+        if (card.image) chip.setAttribute("data-card-image", card.image);
+        logMessage.appendChild(chip);
+    });
 
     gameLogMessages.appendChild(logMessage);
 
@@ -4162,7 +4207,13 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
             const tBtn   = mkSmBtn("\uD83D\uDDD1 Trash", "#F44336");
             tBtn.onclick = (e) => { e.stopPropagation(); const idx = player[pileKey].indexOf(card); if (idx===-1) return; if (!player.trash) player.trash=[]; player.trash.push(card); player[pileKey].splice(idx,1); window.renderTrash?.(); renderPileSource(); buildGrid(); addGameLog(`Card moved to ${player.name}'s trash`); window.scheduleOnlineBoardSync?.(); };
 
+            // Reveal this one card to the opponent - logs "revealed <name>" (with a
+            // hover preview) for both players. Doesn't move the card.
+            const revBtn = mkSmBtn("\uD83D\uDC41 Reveal", "#009688");
+            revBtn.onclick = (e) => { e.stopPropagation(); window.revealCardToOpponent?.(card); };
+
             hoverPanel.appendChild(rBtn);
+            hoverPanel.appendChild(revBtn);
             hoverPanel.appendChild(hBtn);
             hoverPanel.appendChild(botBtn);
             hoverPanel.appendChild(tBtn);
@@ -4337,6 +4388,8 @@ function renderPlayerHand(player, handElementId, hidden) {
     player.hand.forEach((card, index) => {
         const cardElement = document.createElement("div");
         cardElement.className = hidden ? "hand-card hidden-card" : "hand-card";
+        // A card that just came from Life stays highlighted (both players see it).
+        if (card.fromLife) cardElement.classList.add("from-life");
         cardElement.draggable = true; // Enable native HTML5 drag
         cardElement.style.setProperty("--hand-index", index);
         cardElement.style.setProperty("--hand-middle", (player.hand.length - 1) / 2);
@@ -4383,6 +4436,11 @@ function renderPlayerHand(player, handElementId, hidden) {
                 menu.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.5)";
 
                 const options = [
+                    {
+                        // Reveal this hand card to the opponent (log + hover preview).
+                        label: "Reveal to Opponent",
+                        action: () => window.revealCardToOpponent?.(card)
+                    },
                     {
                         label: "Send to Trash",
                         action: () => {
@@ -4618,13 +4676,19 @@ function renderPlayerLife(player, lifeAreaId) {
 
             const options = [
                 {
-                    label: lifeCard?.faceUp ? "Hide Card" : "Reveal Card",
+                    label: lifeCard?.faceUp ? "Hide (from both)" : "Flip face-up (both see)",
                     action: () => {
                         lifeCard.faceUp = !lifeCard.faceUp;
                         renderLifeCards();
                         window.addGameLog?.(`Life card ${lifeCard.faceUp ? "revealed" : "hidden"}`);
                         window.scheduleOnlineBoardSync?.();
                     }
+                },
+                {
+                    // Reveal just this card's identity to the opponent (log entry
+                    // with a hover preview) without flipping it face-up.
+                    label: "Reveal to Opponent",
+                    action: () => window.revealCardToOpponent?.(lifeCard)
                 },
                 {
                     label: "Send to Top Deck",
@@ -4655,6 +4719,7 @@ function renderPlayerLife(player, lifeAreaId) {
                     action: () => {
                         const taken = takeLifeCard();
                         if (!taken) return;
+                        taken.fromLife = true; // highlight it in hand (both players)
                         player.hand.push(taken);
                         renderLifeCards();
                         window.renderHands?.();
@@ -5413,19 +5478,23 @@ function setupDeckViewerInspect() {
     // peek / trash / pile viewer). Those viewers all live inside .look-top-overlay
     // and render each card as an <img> in a frame (a draggable div, a
     // .look-top-card-button, or a .trash-viewer-card).
-    const viewerImageFor = (target) => {
-        if (!target.closest?.(".look-top-overlay")) return null;
-        if (target.tagName === "IMG") return target;
+    const viewerSrcFor = (target) => {
+        if (!target.closest) return null;
+        // Hoverable card name in the game log.
+        const logCard = target.closest(".log-card[data-card-image]");
+        if (logCard) return logCard.getAttribute("data-card-image");
+        // Card inside a deck/peek/trash/pile viewer overlay.
+        if (!target.closest(".look-top-overlay")) return null;
+        if (target.tagName === "IMG") return target.currentSrc || target.src;
         const frame = target.closest(
             "div[draggable='true'], .look-top-card-button, .trash-viewer-card, .bottom-order-card-button"
         );
-        return frame?.querySelector?.("img") || null;
+        const img = frame?.querySelector?.("img");
+        return img ? (img.currentSrc || img.src) : null;
     };
 
     document.addEventListener("mouseover", (event) => {
-        const img = viewerImageFor(event.target);
-        if (!img) return;
-        const src = img.currentSrc || img.src;
+        const src = viewerSrcFor(event.target);
         if (!src) return;
         const preview = getPreview();
         preview.src = src;
@@ -5437,10 +5506,24 @@ function setupDeckViewerInspect() {
         preview.style.display = "block";
     });
 
-    document.addEventListener("mouseout", (event) => {
-        if (!viewerImageFor(event.target)) return;
+    const hideInspect = () => {
         const preview = document.getElementById("deckViewerInspect");
         if (preview) preview.style.display = "none";
+    };
+
+    document.addEventListener("mouseout", (event) => {
+        if (!viewerSrcFor(event.target)) return;
+        hideInspect();
+    });
+
+    // Clicking a card action (send to bottom / trash / hand, reveal, etc.)
+    // rebuilds or removes the hovered card, so `mouseout` never fires and the big
+    // preview would get stuck on screen. Hide it on any pointer press.
+    document.addEventListener("pointerdown", hideInspect, true);
+    // Belt and braces: if the pointer moves onto anything that isn't a viewer
+    // card while the preview is up, drop it too.
+    document.addEventListener("mouseover", (event) => {
+        if (!viewerSrcFor(event.target)) hideInspect();
     });
 }
 

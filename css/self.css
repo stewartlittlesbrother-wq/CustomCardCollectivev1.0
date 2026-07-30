@@ -4415,3 +4415,24 @@ body.online-choosing-turn .opponent-hand {
 
 /* Turned off in Settings: hide the extra slots entirely. */
 body.extra-slots-off .extra-slots-wrap { display: none !important; }
+
+/* Hoverable revealed-card names in the game log (preview on hover). */
+.log-message .log-card {
+    color: #ffd24a;
+    font-weight: 800;
+    cursor: help;
+    text-decoration: underline dotted rgba(255, 210, 74, .6);
+}
+.log-message .log-card:hover { color: #fff; }
+
+/* A card in hand that just came from Life - highlighted until played or the
+   owner's turn ends. Visible to both players (owner sees the face, opponent sees
+   a highlighted card back). */
+.hand-card.from-life,
+.hand-card.from-life img,
+.from-life {
+    outline: 3px solid #ffd21e !important;
+    outline-offset: -1px;
+    box-shadow: 0 0 12px rgba(255, 210, 30, .85) !important;
+    border-radius: 6px;
+}

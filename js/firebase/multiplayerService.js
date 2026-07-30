@@ -709,7 +709,9 @@ export async function applyMultiplayerLifeDamage(roomCode, defenderSlot, attacke
         if (options.banish) {
             trash.push(lifeCard);
         } else {
-            hand.push(lifeCard);
+            // Mark it so both players see it highlighted in hand until played or
+            // the owner's turn ends.
+            hand.push({ ...lifeCard, fromLife: true });
         }
 
         moved++;
@@ -723,6 +725,7 @@ export async function applyMultiplayerLifeDamage(roomCode, defenderSlot, attacke
             .map((card, index) => card?.faceUp ? { index, card: createPublicCardSnapshot(card) } : null)
             .filter(Boolean),
         [`public/${publicKey}/handCount`]: hand.length,
+        [`public/${publicKey}/lifeTriggerCount`]: hand.filter(card => card?.fromLife).length,
         "public/currentAttack": null
     };
 
