@@ -4436,3 +4436,12 @@ body.extra-slots-off .extra-slots-wrap { display: none !important; }
     box-shadow: 0 0 12px rgba(255, 210, 30, .85) !important;
     border-radius: 6px;
 }
+
+/* A life card you're privately peeking at (only you can see the face). Blue tint
+   distinguishes it from a public "flip face-up" (which both players see). */
+.life-card.life-peeked {
+    outline: 3px solid #46a0ff;
+    outline-offset: -1px;
+    box-shadow: 0 0 12px rgba(70, 160, 255, .8);
+    border-radius: 6px;
+}

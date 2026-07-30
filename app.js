@@ -2411,6 +2411,15 @@ async function saveCreatedCard(event) {
     return;
   }
 
+  // Discord attachment links (media.discordapp.net / cdn.discordapp.com) carry a
+  // signed expiry token and STOP WORKING after a day or two, which silently blanks
+  // the card later. Warn and require the image be uploaded instead so it's stored
+  // permanently. (This is what happened to the "Pig's Deltarune" cards.)
+  if (imageUrl && /(?:media|cdn)\.discordapp\.(?:net|com)/i.test(imageUrl) && !file) {
+    toast("Discord image links expire — upload the image file instead so it stays.");
+    return;
+  }
+
   // Prefer an image URL - stores only the link, not a base64 PNG blob. Fall
   // back to the uploaded file (compressed base64) only when no URL is given.
   let imageSource;

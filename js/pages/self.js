@@ -1457,6 +1457,7 @@ async function handleOnlinePassTurn() {
         if (ownPlayer) {
             // Ending your turn clears the "from Life" highlight on your hand cards.
             clearFromLifeHighlights(ownPlayer);
+            renderHands();
 
             const endOfTurnResults = resolveEndOfTurnEffects(ownPlayer, ui);
 
@@ -4196,13 +4197,16 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
             const hBtn   = mkSmBtn("\u2192 Hand", "#FF9800");
             hBtn.onclick = (e) => { e.stopPropagation(); const idx = player[pileKey].indexOf(card); if (idx===-1) return; player.hand.push(card); player[pileKey].splice(idx,1); window.renderHands?.(); renderPileSource(); buildGrid(); addGameLog(`Card moved to ${player.name}'s hand`); window.scheduleOnlineBoardSync?.(); };
 
-            const botBtn = mkSmBtn("\u2193 Bottom", "#9C27B0");
-            botBtn.onclick = (e) => { e.stopPropagation(); const idx = player[pileKey].indexOf(card); if (idx===-1) return; player[pileKey].splice(idx,1); player[pileKey].unshift(card);
-                // The card stays in the deck (at the bottom), but it has left the
-                // top - so drop it from the peek snapshot too, or it would keep
-                // showing while hand/trash cards vanish.
+            // Always sends the card to the BOTTOM OF THE DECK. When viewing the
+            // deck that's a reorder ("Bottom"); when viewing the trash (or any
+            // other pile) it moves the card out to the deck bottom ("Bottom Deck").
+            const viewingDeck = pileKey === "deck";
+            const botBtn = mkSmBtn(viewingDeck ? "\u2193 Bottom" : "\u2193 Bottom Deck", "#9C27B0");
+            botBtn.onclick = (e) => { e.stopPropagation(); const idx = player[pileKey].indexOf(card); if (idx===-1) return; player[pileKey].splice(idx,1); player.deck.unshift(card);
+                // The card left the top of what we're viewing - drop it from the
+                // peek snapshot too, or it would keep showing while others vanish.
                 if (peekIds) peekIds.delete(card.instanceId);
-                renderPileSource(); buildGrid(); addGameLog(`Card moved to bottom of ${player.name}'s deck`); window.scheduleOnlineBoardSync?.(); };
+                window.renderDecks?.(); renderPileSource(); buildGrid(); addGameLog(`Card moved to bottom of ${player.name}'s deck`); window.scheduleOnlineBoardSync?.(); };
 
             const tBtn   = mkSmBtn("\uD83D\uDDD1 Trash", "#F44336");
             tBtn.onclick = (e) => { e.stopPropagation(); const idx = player[pileKey].indexOf(card); if (idx===-1) return; if (!player.trash) player.trash=[]; player.trash.push(card); player[pileKey].splice(idx,1); window.renderTrash?.(); renderPileSource(); buildGrid(); addGameLog(`Card moved to ${player.name}'s trash`); window.scheduleOnlineBoardSync?.(); };
@@ -4640,10 +4644,14 @@ function renderPlayerLife(player, lifeAreaId) {
 
         const img = document.createElement("img");
 
-        // Show face-down (card back) for life cards, or revealed if faceUp
-        img.src = lifeCard?.faceUp ? cardArtSrc(lifeCard) : cardBackImage;
-        img.alt = lifeCard?.faceUp && lifeCard.name ? lifeCard.name : "Life Card";
+        // Show the face when the card is flipped for everyone (faceUp) OR when
+        // this player is privately peeking at it (peeked - only they see it).
+        const showLifeFace = lifeCard?.faceUp || lifeCard?.peeked;
+        img.src = showLifeFace ? cardArtSrc(lifeCard) : cardBackImage;
+        img.alt = showLifeFace && lifeCard.name ? lifeCard.name : "Life Card";
         img.className = "life-card-img board-card-img";
+        // Blue tint marks a private peek (only you can see it), vs a public flip.
+        if (lifeCard?.peeked && !lifeCard?.faceUp) cardElement.classList.add("life-peeked");
         // Let the parent .life-card own the drag (images are natively draggable).
         img.draggable = false;
         img.setAttribute("data-card-image", img.src);
@@ -4675,6 +4683,14 @@ function renderPlayerLife(player, lifeAreaId) {
             };
 
             const options = [
+                {
+                    // Private peek - only YOU see the face, nothing is synced.
+                    label: lifeCard?.peeked ? "Stop peeking (only you)" : "Peek (only you)",
+                    action: () => {
+                        lifeCard.peeked = !lifeCard.peeked;
+                        renderLifeCards();
+                    }
+                },
                 {
                     label: lifeCard?.faceUp ? "Hide (from both)" : "Flip face-up (both see)",
                     action: () => {

@@ -1094,6 +1094,8 @@ const manualPlay = {
             }
             const card = player.hand[cardIndex];
             player.hand.splice(cardIndex, 1);
+            // A card that leaves the hand loses its "from Life" highlight.
+            delete card.fromLife;
             console.log("✓ Removed from hand:", card.name);
             
             // Add to target zone
