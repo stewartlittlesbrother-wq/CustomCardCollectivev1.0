@@ -48,11 +48,13 @@ async function loadCardDatabase() {
     const leaderCards = {};
 
     const place = (card) => {
-        if (card.cardType === "leader") {
-            leaderCards[card.id] = card;
-        } else {
-            mainCards[card.id] = card;
-        }
+        const target = card.cardType === "leader" ? leaderCards : mainCards;
+        // Key by id AND by cardNumber. Built-in cards have id === cardNumber, but
+        // imported cards keep their external id (e.g. an Untap uuid) as `id` while
+        // decks reference the CARD NUMBER (JJK1-001). Without the cardNumber key,
+        // getCardById(cardNumber) misses and the card "doesn't work" in a game.
+        if (card.id) target[card.id] = card;
+        if (card.cardNumber && card.cardNumber !== card.id) target[card.cardNumber] = card;
     };
 
     // Bundled cards first, minus anything deleted from the shared library, so a
@@ -74,13 +76,7 @@ async function loadCardDatabase() {
     importedCards
         .map(normalizeImportedCardForGame)
         .filter(card => !loadedKeys.has(cardLibraryKeyForGame(card)))
-        .forEach(normalizedCard => {
-        if (normalizedCard.cardType === "leader") {
-            leaderCards[normalizedCard.id] = normalizedCard;
-        } else {
-            mainCards[normalizedCard.id] = normalizedCard;
-        }
-    });
+        .forEach(place);
 
     cardDatabase = mainCards;
     leaders = leaderCards;
@@ -131,16 +127,22 @@ function normalizePermanentCardForGame(card, category) {
 }
 
 function loadImportedCardsForGame() {
-    try {
-        const cards = JSON.parse(localStorage.getItem(customCardsStorageKey) || "[]");
-
-        if (!Array.isArray(cards)) return [];
-
-        return dedupeImportedCardsForGame(cards);
-    } catch {
-        localStorage.removeItem(customCardsStorageKey);
-        return [];
-    }
+    const read = (key) => {
+        try {
+            const cards = JSON.parse(localStorage.getItem(key) || "[]");
+            return Array.isArray(cards) ? cards : [];
+        } catch {
+            return [];
+        }
+    };
+    // Read BOTH local stores: the legacy imported-cards key AND the project-cards
+    // fallback that publishSingleCard writes to when the shared library can't be
+    // reached during an import. Without the second one, cards that only saved
+    // locally showed up in the deck builder but "didn't work" in a game.
+    return dedupeImportedCardsForGame([
+        ...read(customCardsStorageKey),
+        ...read("custom-cards-sim-local-project-cards-v1")
+    ]);
 }
 
 function dedupeImportedCardsForGame(cards) {

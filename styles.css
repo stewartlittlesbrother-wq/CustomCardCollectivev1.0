@@ -5750,3 +5750,14 @@ button.trash-area {
   border-radius: 8px;
   min-width: 180px;
 }
+
+/* Untap import summary: device-only warning row. */
+.untap-summary-list .untap-summary-warn {
+  display: block;
+  background: rgba(255, 60, 60, .15);
+  border: 1px solid rgba(255, 80, 80, .5);
+  color: #ffb3b3;
+  font-weight: 700;
+  line-height: 1.45;
+  padding: 12px 14px;
+}

@@ -972,7 +972,7 @@ async function publishSingleCard(card) {
       await library.saveSharedCard(card);
       localStorage.removeItem(LOCAL_PROJECT_CARDS_KEY);
       localStorage.removeItem(LOCAL_PROJECT_DELETIONS_KEY);
-      return true;
+      return "shared";
     } catch (error) {
       console.warn("Shared card save failed, falling back:", error);
       if (!sharedLibraryWarned) {
@@ -983,9 +983,10 @@ async function publishSingleCard(card) {
   }
 
   // No library (offline / static-only): keep the whole-list local fallback.
+  // Returns "local" so bulk callers can tell shared saves from device-only ones.
   const existing = (await loadProjectCards())
     .filter(other => projectCardKey(other) !== projectCardKey(card));
-  return saveProjectCardsLocally([...existing, card]);
+  return saveProjectCardsLocally([...existing, card]) ? "local" : false;
 }
 
 async function saveProjectCards(cards) {
@@ -5421,8 +5422,10 @@ function mapUntapCardToSim(raw, sourceMeta) {
   const category = normalizeCategory(meta.type || fields.cardType || raw.type);
   // Prefer the stable Untap-rendered image. The Discord `front` URLs carry
   // expiry params (ex/is/hm) and stop loading after a while, so they're only a
-  // fallback.
-  const image = images.untapRendered || images.front || images.back || "";
+  // fallback. Some exports put the image at the top level (imageUrl/front_image)
+  // instead of an images{} object, so read those too.
+  const image = images.untapRendered || images.preferred || images.front || images.back ||
+    raw.imageUrl || raw.front_image || raw.image || "";
   const effect = String(text.front || fields.effect || "").trim();
   // meta.attribute is an array; fields.attribute is a single string.
   const attribute = Array.isArray(meta.attribute)
@@ -5431,7 +5434,9 @@ function mapUntapCardToSim(raw, sourceMeta) {
   const cardNumber = String(fields.cardNumber || "").trim() || makeUntapCardNumber(setCode, untapId);
 
   return {
-    id: untapId,
+    // Use the CARD NUMBER as the id (like built-in cards) so the game's
+    // getCardById(cardNumber) resolves it. The Untap uuid is kept as untapId.
+    id: cardNumber,
     cardNumber,
     // Stable external id from Untap - used to detect duplicates on re-import.
     untapId,
@@ -5741,7 +5746,7 @@ function setAllUntapIncluded(included) {
 }
 
 async function runUntapImport() {
-  const summary = { imported: 0, replaced: 0, skipped: 0, invalid: 0, failed: 0 };
+  const summary = { imported: 0, replaced: 0, skipped: 0, invalid: 0, failed: 0, deviceOnly: 0 };
   const toImport = [];
 
   untapReview.entries.forEach(entry => {
@@ -5761,6 +5766,9 @@ async function runUntapImport() {
     const [card] = await compressImportedCardImages([entry.card]);
     const ok = await publishSingleCard(card);
     if (!ok) { summary.failed++; continue; }
+    // "local" means the shared library couldn't be reached - the card is on THIS
+    // device only, so it won't work in multiplayer or for anyone else.
+    if (ok === "local") summary.deviceOnly++;
     if (entry.dup && entry.action === "replace") summary.replaced++;
     else summary.imported++;
   }
@@ -5787,6 +5795,15 @@ function showUntapSummary(summary) {
     list.innerHTML = rows
       .map(([label, count]) => `<li><span>${label}</span><strong>${count}</strong></li>`)
       .join("");
+    // Loud warning if the shared library couldn't be reached - those cards won't
+    // work in multiplayer. Tells the user to check their connection and re-import.
+    if (summary.deviceOnly) {
+      const warn = document.createElement("li");
+      warn.className = "untap-summary-warn";
+      warn.innerHTML = `<span>⚠ ${summary.deviceOnly} saved to THIS DEVICE ONLY — the shared library was unreachable. ` +
+        `They won't work in multiplayer. Check your connection and import again.</span>`;
+      list.appendChild(warn);
+    }
   }
   showUntapStep("summary");
 }
