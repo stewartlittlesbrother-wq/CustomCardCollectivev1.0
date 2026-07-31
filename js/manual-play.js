@@ -967,6 +967,8 @@ const manualPlay = {
                 
                 window.renderLifeCards?.();
             } else if (handArea) {
+                // Only the newest life grab stays highlighted - clear the rest.
+                (player.hand || []).forEach(c => { if (c) delete c.fromLife; });
                 card.fromLife = true; // highlight it in hand (both players see it)
                 player.hand.push(card);
                 console.log("✓ Added to hand");

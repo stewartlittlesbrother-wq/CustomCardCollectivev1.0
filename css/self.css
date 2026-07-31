@@ -4445,3 +4445,45 @@ body.extra-slots-off .extra-slots-wrap { display: none !important; }
     box-shadow: 0 0 12px rgba(70, 160, 255, .8);
     border-radius: 6px;
 }
+
+/* ── Game-over / rematch screen chat ───────────────────── */
+.gameover-chat {
+    width: min(460px, 92vw);
+    margin: 14px auto 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+}
+.gameover-chat-title {
+    font-weight: 800;
+    font-size: .85rem;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    opacity: .8;
+}
+.gameover-chat-messages {
+    height: 130px;
+    overflow-y: auto;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, .35);
+    border: 1px solid rgba(255, 255, 255, .12);
+    font-size: .85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.gameover-chat-entry { line-height: 1.35; word-break: break-word; }
+.gameover-chat-entry.own { color: #9fd0ff; }
+.gameover-chat-entry strong { opacity: .85; }
+.gameover-chat-form { display: flex; gap: 8px; }
+.gameover-chat-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, .2);
+    background: rgba(0, 0, 0, .3);
+    color: inherit;
+}

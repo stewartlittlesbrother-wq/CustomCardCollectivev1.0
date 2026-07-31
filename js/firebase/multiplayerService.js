@@ -696,7 +696,9 @@ export async function applyMultiplayerLifeDamage(roomCode, defenderSlot, attacke
     const privateState = match.private?.[defender.uid] || {};
     const publicKey = defenderSlot === "p1" ? "player1" : "player2";
     const life = [...(privateState.life || [])];
-    const hand = [...(privateState.hand || [])];
+    // Clear any prior "from Life" highlight - only the newest life grab is marked.
+    const hand = [...(privateState.hand || [])].map(card =>
+        card && card.fromLife ? { ...card, fromLife: false } : card);
     const publicPlayer = match.public?.[publicKey] || {};
     const trash = [...(publicPlayer.trash || [])];
     let moved = 0;

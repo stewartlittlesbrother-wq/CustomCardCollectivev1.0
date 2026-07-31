@@ -426,7 +426,29 @@ function applyOnlinePublicState(publicState = {}) {
     maybeRunOnlineTurnStart(turnStartKey);
     showOnlineRevealedCards();
     maybeAnnounceOwnTurn();
+    announceOnlineTurnOrder();
     syncSpectateRegistry();
+}
+
+// Once turn order is decided (the dice winner chose), tell BOTH players whether
+// they go first or second. Without this the player who DIDN'T pick had no idea.
+let onlineTurnOrderAnnounced = false;
+function announceOnlineTurnOrder() {
+    if (!isOnlineMatch || isSpectator) return;
+    const first = onlinePublicState?.firstPlayer;
+    if (!first) { onlineTurnOrderAnnounced = false; return; }
+    if (onlineTurnOrderAnnounced) return;
+    onlineTurnOrderAnnounced = true;
+
+    const youFirst = first === playerSlot;
+    showTurnBanner(
+        youFirst ? "YOU GO FIRST" : "YOU GO SECOND",
+        youFirst ? "Take the first turn" : "Your opponent takes the first turn",
+        "turn"
+    );
+    addGameLog(youFirst
+        ? "Turn order decided: you go FIRST."
+        : "Turn order decided: you go SECOND.");
 }
 
 // Keep the public "active games" list (used by the Spectate menu) in step with
@@ -1049,6 +1071,10 @@ function applyTurnStartToPlayer(player, { isFirstTurn, skipDraw, donGain }) {
     const settings = getTurnAutomationSettings();
     const label = player?.name || "Player";
 
+    // The "from Life" yellow highlight is transient - when the turn passes to you
+    // it's no longer new, so drop it.
+    clearFromLifeHighlights(player);
+
     // Nothing on the board to refresh on your opening turn.
     if (!isFirstTurn) {
         if (settings.autoRestand) {
@@ -1198,7 +1224,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-1");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-2");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1242,7 +1268,7 @@ async function initializeSpectatorMatch() {
     showSpectatorBanner();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-1");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-2");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2106,6 +2132,7 @@ function showGameOverPopup(winnerPlayer, reasonTitle = "Victory", reasonText = "
         // Online: ready up (optionally with a different deck) and rematch in
         // place once BOTH players are ready. Handled by the rematch panel.
         popup.appendChild(buildRematchPanel());
+        popup.appendChild(buildGameOverChat());
         buttons.appendChild(mainMenuButton);
     } else {
         const playAgainButton = document.createElement("button");
@@ -2132,6 +2159,64 @@ let rematchUnsubscribe = null;
 let rematchState = {};
 let ownRematchDeckId = null;
 let rematchRestartAttempted = false;
+
+// A small chat on the game-over / rematch screen (the full-screen popup hides
+// the in-game chat), so players can talk while deciding on a rematch. Reuses the
+// same match chat channel.
+function buildGameOverChat() {
+    const wrap = document.createElement("div");
+    wrap.className = "gameover-chat";
+    wrap.innerHTML = `
+        <div class="gameover-chat-title">Chat</div>
+        <div class="gameover-chat-messages" id="gameOverChatMessages"></div>
+        <form class="gameover-chat-form" id="gameOverChatForm">
+            <input id="gameOverChatInput" type="text" maxlength="300" placeholder="Say something…" autocomplete="off">
+            <button type="submit" class="game-over-button">Send</button>
+        </form>
+    `;
+
+    const messagesEl = wrap.querySelector("#gameOverChatMessages");
+    const form = wrap.querySelector("#gameOverChatForm");
+    const input = wrap.querySelector("#gameOverChatInput");
+    const seen = new Set();
+
+    const renderMessage = (message) => {
+        if (seen.has(message.id)) return;
+        seen.add(message.id);
+        const isOwn = message.sender === getOwnChatName();
+        const entry = document.createElement("div");
+        entry.className = `gameover-chat-entry${isOwn ? " own" : ""}`;
+        const who = document.createElement("strong");
+        who.textContent = `${message.sender}: `;
+        entry.appendChild(who);
+        entry.appendChild(document.createTextNode(message.text));
+        messagesEl.appendChild(entry);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    };
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const text = input.value.trim();
+        if (!text || !onlineMultiplayerService) return;
+        input.value = "";
+        try {
+            await onlineMultiplayerService.sendChatMessage(roomCode, getOwnChatName(), text);
+        } catch (error) {
+            console.warn("Game-over chat send failed:", error);
+        }
+    });
+
+    if (onlineMultiplayerService?.subscribeToChat) {
+        // Own subscription so it renders into this box (the main one renders into
+        // the hidden game log). Cleaned up when the popup is torn down / on reload.
+        const unsub = onlineMultiplayerService.subscribeToChat(roomCode, (messages) => {
+            messages.forEach(renderMessage);
+        });
+        wrap._chatUnsub = unsub;
+    }
+
+    return wrap;
+}
 
 function buildRematchPanel() {
     const panel = document.createElement("div");
@@ -4735,6 +4820,8 @@ function renderPlayerLife(player, lifeAreaId) {
                     action: () => {
                         const taken = takeLifeCard();
                         if (!taken) return;
+                        // Only the most-recent life grab stays highlighted.
+                        clearFromLifeHighlights(player);
                         taken.fromLife = true; // highlight it in hand (both players)
                         player.hand.push(taken);
                         renderLifeCards();
