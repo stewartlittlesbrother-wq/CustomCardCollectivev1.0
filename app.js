@@ -1154,6 +1154,44 @@ async function compressImportedCardImages(cards) {
   return compactCards;
 }
 
+// Some card sites (Discord, Ultimate TCG Card Maker) hand out image URLs with a
+// short-lived signed token - they load for a day, then 404 and the card goes
+// blank. To make an imported card PERMANENT we pull its image NOW (while the
+// token is still valid) and store a compressed copy inline, so it never depends
+// on that link again.
+//
+// The image hosts don't send CORS headers, so a plain fetch/canvas is blocked.
+// We route through a public image proxy (wsrv.nl) that fetches the image
+// server-side and re-serves it WITH CORS, letting us read the bytes and inline
+// them. Returns a data: URL, or null if the proxy/image is unreachable (caller
+// then keeps the original URL as a best-effort fallback).
+const IMAGE_PROXY = "https://wsrv.nl/";
+async function fetchRemoteImageAsDataUrl(url) {
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  // Data URLs and already-permanent hosts don't need proxying.
+  if (url.startsWith("data:")) return url;
+
+  const proxied = `${IMAGE_PROXY}?url=${encodeURIComponent(url)}` +
+    `&w=${IMPORT_IMAGE_MAX_WIDTH}&we&output=webp&q=82`;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const response = await fetch(proxied, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    if (!blob.size || !/^image\//.test(blob.type)) return null;
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
 function csvValues(value) {
   return String(value || "")
     .split(/[,/]/)
@@ -2421,11 +2459,12 @@ async function saveCreatedCard(event) {
     return;
   }
 
-  // Prefer an image URL - stores only the link, not a base64 PNG blob. Fall
-  // back to the uploaded file (compressed base64) only when no URL is given.
+  // Prefer an uploaded file (permanent). For a pasted URL, try to store a
+  // permanent copy now (via the image proxy) so it can't expire later; if that
+  // can't be reached, fall back to keeping the link.
   let imageSource;
   if (imageUrl) {
-    imageSource = imageUrl;
+    imageSource = (await fetchRemoteImageAsDataUrl(imageUrl)) || imageUrl;
   } else if (file) {
     imageSource = await compressImageDataUrl(await readFileAsDataUrl(file));
   } else {
@@ -5761,9 +5800,26 @@ async function runUntapImport() {
     untapEl.untapDoImport.textContent = "Importing…";
   }
 
+  summary.imageStored = 0;
+  summary.imageKept = 0;
+  let done = 0;
   for (const entry of toImport) {
-    // Compress does nothing to remote URLs (only base64) but normalises shape.
-    const [card] = await compressImportedCardImages([entry.card]);
+    done++;
+    if (untapEl.untapDoImport) {
+      untapEl.untapDoImport.textContent = `Saving image ${done}/${toImport.length}…`;
+    }
+
+    // Store a PERMANENT copy of the image now, while any expiring token is still
+    // valid, so the card never goes blank later. Falls back to the original URL
+    // if the proxy can't reach it.
+    let card = entry.card;
+    if (!String(card.image || "").startsWith("data:")) {
+      const stored = await fetchRemoteImageAsDataUrl(card.image);
+      if (stored) { card = { ...card, image: stored }; summary.imageStored++; }
+      else summary.imageKept++;
+    }
+
+    [card] = await compressImportedCardImages([card]);
     const ok = await publishSingleCard(card);
     if (!ok) { summary.failed++; continue; }
     // "local" means the shared library couldn't be reached - the card is on THIS
@@ -5791,10 +5847,20 @@ function showUntapSummary(summary) {
       ["Skipped", summary.skipped],
       ["Invalid", summary.invalid]
     ];
+    if (summary.imageStored) rows.push(["Images saved permanently", summary.imageStored]);
     if (summary.failed) rows.push(["Failed to save", summary.failed]);
     list.innerHTML = rows
       .map(([label, count]) => `<li><span>${label}</span><strong>${count}</strong></li>`)
       .join("");
+    // Warn if some images couldn't be permanently stored - those still rely on an
+    // external link that may expire.
+    if (summary.imageKept) {
+      const note = document.createElement("li");
+      note.className = "untap-summary-warn";
+      note.innerHTML = `<span>⚠ ${summary.imageKept} image${summary.imageKept === 1 ? "" : "s"} couldn't be saved permanently ` +
+        `(the source couldn't be reached) — those still use a link that may expire. Try importing those again.</span>`;
+      list.appendChild(note);
+    }
     // Loud warning if the shared library couldn't be reached - those cards won't
     // work in multiplayer. Tells the user to check their connection and re-import.
     if (summary.deviceOnly) {
