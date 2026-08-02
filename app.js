@@ -313,14 +313,22 @@ const el = {
   donDeckPanel: document.querySelector("#donDeckPanel"),
   closeDonDeck: document.querySelector("#closeDonDeck"),
   importDonDeck: document.querySelector("#importDonDeck"),
-  donDeckForm: document.querySelector("#donDeckForm"),
+  addDonCardBtn: document.querySelector("#addDonCardBtn"),
+  addDonCardForm: document.querySelector("#addDonCardForm"),
+  donCardName: document.querySelector("#donCardName"),
+  donCardArtUrl: document.querySelector("#donCardArtUrl"),
+  donCardArtImage: document.querySelector("#donCardArtImage"),
+  cancelAddDonCard: document.querySelector("#cancelAddDonCard"),
+  donCardStatus: document.querySelector("#donCardStatus"),
   donDeckEditId: document.querySelector("#donDeckEditId"),
   donDeckName: document.querySelector("#donDeckName"),
   donDeckCount: document.querySelector("#donDeckCount"),
-  donDeckArtUrl: document.querySelector("#donDeckArtUrl"),
-  donDeckArtImage: document.querySelector("#donDeckArtImage"),
+  saveDonDeck: document.querySelector("#saveDonDeck"),
+  clearDonDeckBuild: document.querySelector("#clearDonDeckBuild"),
   cancelDonDeckEdit: document.querySelector("#cancelDonDeckEdit"),
   donDeckStatus: document.querySelector("#donDeckStatus"),
+  donDeckCurrent: document.querySelector("#donDeckCurrent"),
+  donCardPool: document.querySelector("#donCardPool"),
   donDeckList: document.querySelector("#donDeckList"),
   cardCreationForm: document.querySelector("#cardCreationForm"),
   creationImage: document.querySelector("#creationImage"),
@@ -461,9 +469,13 @@ function normalizeCard(raw, category) {
     imageUrl: normalizeImagePath(raw.image || ""),
     // Optional second artwork players can switch to (see alt-art prefs).
     altArt: normalizeImagePath(raw.altArt || ""),
+    // DON!! cards are shared library cards used only to build custom DON!! decks.
+    // Flagged so they're kept out of the normal deck-building pool.
+    donCard: Boolean(raw.donCard),
     // Which collection this card belongs to. Cards from before collections
-    // existed have no value and fall back to Goldrush717's Bleach.
-    collection: normalizeCollectionSlug(raw.collection),
+    // existed have no value and fall back to Goldrush717's Bleach. DON!! cards
+    // keep their own unregistered slug so they never inflate a real collection.
+    collection: raw.donCard ? "don-cards" : normalizeCollectionSlug(raw.collection),
     effectScript: raw.effectScript || raw.script || "",
     imported: Boolean(raw.imported || raw.needsCoding),
     needsCoding: Boolean(raw.needsCoding),
@@ -1145,18 +1157,26 @@ function readFileAsDataUrl(file) {
 // ─────────────────────────────────────────────────────────────────────────
 // Custom DON!! decks
 //
-// A DON!! deck is just { id, name, count, art }. Players build them in the Deck
-// Builder and pick one before a game; the game (self.js) reads the same
-// localStorage keys. No art / no selection falls back to the standard 10 DON!!
-// with the default image, so this is entirely additive.
+// Works like the deck builder, but for DON!!. DON!! cards are shared library
+// cards flagged `donCard: true` (in a hidden "don-cards" collection so they
+// never show up in the normal card pool). A DON!! deck is a saved list of up to
+// 10 of those cards, WITH each card's art embedded so the game never has to look
+// them up. Players pick a deck at game start; no deck / no selection falls back
+// to the standard 10 DON!!. Saved decks live per-device (localStorage) like the
+// main saved decks; the DON!! cards themselves are shared for everyone.
 // ─────────────────────────────────────────────────────────────────────────
 const DON_DECKS_KEY = "custom-don-decks-v1";
 const DON_ACTIVE_DECK_KEY = "custom-don-active-deck-v1";
+const DON_COLLECTION = "don-cards";
+const DON_DECK_MAX = 10;
+
+// The deck currently being built in the DON!! screen: { editId, cards:[{n,art,name}] }.
+let donBuild = { editId: "", cards: [] };
 
 function getDonDecks() {
   try {
     const list = JSON.parse(localStorage.getItem(DON_DECKS_KEY) || "[]");
-    return Array.isArray(list) ? list : [];
+    return Array.isArray(list) ? list.filter(d => d && Array.isArray(d.cards)) : [];
   } catch { return []; }
 }
 
@@ -1175,14 +1195,216 @@ function setActiveDonDeckId(id) {
   } catch {}
 }
 
-function resetDonDeckForm() {
-  if (!el.donDeckForm) return;
-  el.donDeckForm.reset();
+// Every DON!! card currently in the shared pool.
+function getDonPoolCards() {
+  return (state.cards || []).filter(card => card && card.donCard);
+}
+
+// Open (or refresh) the whole DON!! screen.
+function openDonDeckScreen() {
+  resetDonBuild();
+  hideAddDonCardForm();
+  renderDonCardPool();
+  renderDonDeckCurrent();
+  renderDonDeckList();
+}
+
+function resetDonBuild() {
+  donBuild = { editId: "", cards: [] };
+  if (el.donDeckName) el.donDeckName.value = "";
   if (el.donDeckEditId) el.donDeckEditId.value = "";
-  if (el.donDeckCount) el.donDeckCount.value = "10";
   if (el.cancelDonDeckEdit) el.cancelDonDeckEdit.hidden = true;
-  if (el.saveDonDeck) el.saveDonDeck.textContent = "Save DON!! Deck";
+  if (el.saveDonDeck) el.saveDonDeck.textContent = "Save Deck";
   if (el.donDeckStatus) el.donDeckStatus.textContent = "Ready";
+  renderDonDeckCurrent();
+}
+
+// ── Adding a DON!! card to the shared pool ────────────────────────────────
+function showAddDonCardForm() {
+  if (!el.addDonCardForm) return;
+  el.addDonCardForm.hidden = false;
+  if (el.donCardName) el.donCardName.value = "";
+  if (el.donCardArtUrl) el.donCardArtUrl.value = "";
+  if (el.donCardArtImage) el.donCardArtImage.value = "";
+  if (el.donCardStatus) el.donCardStatus.textContent = "";
+  el.donCardArtUrl?.focus();
+}
+
+function hideAddDonCardForm() {
+  if (el.addDonCardForm) el.addDonCardForm.hidden = true;
+}
+
+async function saveDonCard(event) {
+  event.preventDefault();
+  const name = (el.donCardName?.value || "").trim();
+  const file = el.donCardArtImage?.files?.[0];
+  const url = (el.donCardArtUrl?.value || "").trim();
+  if (!file && !url) { toast("Add an image URL or upload a file for the DON!! card"); return; }
+
+  if (el.donCardStatus) el.donCardStatus.textContent = "Saving image…";
+  let image = "";
+  try {
+    if (file) image = await readFileAsDataUrl(file);
+    else image = (await fetchRemoteImageAsDataUrl(url)) || url; // permanent copy
+  } catch { image = url; }
+  if (!image) { toast("Could not read that image"); if (el.donCardStatus) el.donCardStatus.textContent = ""; return; }
+
+  // A unique DON!! card number; the id/cardNumber convention matches other cards.
+  // Store the RAW card shape (with `image`, like creationCardFromForm) - NOT a
+  // pre-normalized one - so the art survives the save→reload round-trip
+  // (normalizeCard reads raw.image on load).
+  const cardNumber = `DON-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`.toUpperCase();
+  const card = {
+    id: cardNumber,
+    cardNumber,
+    name: name || "DON!!",
+    category: "character",
+    cardType: "character",
+    color: "colorless",
+    colors: ["colorless"],
+    image,
+    altArt: "",
+    collection: DON_COLLECTION,
+    donCard: true,
+    imported: true,
+    importedAt: new Date().toISOString(),
+    untapId: cardNumber
+  };
+
+  if (el.donCardStatus) el.donCardStatus.textContent = "Publishing…";
+  const result = await publishSingleCard(card);
+  if (!result) { toast("Could not save the DON!! card"); if (el.donCardStatus) el.donCardStatus.textContent = ""; return; }
+  await loadCardPool();
+  hideAddDonCardForm();
+  renderDonCardPool();
+  toast(result === "local" ? "DON!! card saved (this device only)" : "DON!! card added to the shared pool");
+}
+
+async function deleteDonCard(cardNumber) {
+  const card = getDonPoolCards().find(c => c.cardNumber === cardNumber);
+  if (!card) return;
+  // Reuse the standard imported-card delete (confirm + shared-library removal +
+  // pool reload), then refresh the DON!! screen.
+  await deleteImportedCard(card.id);
+  donBuild.cards = donBuild.cards.filter(c => c.n !== cardNumber);
+  renderDonCardPool();
+  renderDonDeckCurrent();
+}
+
+// ── Building a deck from the pool ─────────────────────────────────────────
+function renderDonCardPool() {
+  if (!el.donCardPool) return;
+  const cards = getDonPoolCards();
+  el.donCardPool.innerHTML = "";
+  if (!cards.length) {
+    el.donCardPool.innerHTML = `<div class="don-pool-empty">No DON!! cards yet — use “+ Add DON!! Card” to add art everyone can build with.</div>`;
+    return;
+  }
+  cards.forEach(card => {
+    const inDeck = donBuild.cards.filter(c => c.n === card.cardNumber).length;
+    const tile = document.createElement("div");
+    tile.className = "don-pool-card";
+    tile.innerHTML = `
+      <div class="don-pool-art">${card.imageUrl ? `<img src="${card.imageUrl}" alt="">` : `<span>ド!!</span>`}</div>
+      <div class="don-pool-name"></div>
+      <div class="don-pool-actions">
+        <button class="red-button" type="button" data-add-donpool="${card.cardNumber}">Add${inDeck ? ` (${inDeck})` : ""}</button>
+        <button class="ghost danger" type="button" data-del-donpool="${card.cardNumber}">✕</button>
+      </div>`;
+    tile.querySelector(".don-pool-name").textContent = card.name || "DON!!";
+    el.donCardPool.appendChild(tile);
+  });
+}
+
+function addDonCardToBuild(cardNumber) {
+  if (donBuild.cards.length >= DON_DECK_MAX) { toast(`A DON!! deck holds at most ${DON_DECK_MAX} cards`); return; }
+  const card = getDonPoolCards().find(c => c.cardNumber === cardNumber);
+  if (!card) return;
+  donBuild.cards.push({ n: card.cardNumber, art: card.imageUrl || "", name: card.name || "DON!!" });
+  renderDonDeckCurrent();
+  renderDonCardPool();
+}
+
+function removeDonCardFromBuild(index) {
+  donBuild.cards.splice(index, 1);
+  renderDonDeckCurrent();
+  renderDonCardPool();
+}
+
+function renderDonDeckCurrent() {
+  if (el.donDeckCount) el.donDeckCount.textContent = String(donBuild.cards.length);
+  if (!el.donDeckCurrent) return;
+  el.donDeckCurrent.innerHTML = "";
+  if (!donBuild.cards.length) {
+    el.donDeckCurrent.innerHTML = `<span class="don-deck-empty-hint">Add DON!! cards from the pool below (up to ${DON_DECK_MAX}).</span>`;
+    return;
+  }
+  donBuild.cards.forEach((c, index) => {
+    const chip = document.createElement("div");
+    chip.className = "don-deck-chip";
+    chip.innerHTML = `
+      <div class="don-deck-chip-art">${c.art ? `<img src="${c.art}" alt="">` : `<span>ド!!</span>`}</div>
+      <button class="don-deck-chip-remove" type="button" data-remove-donbuild="${index}" title="Remove">✕</button>`;
+    el.donDeckCurrent.appendChild(chip);
+  });
+}
+
+function clearDonBuild() {
+  donBuild.cards = [];
+  renderDonDeckCurrent();
+  renderDonCardPool();
+}
+
+function saveDonDeck() {
+  const name = (el.donDeckName?.value || "").trim();
+  if (!name) { toast("Name your DON!! deck"); return; }
+  if (!donBuild.cards.length) { toast("Add at least one DON!! card"); return; }
+
+  const decks = getDonDecks();
+  const existing = donBuild.editId ? decks.find(d => d.id === donBuild.editId) : null;
+  const cards = donBuild.cards.map(c => ({ n: c.n, art: c.art || "", name: c.name || "DON!!" }));
+  if (existing) {
+    existing.name = name;
+    existing.cards = cards;
+  } else {
+    decks.push({ id: `don-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name, cards });
+  }
+  saveDonDecks(decks);
+  const wasEditing = Boolean(existing);
+  resetDonBuild();
+  renderDonDeckList();
+  toast(wasEditing ? "DON!! deck updated" : "DON!! deck saved");
+}
+
+function editDonDeck(id) {
+  const deck = getDonDecks().find(d => d.id === id);
+  if (!deck) return;
+  donBuild = {
+    editId: deck.id,
+    cards: (deck.cards || []).map(c => ({ n: c.n, art: c.art || "", name: c.name || "DON!!" }))
+  };
+  if (el.donDeckName) el.donDeckName.value = deck.name || "";
+  if (el.cancelDonDeckEdit) el.cancelDonDeckEdit.hidden = false;
+  if (el.saveDonDeck) el.saveDonDeck.textContent = "Update Deck";
+  if (el.donDeckStatus) el.donDeckStatus.textContent = "Editing…";
+  renderDonDeckCurrent();
+  renderDonCardPool();
+  el.donDeckName?.focus();
+}
+
+function deleteDonDeck(id) {
+  const decks = getDonDecks().filter(d => d.id !== id);
+  saveDonDecks(decks);
+  if (getActiveDonDeckId() === id) setActiveDonDeckId("");
+  renderDonDeckList();
+  toast("DON!! deck deleted");
+}
+
+function useDonDeck(id) {
+  setActiveDonDeckId(id || "");
+  renderDonDeckList();
+  const deck = getDonDecks().find(d => d.id === id);
+  toast(id && deck ? `Using "${deck.name}" DON!! deck in games` : "Using standard DON!!");
 }
 
 function renderDonDeckList() {
@@ -1191,7 +1413,7 @@ function renderDonDeckList() {
   const activeId = getActiveDonDeckId();
   el.donDeckList.innerHTML = "";
 
-  // The always-present default option.
+  // The always-present standard option.
   const defaultRow = document.createElement("div");
   defaultRow.className = "don-deck-row" + (activeId ? "" : " active");
   defaultRow.innerHTML = `
@@ -1209,14 +1431,13 @@ function renderDonDeckList() {
     const isActive = activeId === deck.id;
     const row = document.createElement("div");
     row.className = "don-deck-row" + (isActive ? " active" : "");
-    const art = deck.art
-      ? `<img src="${deck.art}" alt="">`
-      : `<span>ド!!</span>`;
+    const thumbs = (deck.cards || []).slice(0, 5)
+      .map(c => c.art ? `<img src="${c.art}" alt="">` : `<span>ド!!</span>`).join("");
     row.innerHTML = `
-      <div class="don-deck-art">${art}</div>
+      <div class="don-deck-art don-deck-art-stack">${thumbs || `<span>ド!!</span>`}</div>
       <div class="don-deck-meta">
         <strong></strong>
-        <small>${Number(deck.count) || 10} DON!!</small>
+        <small>${(deck.cards || []).length} DON!!</small>
       </div>
       <div class="don-deck-row-actions">
         <button class="ghost" type="button" data-use-don="${deck.id}">${isActive ? "In use" : "Use"}</button>
@@ -1224,81 +1445,15 @@ function renderDonDeckList() {
         <button class="ghost" type="button" data-export-don="${deck.id}">Export</button>
         <button class="ghost danger" type="button" data-delete-don="${deck.id}">Delete</button>
       </div>`;
-    // Set the name via textContent so custom names can't inject markup.
     row.querySelector(".don-deck-meta strong").textContent = deck.name || "DON!! deck";
     el.donDeckList.appendChild(row);
   });
 }
 
-async function saveDonDeckFromForm(event) {
-  event.preventDefault();
-  const name = (el.donDeckName?.value || "").trim();
-  const count = Math.max(1, Math.min(30, Math.round(Number(el.donDeckCount?.value) || 10)));
-  if (!name) { toast("Name your DON!! deck"); return; }
-
-  const editId = el.donDeckEditId?.value || "";
-  const decks = getDonDecks();
-  const existing = editId ? decks.find(d => d.id === editId) : null;
-
-  // Resolve art: uploaded file > URL > keep existing (when editing).
-  let art = existing?.art || "";
-  const file = el.donDeckArtImage?.files?.[0];
-  const url = (el.donDeckArtUrl?.value || "").trim();
-  if (file) {
-    if (el.donDeckStatus) el.donDeckStatus.textContent = "Reading image…";
-    art = await readFileAsDataUrl(file);
-  } else if (url) {
-    if (el.donDeckStatus) el.donDeckStatus.textContent = "Saving image…";
-    // Store a permanent copy so link expiry can't blank the art later.
-    art = (await fetchRemoteImageAsDataUrl(url)) || url;
-  }
-
-  if (existing) {
-    existing.name = name;
-    existing.count = count;
-    existing.art = art;
-  } else {
-    decks.push({ id: `don-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name, count, art });
-  }
-  saveDonDecks(decks);
-  resetDonDeckForm();
-  renderDonDeckList();
-  toast(existing ? "DON!! deck updated" : "DON!! deck saved");
-}
-
-function editDonDeck(id) {
-  const deck = getDonDecks().find(d => d.id === id);
-  if (!deck) return;
-  if (el.donDeckEditId) el.donDeckEditId.value = deck.id;
-  if (el.donDeckName) el.donDeckName.value = deck.name || "";
-  if (el.donDeckCount) el.donDeckCount.value = Number(deck.count) || 10;
-  if (el.donDeckArtUrl) el.donDeckArtUrl.value = /^https?:\/\//i.test(deck.art || "") ? deck.art : "";
-  if (el.donDeckArtImage) el.donDeckArtImage.value = "";
-  if (el.cancelDonDeckEdit) el.cancelDonDeckEdit.hidden = false;
-  if (el.saveDonDeck) el.saveDonDeck.textContent = "Update DON!! Deck";
-  if (el.donDeckStatus) el.donDeckStatus.textContent = "Editing…";
-  el.donDeckName?.focus();
-}
-
-function deleteDonDeck(id) {
-  const decks = getDonDecks().filter(d => d.id !== id);
-  saveDonDecks(decks);
-  if (getActiveDonDeckId() === id) setActiveDonDeckId("");
-  renderDonDeckList();
-  toast("DON!! deck deleted");
-}
-
-function useDonDeck(id) {
-  setActiveDonDeckId(id || "");
-  renderDonDeckList();
-  const deck = getDonDecks().find(d => d.id === id);
-  toast(id && deck ? `Using "${deck.name}" DON!! deck` : "Using standard DON!!");
-}
-
 function exportDonDeck(id) {
   const deck = getDonDecks().find(d => d.id === id);
   if (!deck) return;
-  const payload = JSON.stringify({ type: "custom-don-deck", name: deck.name, count: deck.count, art: deck.art });
+  const payload = JSON.stringify({ type: "custom-don-deck", name: deck.name, cards: deck.cards });
   navigator.clipboard?.writeText(payload).then(
     () => toast("DON!! deck copied — share the text to let others import it"),
     () => window.prompt("Copy this DON!! deck code:", payload)
@@ -1310,13 +1465,18 @@ function importDonDeckFromText() {
   if (!text) return;
   let data;
   try { data = JSON.parse(text.trim()); } catch { toast("That doesn't look like a DON!! deck code"); return; }
-  if (!data || data.type !== "custom-don-deck" || !data.name) { toast("Invalid DON!! deck code"); return; }
+  if (!data || data.type !== "custom-don-deck" || !data.name || !Array.isArray(data.cards)) {
+    toast("Invalid DON!! deck code"); return;
+  }
   const decks = getDonDecks();
   decks.push({
     id: `don-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name: String(data.name).slice(0, 60),
-    count: Math.max(1, Math.min(30, Math.round(Number(data.count) || 10))),
-    art: typeof data.art === "string" ? data.art : ""
+    cards: data.cards.slice(0, DON_DECK_MAX).map(c => ({
+      n: String(c.n || ""),
+      art: typeof c.art === "string" ? c.art : "",
+      name: String(c.name || "DON!!").slice(0, 60)
+    }))
   });
   saveDonDecks(decks);
   renderDonDeckList();
@@ -4113,6 +4273,10 @@ function filteredCards() {
     : false;
 
   return state.cards.filter(card => {
+    // DON!! cards live in their own screen and must never appear in the normal
+    // deck-building pool.
+    if (card.donCard) return false;
+
     // Collections gate everything: the grid only ever shows the collection the
     // user opened from the picker. With no collection chosen nothing shows (the
     // picker screen is displayed in its place).
@@ -5577,14 +5741,30 @@ function bindEvents() {
     if (el.savedDecksPanel) el.savedDecksPanel.hidden = true;
     if (el.cardCreationPanel) el.cardCreationPanel.hidden = true;
     if (el.donDeckPanel) el.donDeckPanel.hidden = false;
-    resetDonDeckForm();
-    renderDonDeckList();
+    openDonDeckScreen();
   });
   el.closeDonDeck?.addEventListener("click", () => {
     if (el.donDeckPanel) el.donDeckPanel.hidden = true;
   });
-  el.donDeckForm?.addEventListener("submit", saveDonDeckFromForm);
-  el.cancelDonDeckEdit?.addEventListener("click", resetDonDeckForm);
+  // Add a DON!! card to the shared pool.
+  el.addDonCardBtn?.addEventListener("click", showAddDonCardForm);
+  el.cancelAddDonCard?.addEventListener("click", hideAddDonCardForm);
+  el.addDonCardForm?.addEventListener("submit", saveDonCard);
+  // Pool: add a card to the deck being built, or delete it from the pool.
+  el.donCardPool?.addEventListener("click", event => {
+    const addId = event.target.closest("[data-add-donpool]")?.dataset.addDonpool;
+    if (addId) { addDonCardToBuild(addId); return; }
+    const delId = event.target.closest("[data-del-donpool]")?.dataset.delDonpool;
+    if (delId) { deleteDonCard(delId); return; }
+  });
+  // Current build: remove a card by its slot index.
+  el.donDeckCurrent?.addEventListener("click", event => {
+    const idx = event.target.closest("[data-remove-donbuild]")?.dataset.removeDonbuild;
+    if (idx !== undefined) removeDonCardFromBuild(Number(idx));
+  });
+  el.saveDonDeck?.addEventListener("click", saveDonDeck);
+  el.clearDonDeckBuild?.addEventListener("click", clearDonBuild);
+  el.cancelDonDeckEdit?.addEventListener("click", resetDonBuild);
   el.importDonDeck?.addEventListener("click", importDonDeckFromText);
   el.donDeckList?.addEventListener("click", event => {
     const useId = event.target.closest("[data-use-don]")?.dataset.useDon;

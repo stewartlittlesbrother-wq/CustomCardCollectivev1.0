@@ -4487,3 +4487,58 @@ body.extra-slots-off .extra-slots-wrap { display: none !important; }
     background: rgba(0, 0, 0, .3);
     color: inherit;
 }
+
+/* ── DON!! deck chooser (shown at game start when you have saved decks) ── */
+.don-choice-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 900;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, .6);
+}
+.don-choice-card {
+    width: min(420px, 92%);
+    background: #14161c;
+    color: #f2f4f8;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 14px;
+    padding: 20px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+}
+.don-choice-card h3 {
+    margin: 0 0 6px;
+}
+.don-choice-card p {
+    margin: 0 0 14px;
+    opacity: .75;
+    font-size: 14px;
+}
+.don-choice-options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.don-choice-btn {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, .16);
+    background: rgba(255, 255, 255, .04);
+    color: inherit;
+    cursor: pointer;
+}
+.don-choice-btn:hover {
+    border-color: #f2c14e;
+}
+.don-choice-btn.active {
+    border-color: #f2c14e;
+    box-shadow: 0 0 0 1px #f2c14e inset;
+}
+.don-choice-btn small {
+    opacity: .65;
+}

@@ -35,31 +35,101 @@ const donBackImage = "../images/basic/card-back-don.webp";
 const donImage = "../images/basic/card-front-don.webp";
 
 // Custom DON!! decks, built in the Deck Builder (app.js) and stored in
-// localStorage. The active selection sets how many DON!! a player starts the
-// game able to draw and which art their DON!! use. No selection / no art falls
-// back to the standard 10 DON!! with the default image above.
+// localStorage. A DON!! deck is a list of up to 10 DON!! cards, each with its
+// own art. The active selection sets how many DON!! a player can draw (the deck
+// size) and the per-slot art. No selection / empty deck falls back to the
+// standard 10 DON!! with the default image above.
 const DON_DECKS_KEY = "custom-don-decks-v1";
 const DON_ACTIVE_DECK_KEY = "custom-don-active-deck-v1";
 function getActiveDonDeck() {
     try {
         const id = localStorage.getItem(DON_ACTIVE_DECK_KEY) || "";
-        if (!id) return { count: 10, art: null };
+        if (!id) return { count: 10, arts: null };
         const list = JSON.parse(localStorage.getItem(DON_DECKS_KEY) || "[]");
         const deck = Array.isArray(list) ? list.find(d => d && d.id === id) : null;
-        if (!deck) return { count: 10, art: null };
-        return {
-            count: Math.max(1, Math.min(30, Math.round(Number(deck.count) || 10))),
-            art: typeof deck.art === "string" && deck.art ? deck.art : null
-        };
-    } catch { return { count: 10, art: null }; }
+        const cards = deck && Array.isArray(deck.cards) ? deck.cards : null;
+        if (!cards || !cards.length) return { count: 10, arts: null };
+        const arts = cards.slice(0, 10).map(c => (c && typeof c.art === "string" && c.art) ? c.art : donImage);
+        return { count: arts.length, arts };
+    } catch { return { count: 10, arts: null }; }
 }
-// Per-player DON!! limit / art with sane fallbacks for older player objects.
+// Per-player DON!! limit with a sane fallback for older player objects.
 function donMaxFor(player) {
     const max = Number(player?.donMax);
     return max > 0 ? max : 10;
 }
-function donArtFor(player) {
-    return (player && typeof player.donArt === "string" && player.donArt) ? player.donArt : donImage;
+// Art for a specific DON!! slot (left to right). Custom decks give each DON!! its
+// own art; standard decks return the default image for every slot. Online, only
+// your own DON!! art is known locally (per-slot art isn't synced), so the
+// opponent always uses the default image.
+function donArtForSlot(player, index) {
+    if (isOnlineMatch && !isSpectator && !isOwnOnlinePlayer(player)) return donImage;
+    const arts = player && Array.isArray(player.donArts) ? player.donArts : null;
+    const art = arts && index >= 0 && index < arts.length ? arts[index] : null;
+    return (typeof art === "string" && art) ? art : donImage;
+}
+
+// All saved DON!! decks (for the game-start picker).
+function getSavedDonDeckList() {
+    try {
+        const list = JSON.parse(localStorage.getItem(DON_DECKS_KEY) || "[]");
+        return Array.isArray(list) ? list.filter(d => d && Array.isArray(d.cards) && d.cards.length) : [];
+    } catch { return []; }
+}
+
+// Apply a chosen DON!! deck (or null = standard 10) to the local player(s).
+function applyDonDeckSelection(deck) {
+    const arts = deck && Array.isArray(deck.cards) && deck.cards.length
+        ? deck.cards.slice(0, 10).map(c => (c && typeof c.art === "string" && c.art) ? c.art : donImage)
+        : null;
+    const count = arts ? arts.length : 10;
+    // Apply to both players. In practice you control both sides; online, the
+    // opponent's art is ignored (donArtForSlot guard) and their count is
+    // overwritten by the synced board, so this only really affects your side.
+    [gameState.player1, gameState.player2].forEach(player => {
+        player.donMax = count;
+        player.donArts = arts;
+    });
+    try { localStorage.setItem(DON_ACTIVE_DECK_KEY, deck?.id || ""); } catch {}
+    updateDonDisplay();
+}
+
+// At game start, if the player has any saved DON!! decks, let them pick one
+// (or the standard 10) for this game. No saved decks → silently keep standard.
+function maybePromptDonDeckChoice() {
+    if (isSpectator) return;
+    const decks = getSavedDonDeckList();
+    if (!decks.length) return;
+
+    const overlay = document.createElement("div");
+    overlay.className = "don-choice-overlay";
+    const card = document.createElement("div");
+    card.className = "don-choice-card";
+    card.innerHTML = `<h3>Choose your DON!! deck</h3>
+        <p>Pick the DON!! deck to use this game.</p>
+        <div class="don-choice-options"></div>`;
+    const options = card.querySelector(".don-choice-options");
+
+    const activeId = (() => { try { return localStorage.getItem(DON_ACTIVE_DECK_KEY) || ""; } catch { return ""; } })();
+    const makeBtn = (label, sub, deck) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "don-choice-btn" + ((deck?.id || "") === activeId ? " active" : "");
+        btn.innerHTML = `<strong></strong><small></small>`;
+        btn.querySelector("strong").textContent = label;
+        btn.querySelector("small").textContent = sub;
+        btn.addEventListener("click", () => {
+            applyDonDeckSelection(deck);
+            overlay.remove();
+            addGameLog(deck ? `Using DON!! deck "${deck.name}".` : "Using standard DON!!.");
+        });
+        return btn;
+    };
+    options.appendChild(makeBtn("Standard DON!!", "10 DON!! · default art", null));
+    decks.forEach(deck => options.appendChild(makeBtn(deck.name || "DON!! deck", `${deck.cards.length} DON!!`, deck)));
+
+    overlay.appendChild(card);
+    (document.querySelector(".game-board") || document.body).appendChild(overlay);
 }
 
 // =========================
@@ -254,11 +324,10 @@ function applyBoardToPlayer(player, boardJson) {
     player.floatingDon = Array.isArray(board.floatingDon) ? board.floatingDon : [];
     player.don = Number(board.don || 0);
     player.restedDon = Number(board.restedDon || 0);
-    // Custom DON!! deck (count + art) so the opponent's DON!! render correctly.
+    // Custom DON!! deck size so the opponent's DON!! count renders correctly.
     // Own player keeps its locally-applied deck; only apply from the board when
     // it carries a value (older matches won't have it).
     if (Number(board.donMax) > 0) player.donMax = Number(board.donMax);
-    if (typeof board.donArt === "string" && board.donArt) player.donArt = board.donArt;
     // Rebuilt from the counts by getDonSlots if absent or inconsistent.
     player.donOrder = Array.isArray(board.donOrder) ? board.donOrder : null;
 }
@@ -971,9 +1040,10 @@ function createPublicPlayerStateFromLocal(player) {
         floatingDon: player.floatingDon || [],
         don: Number(player.don || 0),
         restedDon: Number(player.restedDon || 0),
-        // Custom DON!! deck so the opponent sees the right count + art.
-        donMax: donMaxFor(player),
-        donArt: (typeof player.donArt === "string" && player.donArt) ? player.donArt : null
+        // Custom DON!! deck SIZE so the opponent sees the right count. Per-slot
+        // art isn't synced (up to 10 images would bloat every board update); the
+        // opponent renders standard DON!! art, which is fine for counting.
+        donMax: donMaxFor(player)
     };
 
     return {
@@ -1762,7 +1832,7 @@ function createInitialPlayerState(playerName, deckDefinition) {
         donDeck: 10,
         // Custom DON!! deck limit / art (default 10 + standard image).
         donMax: 10,
-        donArt: null,
+        donArts: null,
         turns: 0,
         deck: shuffleDeck(parseDeckText(selectedDeck.deckText)),
         deckName: selectedDeck.name,
@@ -1812,7 +1882,7 @@ function createEmptyPlayerState(playerName) {
         restedDon: 0,
         donDeck: 10,
         donMax: 10,
-        donArt: null,
+        donArts: null,
         turns: 0,
         deck: [],
         deckName: playerName,
@@ -1991,15 +2061,14 @@ async function initializeGamePage() {
 
         gameState = createInitialGameState();
 
-        // Apply the player's chosen custom DON!! deck (count + art). In practice
-        // you control both sides, so both use it; online, only your own side does
-        // and the opponent's DON!! come through the synced board state.
+        // Apply the player's chosen custom DON!! deck (size + per-slot art). In
+        // practice you control both sides, so both use it; online, only your own
+        // side does and the opponent's DON!! count comes through the synced board.
         if (!isSpectator) {
             const activeDon = getActiveDonDeck();
-            const mine = [gameState.player1, gameState.player2];
-            mine.forEach(player => {
+            [gameState.player1, gameState.player2].forEach(player => {
                 player.donMax = activeDon.count;
-                player.donArt = activeDon.art;
+                player.donArts = activeDon.arts;
             });
         }
 
@@ -2023,6 +2092,10 @@ async function initializeGamePage() {
         setupCardPreview();
         setupDonAttachmentClearListener();
         autoStartSelfMatch();
+
+        // If the player has saved DON!! decks, let them choose one for this game
+        // (or the standard 10). No saved decks → keep standard silently.
+        maybePromptDonDeckChoice();
 
         // Practice board: auto-lay each side's life from their leader's life
         // value. Online life is handled in maybeAutoLayOnlineLife after mulligan.
@@ -3216,7 +3289,7 @@ function renderDonArea(player, areaId) {
         const rested = slot === "rested";
         const img = document.createElement("img");
 
-        const donArt = donArtFor(player);
+        const donArt = donArtForSlot(player, index);
         img.src = donArt;
         // .don-card-img has a CSS `content: url(default)` that replaces the src on
         // every DON!!. For a custom deck art we must undo that inline (inline style

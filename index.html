@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=1280">
   <title>Custom Cards Simulator</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=creation-20">
+  <link rel="stylesheet" href="styles.css?v=creation-21">
 </head>
 <body>
   <div class="app-shell">
@@ -513,44 +513,51 @@
                 </div>
               </section>
 
-              <!-- Custom DON!! decks: set how many DON!! and which art a player
-                   uses. Players pick one at game start (practice or multiplayer)
-                   or fall back to the standard 10 DON!! with the default art. -->
+              <!-- Custom DON!! decks. Works like the deck builder but for DON!!:
+                   a shared pool of DON!! cards people have added, from which you
+                   build a deck of 0-10 cards. Players pick one at game start
+                   (Practice or Multiplayer) or fall back to the standard 10. -->
               <section class="don-deck-panel" id="donDeckPanel" hidden>
                 <div class="saved-decks-header">
                   <strong>DON!! Decks</strong>
                   <div class="creation-header-actions">
-                    <button class="ghost" type="button" id="importDonDeck">Import</button>
+                    <button class="red-button" type="button" id="addDonCardBtn">+ Add DON!! Card</button>
+                    <button class="ghost" type="button" id="importDonDeck">Import Deck</button>
                     <button class="ghost" type="button" id="closeDonDeck">Close</button>
                   </div>
                 </div>
-                <p class="settings-group-note">
-                  Build a custom DON!! deck with your own art and DON!! count.
-                  Choose one before a game in the Practice or Multiplayer board —
-                  otherwise you get the standard 10 DON!!.
-                </p>
 
-                <form id="donDeckForm" class="don-deck-form">
-                  <input type="hidden" id="donDeckEditId" value="">
-                  <label>Deck name
-                    <input id="donDeckName" type="text" placeholder="My DON!! deck" required>
-                  </label>
-                  <label>DON!! count
-                    <input id="donDeckCount" type="number" min="1" max="30" step="1" value="10" required>
-                  </label>
-                  <label>Art URL <small>(optional)</small>
-                    <input id="donDeckArtUrl" type="url" placeholder="https://example.com/don.png">
-                  </label>
-                  <label>Or upload art <small>(optional)</small>
-                    <input id="donDeckArtImage" type="file" accept="image/png,image/jpeg,image/webp">
-                  </label>
-                  <div class="don-deck-form-actions">
-                    <button class="red-button" type="submit" id="saveDonDeck">Save DON!! Deck</button>
-                    <button class="ghost" type="button" id="cancelDonDeckEdit" hidden>Cancel edit</button>
-                    <span id="donDeckStatus" class="creation-status">Ready</span>
+                <!-- Mini creator for a single DON!! card (art + optional name).
+                     Adds it to the shared pool so everyone can use it. -->
+                <form id="addDonCardForm" class="don-add-card-form" hidden>
+                  <input id="donCardName" type="text" placeholder="Name (optional)">
+                  <input id="donCardArtUrl" type="url" placeholder="Art URL (https://…)">
+                  <input id="donCardArtImage" type="file" accept="image/png,image/jpeg,image/webp">
+                  <div class="don-add-card-actions">
+                    <button class="red-button" type="submit" id="saveDonCard">Add to pool</button>
+                    <button class="ghost" type="button" id="cancelAddDonCard">Cancel</button>
+                    <span id="donCardStatus" class="creation-status"></span>
                   </div>
                 </form>
 
+                <!-- The DON!! deck you're currently building. -->
+                <div class="don-builder-bar">
+                  <input type="hidden" id="donDeckEditId" value="">
+                  <input id="donDeckName" type="text" placeholder="DON!! deck name">
+                  <span class="don-deck-count-pill"><strong id="donDeckCount">0</strong>/10</span>
+                  <button class="red-button" type="button" id="saveDonDeck">Save Deck</button>
+                  <button class="ghost" type="button" id="clearDonDeckBuild">Clear</button>
+                  <button class="ghost" type="button" id="cancelDonDeckEdit" hidden>Cancel edit</button>
+                  <span id="donDeckStatus" class="creation-status">Ready</span>
+                </div>
+                <div id="donDeckCurrent" class="don-deck-current">
+                  <span class="don-deck-empty-hint">Add DON!! cards from the pool below (up to 10).</span>
+                </div>
+
+                <strong class="don-section-label">DON!! Card Pool</strong>
+                <div id="donCardPool" class="don-card-pool"></div>
+
+                <strong class="don-section-label">Saved DON!! Decks</strong>
                 <div id="donDeckList" class="don-deck-list"></div>
               </section>
 
@@ -759,7 +766,7 @@
   <script src="js/rotate-prompt.js"></script>
   <script src="js/cards/decks.js?v=creation-8"></script>
   <script src="js/manual-play.js?v=manual-3"></script>
-  <script src="app.js?v=creation-33"></script>
+  <script src="app.js?v=creation-34"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).
