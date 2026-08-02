@@ -592,72 +592,47 @@ async function loadSharedCardsForPool() {
 // ─────────────────────────────────────────────────────────────────────────
 // Official One Piece TCG card list
 //
-// Pulled live from a free, no-key public API (optcgapi.com) and cached locally
-// for a day so we don't hammer their VPS. Images are HOTLINKED from the API's
-// host - nothing is written to Firebase, so this uses zero shared storage. The
-// cards live in a read-only "official-op" collection and are loaded into the
-// in-memory pool (and, via the same cache, into the game) like any other card.
+// The data is refreshed once a day by a GitHub Action (see
+// .github/workflows/update-official-cards.yml) that pulls cardkaizoku's public
+// card list and commits a trimmed copy to data/official-cards.json. The site
+// loads that file SAME-ORIGIN (cardkaizoku's CDN blocks cross-site fetches, so
+// the browser can't read it directly). Card IMAGES are hotlinked from
+// cardkaizoku's CDN - nothing is written to Firebase, so this uses zero shared
+// storage. The cards live in a read-only "official-op" collection and load into
+// the in-memory pool (and, via the localStorage cache, into the game).
 // ─────────────────────────────────────────────────────────────────────────
 const OFFICIAL_COLLECTION = "official-op";
 const OFFICIAL_CARDS_KEY = "official-optcg-cards-v1";
-const OFFICIAL_CARDS_TTL_MS = 24 * 60 * 60 * 1000;
-const OPTCG_API_BASE = "https://optcgapi.com/api";
+const OFFICIAL_CARDS_FILE = "data/official-cards.json";
 
-// One optcgapi record -> our raw card shape (normalizeCard finishes the job).
+// A trimmed record from data/official-cards.json -> our raw card shape.
 function officialCardToRaw(c) {
-  const category = normalizeCategory(c.card_type);
-  const colors = String(c.card_color || "").trim().split(/[\s,/]+/).filter(Boolean).join(",").toLowerCase();
+  const category = normalizeCategory(c.category || c.cardType);
   return {
-    id: c.card_set_id,
-    cardNumber: c.card_set_id,
-    name: c.card_name || "",
+    id: c.cardNumber,
+    cardNumber: c.cardNumber,
+    name: c.name || "",
     category,
     cardType: category,
-    color: colors,
-    cost: category === "leader" ? "" : (c.card_cost ?? ""),
+    color: c.color || "",
+    cost: category === "leader" ? "" : (c.cost ?? ""),
     life: category === "leader" ? (c.life ?? "") : "",
-    power: c.card_power ?? "",
-    counter: c.counter_amount ?? "",
+    power: c.power ?? "",
+    counter: c.counter ?? "",
     attribute: c.attribute || "",
-    type: c.sub_types || "",
-    subtype: c.sub_types || "",
+    type: c.type || "",
+    subtype: c.type || "",
     rarity: c.rarity || "",
-    effect: c.card_text || "",
-    image: c.card_image || "",
+    effect: c.effect || "",
+    trigger: c.trigger || "",
+    image: c.image || "",
     collection: OFFICIAL_COLLECTION,
-    setName: c.set_name || c.set_id || "",
+    setName: c.setName || "",
     official: true,
     // Not a user upload: keeps Edit/Delete off these cards, and keeps them out
     // of the local-project / shared-library save paths.
     imported: false
   };
-}
-
-// Fetch every set's cards (plus starter-deck and promo cards) and flatten them.
-async function fetchOfficialCardsFromApi() {
-  const setsRes = await fetch(`${OPTCG_API_BASE}/allSets/`);
-  if (!setsRes.ok) throw new Error(`sets HTTP ${setsRes.status}`);
-  const sets = await setsRes.json();
-  const setIds = (Array.isArray(sets) ? sets : []).map(s => s.set_id).filter(Boolean);
-
-  const grab = url => fetch(url).then(r => (r.ok ? r.json() : [])).catch(() => []);
-  const setCardGroups = await Promise.all(setIds.map(id => grab(`${OPTCG_API_BASE}/sets/${id}/`)));
-  const extras = await Promise.all([
-    grab(`${OPTCG_API_BASE}/allSTCards/`),
-    grab(`${OPTCG_API_BASE}/allPromoCards/`)
-  ]);
-
-  const seen = new Set();
-  const raws = [];
-  [...setCardGroups.flat(), ...extras.flat()].forEach(c => {
-    if (!c || !c.card_set_id) return;
-    // DON!! cards aren't playable main-deck cards; they belong to the DON screen.
-    if (String(c.card_type || "").toUpperCase().includes("DON")) return;
-    if (seen.has(c.card_set_id)) return;
-    seen.add(c.card_set_id);
-    raws.push(officialCardToRaw(c));
-  });
-  return raws;
 }
 
 function readOfficialCardCache() {
@@ -668,25 +643,27 @@ function readOfficialCardCache() {
   return null;
 }
 
-// Normalized official cards, from cache when fresh, else refetched. Never throws
-// - a failed fetch falls back to any (even stale) cache, then to an empty list.
+// Normalized official cards. Fetches the committed same-origin data file (which
+// the daily Action keeps current); on any failure falls back to the last cached
+// copy so the collection still works offline. Never throws.
 async function loadOfficialCards() {
-  const cached = readOfficialCardCache();
-  if (cached && (Date.now() - Number(cached.fetchedAt || 0)) < OFFICIAL_CARDS_TTL_MS) {
-    return cached.cards.map(raw => normalizeCard(raw));
-  }
   try {
-    const raws = await fetchOfficialCardsFromApi();
-    if (raws.length) {
-      // Cache is best-effort: if it's too big for localStorage we just refetch
-      // next time rather than failing.
-      try { localStorage.setItem(OFFICIAL_CARDS_KEY, JSON.stringify({ fetchedAt: Date.now(), cards: raws })); } catch {}
-      return raws.map(raw => normalizeCard(raw));
+    const res = await fetch(OFFICIAL_CARDS_FILE, { cache: "no-cache" });
+    if (res.ok) {
+      const data = await res.json();
+      const cards = Array.isArray(data?.cards) ? data.cards : (Array.isArray(data) ? data : []);
+      if (cards.length) {
+        // Cache the raw records for the game + offline. Best-effort: if it's too
+        // big for localStorage we just refetch next time rather than failing.
+        try { localStorage.setItem(OFFICIAL_CARDS_KEY, JSON.stringify({ fetchedAt: Date.now(), cards })); } catch {}
+        return cards.map(raw => normalizeCard(officialCardToRaw(raw)));
+      }
     }
   } catch (error) {
-    console.warn("Official card list fetch failed, using cache if any:", error);
+    console.warn("Official card list load failed, using cache if any:", error);
   }
-  return cached ? cached.cards.map(raw => normalizeCard(raw)) : [];
+  const cached = readOfficialCardCache();
+  return cached ? cached.cards.map(raw => normalizeCard(officialCardToRaw(raw))) : [];
 }
 
 // Load the official card list and fold it into the in-memory pool without
