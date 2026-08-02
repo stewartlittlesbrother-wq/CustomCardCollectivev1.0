@@ -158,6 +158,31 @@ function normalizeCollectionSlug(value) {
   return byName ? byName.slug : "everything-else";
 }
 
+// ── Alt art ──────────────────────────────────────────────
+// A card can carry a second image (altArt). Whether a player SEES the alt is a
+// per-device preference keyed by card number, so each player picks which art
+// they want without changing the card for everyone.
+const ALT_ART_PREFS_KEY = "custom-cards-alt-art-prefs-v1";
+function getAltArtPrefs() {
+  try { return JSON.parse(localStorage.getItem(ALT_ART_PREFS_KEY) || "{}") || {}; }
+  catch { return {}; }
+}
+function isAltArtPreferred(card) {
+  const key = card?.cardNumber || card?.id;
+  return Boolean(key && card?.altArt && getAltArtPrefs()[key]);
+}
+function toggleAltArtPref(card) {
+  const key = card?.cardNumber || card?.id;
+  if (!key) return;
+  const prefs = getAltArtPrefs();
+  if (prefs[key]) delete prefs[key]; else prefs[key] = true;
+  try { localStorage.setItem(ALT_ART_PREFS_KEY, JSON.stringify(prefs)); } catch {}
+}
+// The image a card should display for THIS player (alt if they've switched to it).
+function preferredCardImageUrl(card) {
+  return isAltArtPreferred(card) ? card.altArt : card.imageUrl;
+}
+
 const CARD_BACK_IMAGE = "images/basic/card-back-custom.png";
 const DON_CARD_IMAGE = "images/basic/don-card-custom.png";
 const DON_DECK_IMAGE = "images/basic/don-deck-custom.png";
@@ -284,9 +309,24 @@ const el = {
   cardCreationTab: document.querySelector("#cardCreationTab"),
   cardCreationPanel: document.querySelector("#cardCreationPanel"),
   closeCardCreation: document.querySelector("#closeCardCreation"),
+  donDeckTab: document.querySelector("#donDeckTab"),
+  donDeckPanel: document.querySelector("#donDeckPanel"),
+  closeDonDeck: document.querySelector("#closeDonDeck"),
+  importDonDeck: document.querySelector("#importDonDeck"),
+  donDeckForm: document.querySelector("#donDeckForm"),
+  donDeckEditId: document.querySelector("#donDeckEditId"),
+  donDeckName: document.querySelector("#donDeckName"),
+  donDeckCount: document.querySelector("#donDeckCount"),
+  donDeckArtUrl: document.querySelector("#donDeckArtUrl"),
+  donDeckArtImage: document.querySelector("#donDeckArtImage"),
+  cancelDonDeckEdit: document.querySelector("#cancelDonDeckEdit"),
+  donDeckStatus: document.querySelector("#donDeckStatus"),
+  donDeckList: document.querySelector("#donDeckList"),
   cardCreationForm: document.querySelector("#cardCreationForm"),
   creationImage: document.querySelector("#creationImage"),
   creationImageUrl: document.querySelector("#creationImageUrl"),
+  creationAltArtUrl: document.querySelector("#creationAltArtUrl"),
+  creationAltArtImage: document.querySelector("#creationAltArtImage"),
   creationCardNumber: document.querySelector("#creationCardNumber"),
   creationName: document.querySelector("#creationName"),
   creationCategory: document.querySelector("#creationCategory"),
@@ -419,6 +459,8 @@ function normalizeCard(raw, category) {
     customEffectV2,
     effectBlocks: blockEffects,
     imageUrl: normalizeImagePath(raw.image || ""),
+    // Optional second artwork players can switch to (see alt-art prefs).
+    altArt: normalizeImagePath(raw.altArt || ""),
     // Which collection this card belongs to. Cards from before collections
     // existed have no value and fall back to Goldrush717's Bleach.
     collection: normalizeCollectionSlug(raw.collection),
@@ -1098,6 +1140,187 @@ function readFileAsDataUrl(file) {
     reader.onerror = () => reject(reader.error || new Error("Could not read image file."));
     reader.readAsDataURL(file);
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Custom DON!! decks
+//
+// A DON!! deck is just { id, name, count, art }. Players build them in the Deck
+// Builder and pick one before a game; the game (self.js) reads the same
+// localStorage keys. No art / no selection falls back to the standard 10 DON!!
+// with the default image, so this is entirely additive.
+// ─────────────────────────────────────────────────────────────────────────
+const DON_DECKS_KEY = "custom-don-decks-v1";
+const DON_ACTIVE_DECK_KEY = "custom-don-active-deck-v1";
+
+function getDonDecks() {
+  try {
+    const list = JSON.parse(localStorage.getItem(DON_DECKS_KEY) || "[]");
+    return Array.isArray(list) ? list : [];
+  } catch { return []; }
+}
+
+function saveDonDecks(list) {
+  try { localStorage.setItem(DON_DECKS_KEY, JSON.stringify(list || [])); } catch {}
+}
+
+function getActiveDonDeckId() {
+  try { return localStorage.getItem(DON_ACTIVE_DECK_KEY) || ""; } catch { return ""; }
+}
+
+function setActiveDonDeckId(id) {
+  try {
+    if (id) localStorage.setItem(DON_ACTIVE_DECK_KEY, id);
+    else localStorage.removeItem(DON_ACTIVE_DECK_KEY);
+  } catch {}
+}
+
+function resetDonDeckForm() {
+  if (!el.donDeckForm) return;
+  el.donDeckForm.reset();
+  if (el.donDeckEditId) el.donDeckEditId.value = "";
+  if (el.donDeckCount) el.donDeckCount.value = "10";
+  if (el.cancelDonDeckEdit) el.cancelDonDeckEdit.hidden = true;
+  if (el.saveDonDeck) el.saveDonDeck.textContent = "Save DON!! Deck";
+  if (el.donDeckStatus) el.donDeckStatus.textContent = "Ready";
+}
+
+function renderDonDeckList() {
+  if (!el.donDeckList) return;
+  const decks = getDonDecks();
+  const activeId = getActiveDonDeckId();
+  el.donDeckList.innerHTML = "";
+
+  // The always-present default option.
+  const defaultRow = document.createElement("div");
+  defaultRow.className = "don-deck-row" + (activeId ? "" : " active");
+  defaultRow.innerHTML = `
+    <div class="don-deck-art don-deck-art-default"><span>ド!!</span></div>
+    <div class="don-deck-meta">
+      <strong>Standard DON!!</strong>
+      <small>10 DON!! · default art</small>
+    </div>
+    <div class="don-deck-row-actions">
+      <button class="ghost" type="button" data-use-don="">${activeId ? "Use" : "In use"}</button>
+    </div>`;
+  el.donDeckList.appendChild(defaultRow);
+
+  decks.forEach(deck => {
+    const isActive = activeId === deck.id;
+    const row = document.createElement("div");
+    row.className = "don-deck-row" + (isActive ? " active" : "");
+    const art = deck.art
+      ? `<img src="${deck.art}" alt="">`
+      : `<span>ド!!</span>`;
+    row.innerHTML = `
+      <div class="don-deck-art">${art}</div>
+      <div class="don-deck-meta">
+        <strong></strong>
+        <small>${Number(deck.count) || 10} DON!!</small>
+      </div>
+      <div class="don-deck-row-actions">
+        <button class="ghost" type="button" data-use-don="${deck.id}">${isActive ? "In use" : "Use"}</button>
+        <button class="ghost" type="button" data-edit-don="${deck.id}">Edit</button>
+        <button class="ghost" type="button" data-export-don="${deck.id}">Export</button>
+        <button class="ghost danger" type="button" data-delete-don="${deck.id}">Delete</button>
+      </div>`;
+    // Set the name via textContent so custom names can't inject markup.
+    row.querySelector(".don-deck-meta strong").textContent = deck.name || "DON!! deck";
+    el.donDeckList.appendChild(row);
+  });
+}
+
+async function saveDonDeckFromForm(event) {
+  event.preventDefault();
+  const name = (el.donDeckName?.value || "").trim();
+  const count = Math.max(1, Math.min(30, Math.round(Number(el.donDeckCount?.value) || 10)));
+  if (!name) { toast("Name your DON!! deck"); return; }
+
+  const editId = el.donDeckEditId?.value || "";
+  const decks = getDonDecks();
+  const existing = editId ? decks.find(d => d.id === editId) : null;
+
+  // Resolve art: uploaded file > URL > keep existing (when editing).
+  let art = existing?.art || "";
+  const file = el.donDeckArtImage?.files?.[0];
+  const url = (el.donDeckArtUrl?.value || "").trim();
+  if (file) {
+    if (el.donDeckStatus) el.donDeckStatus.textContent = "Reading image…";
+    art = await readFileAsDataUrl(file);
+  } else if (url) {
+    if (el.donDeckStatus) el.donDeckStatus.textContent = "Saving image…";
+    // Store a permanent copy so link expiry can't blank the art later.
+    art = (await fetchRemoteImageAsDataUrl(url)) || url;
+  }
+
+  if (existing) {
+    existing.name = name;
+    existing.count = count;
+    existing.art = art;
+  } else {
+    decks.push({ id: `don-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name, count, art });
+  }
+  saveDonDecks(decks);
+  resetDonDeckForm();
+  renderDonDeckList();
+  toast(existing ? "DON!! deck updated" : "DON!! deck saved");
+}
+
+function editDonDeck(id) {
+  const deck = getDonDecks().find(d => d.id === id);
+  if (!deck) return;
+  if (el.donDeckEditId) el.donDeckEditId.value = deck.id;
+  if (el.donDeckName) el.donDeckName.value = deck.name || "";
+  if (el.donDeckCount) el.donDeckCount.value = Number(deck.count) || 10;
+  if (el.donDeckArtUrl) el.donDeckArtUrl.value = /^https?:\/\//i.test(deck.art || "") ? deck.art : "";
+  if (el.donDeckArtImage) el.donDeckArtImage.value = "";
+  if (el.cancelDonDeckEdit) el.cancelDonDeckEdit.hidden = false;
+  if (el.saveDonDeck) el.saveDonDeck.textContent = "Update DON!! Deck";
+  if (el.donDeckStatus) el.donDeckStatus.textContent = "Editing…";
+  el.donDeckName?.focus();
+}
+
+function deleteDonDeck(id) {
+  const decks = getDonDecks().filter(d => d.id !== id);
+  saveDonDecks(decks);
+  if (getActiveDonDeckId() === id) setActiveDonDeckId("");
+  renderDonDeckList();
+  toast("DON!! deck deleted");
+}
+
+function useDonDeck(id) {
+  setActiveDonDeckId(id || "");
+  renderDonDeckList();
+  const deck = getDonDecks().find(d => d.id === id);
+  toast(id && deck ? `Using "${deck.name}" DON!! deck` : "Using standard DON!!");
+}
+
+function exportDonDeck(id) {
+  const deck = getDonDecks().find(d => d.id === id);
+  if (!deck) return;
+  const payload = JSON.stringify({ type: "custom-don-deck", name: deck.name, count: deck.count, art: deck.art });
+  navigator.clipboard?.writeText(payload).then(
+    () => toast("DON!! deck copied — share the text to let others import it"),
+    () => window.prompt("Copy this DON!! deck code:", payload)
+  );
+}
+
+function importDonDeckFromText() {
+  const text = window.prompt("Paste a DON!! deck code:");
+  if (!text) return;
+  let data;
+  try { data = JSON.parse(text.trim()); } catch { toast("That doesn't look like a DON!! deck code"); return; }
+  if (!data || data.type !== "custom-don-deck" || !data.name) { toast("Invalid DON!! deck code"); return; }
+  const decks = getDonDecks();
+  decks.push({
+    id: `don-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: String(data.name).slice(0, 60),
+    count: Math.max(1, Math.min(30, Math.round(Number(data.count) || 10))),
+    art: typeof data.art === "string" ? data.art : ""
+  });
+  saveDonDecks(decks);
+  renderDonDeckList();
+  toast(`Imported DON!! deck "${data.name}"`);
 }
 
 function loadImageSource(source) {
@@ -2389,7 +2612,7 @@ function effectsToCardScript(card) {
 }
 
 
-function creationCardFromForm(imageDataUrl) {
+function creationCardFromForm(imageDataUrl, altArtSource = "") {
   const cardNumber = el.creationCardNumber.value.trim() || nextImportedCardNumber();
   const category = normalizeCategory(el.creationCategory.value);
   const colors = csvValues(el.creationColors.value).map(color => color.toLowerCase());
@@ -2418,6 +2641,7 @@ function creationCardFromForm(imageDataUrl) {
     keywords,
     effect: effectText,
     image: imageDataUrl,
+    altArt: altArtSource || "",
     // Which collection to file this card under. Defaults to the collection the
     // browser is currently showing, then to Goldrush717's Bleach.
     collection: normalizeCollectionSlug(
@@ -2470,9 +2694,23 @@ async function saveCreatedCard(event) {
   } else {
     imageSource = state.creationImageData;
   }
+
+  // Optional alt art (second image), resolved the same way. Keeps any existing
+  // alt art when editing and no new one is provided.
+  const altUrl = el.creationAltArtUrl?.value.trim() || "";
+  const altFile = el.creationAltArtImage?.files?.[0];
+  let altArtSource = "";
+  if (altFile) {
+    altArtSource = await compressImageDataUrl(await readFileAsDataUrl(altFile));
+  } else if (altUrl) {
+    altArtSource = (await fetchRemoteImageAsDataUrl(altUrl)) || altUrl;
+  } else if (state.editingCardId) {
+    altArtSource = getCard(state.editingCardId)?.altArt || "";
+  }
+
   // Compress just this card's artwork, then publish only this card - no need to
   // load, diff and re-upload the entire library to add one entry.
-  const [card] = await compressImportedCardImages([creationCardFromForm(imageSource)]);
+  const [card] = await compressImportedCardImages([creationCardFromForm(imageSource, altArtSource)]);
   if (!await publishSingleCard(card)) return;
 
   // Editing a card and changing its number used to leave the original behind as
@@ -3243,6 +3481,12 @@ function openCardForEditing(card) {
   state.creationImageData = card.imageUrl || "";
 
   if (el.creationImage) el.creationImage.value = "";
+  // Show the existing alt art in the URL field when it's a link; a stored
+  // (data:) alt art is kept via the editingCardId fallback in saveCreatedCard.
+  if (el.creationAltArtImage) el.creationAltArtImage.value = "";
+  if (el.creationAltArtUrl) {
+    el.creationAltArtUrl.value = card.altArt && !String(card.altArt).startsWith("data:") ? card.altArt : "";
+  }
   el.creationCardNumber.value = card.cardNumber || card.id;
   el.creationName.value = card.name || "";
   el.creationCategory.value = normalizeCategory(card.category || card.cardType);
@@ -4370,6 +4614,22 @@ function renderCardGrid() {
       editButton.hidden = false;
     }
 
+    // Alt-art toggle - only shown for cards that actually have a second image.
+    // Switches which art THIS player sees/plays with (stored per device).
+    if (card.altArt) {
+      const altBtn = document.createElement("button");
+      altBtn.type = "button";
+      altBtn.className = "card-alt-btn" + (isAltArtPreferred(card) ? " active" : "");
+      altBtn.textContent = isAltArtPreferred(card) ? "★ Alt" : "☆ Alt";
+      altBtn.title = "Switch between this card's default and alternate art";
+      altBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleAltArtPref(card);
+        renderCardGrid();
+      });
+      (image || article).appendChild(altBtn);
+    }
+
     el.cardGrid.appendChild(node);
   });
 }
@@ -4380,11 +4640,12 @@ function scheduleCardGridRender() {
 }
 
 function cardVisual(card) {
-  if (card?.imageUrl) {
+  const src = preferredCardImageUrl(card);
+  if (src) {
     return `
       <img
         alt="${escapeAttr(card.name)}"
-        src="${escapeAttr(card.imageUrl)}"
+        src="${escapeAttr(src)}"
         data-fallback-name="${escapeAttr(card.name)}"
         data-fallback-number="${escapeAttr(card.cardNumber)}"
         data-fallback-color="${escapeAttr(colorValue(card))}"
@@ -5310,6 +5571,31 @@ function bindEvents() {
     // Panel closed but still in Deck Builder view - restore its tab highlight.
     el.navTabs.forEach(tab => tab.classList.toggle("active", tab.dataset.view === "builder"));
   });
+
+  // DON!! decks tab
+  el.donDeckTab?.addEventListener("click", () => {
+    if (el.savedDecksPanel) el.savedDecksPanel.hidden = true;
+    if (el.cardCreationPanel) el.cardCreationPanel.hidden = true;
+    if (el.donDeckPanel) el.donDeckPanel.hidden = false;
+    resetDonDeckForm();
+    renderDonDeckList();
+  });
+  el.closeDonDeck?.addEventListener("click", () => {
+    if (el.donDeckPanel) el.donDeckPanel.hidden = true;
+  });
+  el.donDeckForm?.addEventListener("submit", saveDonDeckFromForm);
+  el.cancelDonDeckEdit?.addEventListener("click", resetDonDeckForm);
+  el.importDonDeck?.addEventListener("click", importDonDeckFromText);
+  el.donDeckList?.addEventListener("click", event => {
+    const useId = event.target.closest("[data-use-don]")?.dataset.useDon;
+    if (useId !== undefined) { useDonDeck(useId); return; }
+    const editId = event.target.closest("[data-edit-don]")?.dataset.editDon;
+    if (editId) { editDonDeck(editId); return; }
+    const exportId = event.target.closest("[data-export-don]")?.dataset.exportDon;
+    if (exportId) { exportDonDeck(exportId); return; }
+    const deleteId = event.target.closest("[data-delete-don]")?.dataset.deleteDon;
+    if (deleteId) { deleteDonDeck(deleteId); return; }
+  });
   el.cardCreationForm?.addEventListener("submit", saveCreatedCard);
   el.creationImage?.addEventListener("change", previewCreationImage);
   el.creationImageUrl?.addEventListener("change", previewCreationImageUrl);
@@ -5463,14 +5749,27 @@ function mapUntapCardToSim(raw, sourceMeta) {
   // expiry params (ex/is/hm) and stop loading after a while, so they're only a
   // fallback. Some exports put the image at the top level (imageUrl/front_image)
   // instead of an images{} object, so read those too.
-  const image = images.untapRendered || images.preferred || images.front || images.back ||
-    raw.imageUrl || raw.front_image || raw.image || "";
+  const imageCandidates = [
+    images.untapRendered, images.preferred, images.front, images.back,
+    raw.imageUrl, raw.front_image, raw.image
+  ];
+  // The importer embeds permanent `data:` copies of images (they can't expire).
+  // Always prefer one if present, regardless of which field it landed in, so a
+  // stale remote URL in an earlier-listed field can never shadow it.
+  const image = imageCandidates.find(url => typeof url === "string" && url.startsWith("data:"))
+    || imageCandidates.find(url => typeof url === "string" && url) || "";
   const effect = String(text.front || fields.effect || "").trim();
   // meta.attribute is an array; fields.attribute is a single string.
   const attribute = Array.isArray(meta.attribute)
     ? meta.attribute.filter(Boolean).join(", ")
     : String(fields.attribute || "");
   const cardNumber = String(fields.cardNumber || "").trim() || makeUntapCardNumber(setCode, untapId);
+
+  // Preserve the source card for re-import/debugging, but drop any embedded
+  // `data:` image bytes from the copy - the canonical image already lives in
+  // `image`, and keeping a second full-size copy here would double the stored
+  // size of every imported card.
+  const preservedRaw = stripDataUrlsFromImport(raw);
 
   return {
     // Use the CARD NUMBER as the id (like built-in cards) so the game's
@@ -5512,9 +5811,32 @@ function mapUntapCardToSim(raw, sourceMeta) {
       formatVersion: sourceMeta?.formatVersion || null,
       source: sourceMeta?.source || null,
       exportedAt: sourceMeta?.exportedAt || null,
-      card: raw
+      card: preservedRaw
     }
   };
+}
+
+// Return a shallow clone of an imported card record with any embedded `data:`
+// image URLs blanked out, so preserving the source doesn't store a second copy
+// of every (potentially large) inlined image.
+function stripDataUrlsFromImport(raw) {
+  if (!raw || typeof raw !== "object") return raw;
+  const isData = value => typeof value === "string" && value.startsWith("data:");
+  const clone = { ...raw };
+  if (clone.images && typeof clone.images === "object") {
+    const images = { ...clone.images };
+    for (const key of Object.keys(images)) {
+      if (isData(images[key])) images[key] = "";
+    }
+    if (Array.isArray(clone.images.candidates)) {
+      images.candidates = clone.images.candidates.filter(url => !isData(url));
+    }
+    clone.images = images;
+  }
+  ["imageUrl", "front_image", "image", "imageDataUrl", "preferredImageUrl"].forEach(key => {
+    if (isData(clone[key])) clone[key] = "";
+  });
+  return clone;
 }
 
 // Parse the file text into { meta, cards[] }, tolerating a few shapes: the

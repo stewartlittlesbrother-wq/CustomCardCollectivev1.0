@@ -10,12 +10,57 @@ const cardBackImage = "../images/basic/card-back-normal.jpg";
 // example an opponent played a custom card that isn't in this client's card
 // pool - fall back to the card back so the card is still clearly visible on the
 // board. Callers that show a face-down card pass the back directly.
+// Which image to show for a card. If this device has switched a card to its alt
+// art (stored per card number in localStorage), use the alt.
+function altArtPreferredFor(card) {
+    const key = card?.cardNumber || card?.id;
+    if (!key || !card?.altArt) return false;
+    try {
+        const prefs = JSON.parse(localStorage.getItem("custom-cards-alt-art-prefs-v1") || "{}");
+        return Boolean(prefs && prefs[key]);
+    } catch {
+        return false;
+    }
+}
+
 function cardArtSrc(card) {
+    if (altArtPreferredFor(card)) {
+        const alt = typeof card.altArt === "string" ? card.altArt.trim() : "";
+        if (alt) return alt;
+    }
     const src = card && typeof card.image === "string" ? card.image.trim() : "";
     return src || cardBackImage;
 }
 const donBackImage = "../images/basic/card-back-don.webp";
 const donImage = "../images/basic/card-front-don.webp";
+
+// Custom DON!! decks, built in the Deck Builder (app.js) and stored in
+// localStorage. The active selection sets how many DON!! a player starts the
+// game able to draw and which art their DON!! use. No selection / no art falls
+// back to the standard 10 DON!! with the default image above.
+const DON_DECKS_KEY = "custom-don-decks-v1";
+const DON_ACTIVE_DECK_KEY = "custom-don-active-deck-v1";
+function getActiveDonDeck() {
+    try {
+        const id = localStorage.getItem(DON_ACTIVE_DECK_KEY) || "";
+        if (!id) return { count: 10, art: null };
+        const list = JSON.parse(localStorage.getItem(DON_DECKS_KEY) || "[]");
+        const deck = Array.isArray(list) ? list.find(d => d && d.id === id) : null;
+        if (!deck) return { count: 10, art: null };
+        return {
+            count: Math.max(1, Math.min(30, Math.round(Number(deck.count) || 10))),
+            art: typeof deck.art === "string" && deck.art ? deck.art : null
+        };
+    } catch { return { count: 10, art: null }; }
+}
+// Per-player DON!! limit / art with sane fallbacks for older player objects.
+function donMaxFor(player) {
+    const max = Number(player?.donMax);
+    return max > 0 ? max : 10;
+}
+function donArtFor(player) {
+    return (player && typeof player.donArt === "string" && player.donArt) ? player.donArt : donImage;
+}
 
 // =========================
 // Stub Functions for Removed Game Mechanics
@@ -209,6 +254,11 @@ function applyBoardToPlayer(player, boardJson) {
     player.floatingDon = Array.isArray(board.floatingDon) ? board.floatingDon : [];
     player.don = Number(board.don || 0);
     player.restedDon = Number(board.restedDon || 0);
+    // Custom DON!! deck (count + art) so the opponent's DON!! render correctly.
+    // Own player keeps its locally-applied deck; only apply from the board when
+    // it carries a value (older matches won't have it).
+    if (Number(board.donMax) > 0) player.donMax = Number(board.donMax);
+    if (typeof board.donArt === "string" && board.donArt) player.donArt = board.donArt;
     // Rebuilt from the counts by getDonSlots if absent or inconsistent.
     player.donOrder = Array.isArray(board.donOrder) ? board.donOrder : null;
 }
@@ -424,6 +474,7 @@ function applyOnlinePublicState(publicState = {}) {
     // written to the match document and then ignored by both clients.
     handleOnlineGameOver();
     maybeRunOnlineTurnStart(turnStartKey);
+    maybeAutoLayOnlineLife();
     showOnlineRevealedCards();
     maybeAnnounceOwnTurn();
     announceOnlineTurnOrder();
@@ -573,6 +624,23 @@ function renderDiceRollStep(heading, body, actions) {
     const foeRoll = dice[`${foeSlot}Roll`];
     const winner = dice.winner;
 
+    // Rematch: no dice roll - the loser of the last game just picks turn order.
+    if (dice.rematchLoser) {
+        heading.textContent = "Rematch — choose turn order";
+        const status = document.createElement("p");
+        status.className = "setup-overlay-status";
+        if (dice.rematchLoser === playerSlot) {
+            status.textContent = "You lost the last game — choose who goes first.";
+            body.appendChild(status);
+            actions.appendChild(buildSetupButton("Go 1st", () => handleOnlineTurnChoice("first")));
+            actions.appendChild(buildSetupButton("Go 2nd", () => handleOnlineTurnChoice("second"), "secondary"));
+        } else {
+            status.textContent = "You won last game — waiting for your opponent to choose who goes first…";
+            body.appendChild(status);
+        }
+        return;
+    }
+
     heading.textContent = "Roll for turn order";
 
     const rolls = document.createElement("div");
@@ -667,6 +735,60 @@ function showOnlineRevealedCards() {
 // that player ends their turn).
 function clearFromLifeHighlights(player) {
     (player?.hand || []).forEach(card => { if (card) delete card.fromLife; });
+}
+
+// At game start, lay a player's Life equal to their leader's life value (from the
+// top of the deck, face-down). Returns { laid, needsManual } - needsManual is
+// true when the leader has NO life value set (the player must deal life manually
+// and probably wants to set it in the card editor).
+function autoLayLifeForPlayer(player) {
+    if (!player || !player.leader) return { laid: 0, needsManual: false };
+    if ((player.life || []).length > 0) return { laid: 0, needsManual: false };
+
+    const lifeValue = Number(player.leader.life || 0);
+    if (!lifeValue || Number.isNaN(lifeValue)) return { laid: 0, needsManual: true };
+
+    if (!Array.isArray(player.deck)) player.deck = [];
+    const laid = [];
+    for (let i = 0; i < lifeValue && player.deck.length > 0; i++) {
+        const card = player.deck.pop(); // top of deck = end of array (draw order)
+        if (!card) break;
+        card.faceUp = false;
+        laid.push(card);
+    }
+    player.life = laid;
+    return { laid: laid.length, needsManual: false };
+}
+
+// Lay the OWN player's life once, when an online match reaches the main phase
+// (after mulligan). Guarded so it only runs a single time per game.
+let onlineLifeAutoLaid = false;
+function maybeAutoLayOnlineLife() {
+    if (!isOnlineMatch || isSpectator) return;
+    const phase = onlinePublicState?.phase;
+    // Reset the guard for a fresh game (still in setup).
+    if (phase === "diceRoll" || phase === "waiting" || phase === "mulligan") {
+        onlineLifeAutoLaid = false;
+        return;
+    }
+    if (phase !== "main" || onlineLifeAutoLaid) return;
+    if (!ownStateLockedToLocal) return; // own zones not authoritative yet
+
+    const ownKey = getOwnOnlinePlayerKey();
+    const player = ownKey ? gameState?.[ownKey] : null;
+    if (!player) return;
+
+    onlineLifeAutoLaid = true;
+    const { laid, needsManual } = autoLayLifeForPlayer(player);
+    if (laid > 0) {
+        renderLifeCards();
+        renderDecks();
+        addGameLog(`Life set: ${laid} card${laid === 1 ? "" : "s"} placed from the top of your deck.`);
+        scheduleOnlineBoardSync();
+    } else if (needsManual) {
+        addGameLog("⚠ Your leader has no life value set — deal your life manually (and set the leader's life in the card editor).");
+        toast("Set your leader's life in the card editor, or lay life manually.");
+    }
 }
 
 function revealCardToOpponent(card) {
@@ -848,7 +970,10 @@ function createPublicPlayerStateFromLocal(player) {
         tokenTypes: stripCards(player.tokenTypes || []),
         floatingDon: player.floatingDon || [],
         don: Number(player.don || 0),
-        restedDon: Number(player.restedDon || 0)
+        restedDon: Number(player.restedDon || 0),
+        // Custom DON!! deck so the opponent sees the right count + art.
+        donMax: donMaxFor(player),
+        donArt: (typeof player.donArt === "string" && player.donArt) ? player.donArt : null
     };
 
     return {
@@ -862,7 +987,7 @@ function createPublicPlayerStateFromLocal(player) {
         lifeCount: player.life?.length || 0,
         activeTokens: Number(player.don || 0),
         restedTokens: Number(player.restedDon || 0),
-        tokenDeckCount: Math.max(0, 10 - getDonOnField(player)),
+        tokenDeckCount: Math.max(0, donMaxFor(player) - getDonOnField(player)),
         turns: Number(player.turns || 0),
         faceUpLifeCards: (player.life || [])
             .map((card, index) => card?.faceUp ? { index, card: createPublicCardSnapshot(card) } : null)
@@ -1224,7 +1349,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-2");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-4");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1268,7 +1393,7 @@ async function initializeSpectatorMatch() {
     showSpectatorBanner();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-2");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-4");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1635,6 +1760,9 @@ function createInitialPlayerState(playerName, deckDefinition) {
         don: 0,
         restedDon: 0,
         donDeck: 10,
+        // Custom DON!! deck limit / art (default 10 + standard image).
+        donMax: 10,
+        donArt: null,
         turns: 0,
         deck: shuffleDeck(parseDeckText(selectedDeck.deckText)),
         deckName: selectedDeck.name,
@@ -1683,6 +1811,8 @@ function createEmptyPlayerState(playerName) {
         don: 0,
         restedDon: 0,
         donDeck: 10,
+        donMax: 10,
+        donArt: null,
         turns: 0,
         deck: [],
         deckName: playerName,
@@ -1860,6 +1990,19 @@ async function initializeGamePage() {
         await loadCardDatabase();
 
         gameState = createInitialGameState();
+
+        // Apply the player's chosen custom DON!! deck (count + art). In practice
+        // you control both sides, so both use it; online, only your own side does
+        // and the opponent's DON!! come through the synced board state.
+        if (!isSpectator) {
+            const activeDon = getActiveDonDeck();
+            const mine = [gameState.player1, gameState.player2];
+            mine.forEach(player => {
+                player.donMax = activeDon.count;
+                player.donArt = activeDon.art;
+            });
+        }
+
         ui = createUiBridge();
 
         setupLifeArea("lifeArea", "lifeToggleText");
@@ -1880,6 +2023,21 @@ async function initializeGamePage() {
         setupCardPreview();
         setupDonAttachmentClearListener();
         autoStartSelfMatch();
+
+        // Practice board: auto-lay each side's life from their leader's life
+        // value. Online life is handled in maybeAutoLayOnlineLife after mulligan.
+        if (!isOnlineMatch) {
+            [gameState.player1, gameState.player2].forEach(player => {
+                const { laid, needsManual } = autoLayLifeForPlayer(player);
+                if (laid > 0) {
+                    addGameLog(`${player.name}: ${laid} life placed.`);
+                } else if (needsManual) {
+                    addGameLog(`⚠ ${player.name}'s leader has no life value set — lay life manually (set it in the card editor).`);
+                }
+            });
+            renderLifeCards();
+            renderDecks();
+        }
 
         addGameLog(`
             Card database loaded. Game ready.<br>
@@ -2731,8 +2889,9 @@ function startPlayerTurn(player) {
             addGameLog("Player 2's turn starts with 2 DON");
         }
     } else if (settings.autoAddDon) {
-        player.don = Math.min((player.don || 0) + 2, 10);
-        addGameLog(`Player ${playerNum}'s turn starts: +2 DON${player.don === 10 ? " (capped at 10)" : ""}`);
+        const donMax = donMaxFor(player);
+        player.don = Math.min((player.don || 0) + 2, donMax);
+        addGameLog(`Player ${playerNum}'s turn starts: +2 DON${player.don === donMax ? ` (capped at ${donMax})` : ""}`);
     }
 
     // Draw phase - skipped on the first player's first turn per the rules.
@@ -3057,7 +3216,12 @@ function renderDonArea(player, areaId) {
         const rested = slot === "rested";
         const img = document.createElement("img");
 
-        img.src = donImage;
+        const donArt = donArtFor(player);
+        img.src = donArt;
+        // .don-card-img has a CSS `content: url(default)` that replaces the src on
+        // every DON!!. For a custom deck art we must undo that inline (inline style
+        // beats the stylesheet) so the chosen art actually shows.
+        if (donArt !== donImage) img.style.content = "normal";
         img.alt = rested ? "Rested DON!!" : "Active DON!!";
         // Rested DON stays selectable so it can still be picked up and attached.
         img.className = `don-card-img selectable-don${rested ? " rested-don" : ""}`;
@@ -3563,9 +3727,10 @@ function renderDonDeck(player, areaId) {
     const symbol = document.createElement("div");
     symbol.className = "don-deck-symbol";
 
-    // Calculate remaining DON in deck: 10 total - all DON cards on the field
+    // Calculate remaining DON in deck: the deck's max (default 10) minus all
+    // DON cards currently on the field.
     const donOnField = getDonOnField(player);
-    const remaining = Math.max(0, 10 - donOnField);
+    const remaining = Math.max(0, donMaxFor(player) - donOnField);
     player.donDeck = remaining;
 
     symbol.title = `${remaining} DON!! left in deck - Click to add DON to field`;

@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=1280">
   <title>Custom Cards Simulator</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=creation-18">
+  <link rel="stylesheet" href="styles.css?v=creation-20">
 </head>
 <body>
   <div class="app-shell">
@@ -268,6 +268,7 @@
                 <span class="active">Deck Builder</span>
                 <button type="button" id="savedDecksTab">Saved Decks</button>
                 <button type="button" id="cardCreationTab">Card Creation</button>
+                <button type="button" id="donDeckTab">DON Decks</button>
               </div>
 
               <div class="deck-toolbar">
@@ -334,6 +335,14 @@
                       <label class="ocr-toggle-row" title="Reads cost, name and set number from the image and pre-fills the fields. You can always edit them.">
                         <input id="creationOcrToggle" type="checkbox">
                         <span>Auto-scan card images (OCR)</span>
+                      </label>
+                      <label>
+                        Alt Art URL <small style="opacity:.65">(optional — a second image players can switch to)</small>
+                        <input id="creationAltArtUrl" type="url" placeholder="https://example.com/alt.png">
+                      </label>
+                      <label>
+                        Or upload Alt Art <small style="opacity:.65">(optional)</small>
+                        <input id="creationAltArtImage" type="file" accept="image/png,image/jpeg,image/webp">
                       </label>
                       <label>
                         Card #
@@ -503,6 +512,48 @@
                   </aside>
                 </div>
               </section>
+
+              <!-- Custom DON!! decks: set how many DON!! and which art a player
+                   uses. Players pick one at game start (practice or multiplayer)
+                   or fall back to the standard 10 DON!! with the default art. -->
+              <section class="don-deck-panel" id="donDeckPanel" hidden>
+                <div class="saved-decks-header">
+                  <strong>DON!! Decks</strong>
+                  <div class="creation-header-actions">
+                    <button class="ghost" type="button" id="importDonDeck">Import</button>
+                    <button class="ghost" type="button" id="closeDonDeck">Close</button>
+                  </div>
+                </div>
+                <p class="settings-group-note">
+                  Build a custom DON!! deck with your own art and DON!! count.
+                  Choose one before a game in the Practice or Multiplayer board —
+                  otherwise you get the standard 10 DON!!.
+                </p>
+
+                <form id="donDeckForm" class="don-deck-form">
+                  <input type="hidden" id="donDeckEditId" value="">
+                  <label>Deck name
+                    <input id="donDeckName" type="text" placeholder="My DON!! deck" required>
+                  </label>
+                  <label>DON!! count
+                    <input id="donDeckCount" type="number" min="1" max="30" step="1" value="10" required>
+                  </label>
+                  <label>Art URL <small>(optional)</small>
+                    <input id="donDeckArtUrl" type="url" placeholder="https://example.com/don.png">
+                  </label>
+                  <label>Or upload art <small>(optional)</small>
+                    <input id="donDeckArtImage" type="file" accept="image/png,image/jpeg,image/webp">
+                  </label>
+                  <div class="don-deck-form-actions">
+                    <button class="red-button" type="submit" id="saveDonDeck">Save DON!! Deck</button>
+                    <button class="ghost" type="button" id="cancelDonDeckEdit" hidden>Cancel edit</button>
+                    <span id="donDeckStatus" class="creation-status">Ready</span>
+                  </div>
+                </form>
+
+                <div id="donDeckList" class="don-deck-list"></div>
+              </section>
+
               <div class="deck-board-scroll">
                 <section class="leader-slot" id="leaderSlot"></section>
                 <div class="deck-list" id="deckList"></div>
@@ -708,7 +759,7 @@
   <script src="js/rotate-prompt.js"></script>
   <script src="js/cards/decks.js?v=creation-8"></script>
   <script src="js/manual-play.js?v=manual-3"></script>
-  <script src="app.js?v=creation-30"></script>
+  <script src="app.js?v=creation-33"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).

@@ -45,6 +45,10 @@ export function stripCardForSync(card) {
     if (typeof slim.image === "string" && slim.image.startsWith("data:")) {
         delete slim.image;
     }
+    // Same for a base64 alt art - rebuilt from the local DB by hydrateSyncedCard.
+    if (typeof slim.altArt === "string" && slim.altArt.startsWith("data:")) {
+        delete slim.altArt;
+    }
     delete slim.effects;
     delete slim.aliases;
 
@@ -69,7 +73,9 @@ export function stripCardsForSync(cards) {
 // database so rendering is unchanged despite the slim network payload.
 export function hydrateSyncedCard(card) {
     if (!card || typeof card !== "object") return card;
-    if (card.image) return card;
+    // Fast path: image present AND alt art not stripped (undefined) - nothing to
+    // rebuild. A stripped base64 alt art comes back as undefined and needs the DB.
+    if (card.image && card.altArt !== undefined) return card;
 
     const key = card.cardNumber || card.id;
 
@@ -96,6 +102,7 @@ export function hydrateSyncedCard(card) {
     return {
         ...card,
         image: lookup.image || card.image,
+        altArt: card.altArt || lookup.altArt || "",
         effects: card.effects || lookup.effects || [],
         aliases: card.aliases || lookup.aliases || []
     };
@@ -534,10 +541,19 @@ export async function initializeMultiplayerGame(roomCode) {
 }
 
 // The full "deal a brand new game" write. Shared by the first start and by a
-// rematch so the two can never drift apart.
-function buildFreshMatchPayload(player1, player2, player1Deck, player2Deck) {
+// rematch so the two can never drift apart. On a rematch, `rematchLoser` (the
+// player who lost the last game) is pre-set as the dice "winner" so THEY get to
+// choose who goes first - no dice roll needed.
+function buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, rematchLoser = null) {
     const p1Private = createInitialPrivateState(player1Deck);
     const p2Private = createInitialPrivateState(player2Deck);
+
+    const chooser = (rematchLoser === "p1" || rematchLoser === "p2") ? rematchLoser : null;
+    const diceSetup = chooser
+        // Pre-resolved: the loser is the "winner" (chooser). rematchLoser flags
+        // the client to show rematch wording instead of dice results.
+        ? { p1Roll: null, p2Roll: null, winner: chooser, tie: false, rematchLoser: chooser }
+        : { p1Roll: null, p2Roll: null, winner: null, tie: false };
 
     return {
         status: "started",
@@ -556,12 +572,7 @@ function buildFreshMatchPayload(player1, player2, player1Deck, player2Deck) {
         "public/revealedCards": [],
         "public/currentAttack": null,
         "public/setup": {
-            dice: {
-                p1Roll: null,
-                p2Roll: null,
-                winner: null,
-                tie: false
-            },
+            dice: diceSetup,
             turnChoice: {
                 chooser: null,
                 firstPlayer: null,
@@ -654,8 +665,12 @@ export async function restartMatch(roomCode) {
 
     if (!claim.committed) return { committed: false };
 
+    // The loser of the game that just ended chooses turn order for the rematch.
+    const prevWinner = match.public?.winner;
+    const rematchLoser = prevWinner === "p1" ? "p2" : (prevWinner === "p2" ? "p1" : null);
+
     await update(matchRef, {
-        ...buildFreshMatchPayload(player1, player2, player1Deck, player2Deck),
+        ...buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, rematchLoser),
         // Clear readiness so the next game-over starts from a clean slate.
         rematch: null
     });

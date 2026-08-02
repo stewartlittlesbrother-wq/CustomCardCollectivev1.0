@@ -5451,6 +5451,103 @@ button.trash-area {
   gap: 8px;
 }
 
+/* ── Custom DON!! decks ─────────────────────────────────────────────── */
+.don-deck-panel {
+  padding: 16px;
+}
+.don-deck-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0 18px;
+}
+.don-deck-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.don-deck-form label small {
+  font-weight: 400;
+  opacity: .7;
+}
+.don-deck-form input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, .18);
+  background: rgba(0, 0, 0, .25);
+  color: inherit;
+}
+.don-deck-form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.don-deck-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.don-deck-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  background: rgba(255, 255, 255, .03);
+}
+.don-deck-row.active {
+  border-color: #f2c14e;
+  box-shadow: 0 0 0 1px #f2c14e inset;
+}
+.don-deck-art {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 40%, #4a2f7a, #1c1140);
+  color: #fff;
+  font-weight: 800;
+  font-size: 12px;
+}
+.don-deck-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.don-deck-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.don-deck-meta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.don-deck-meta small {
+  opacity: .7;
+}
+.don-deck-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+@media (max-width: 640px) {
+  .don-deck-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 .untap-dialog {
   width: min(920px, 96vw);
   max-width: 96vw;
@@ -5761,3 +5858,27 @@ button.trash-area {
   line-height: 1.45;
   padding: 12px 14px;
 }
+
+/* Alt-art toggle on a card tile (only shown when the card has a second image). */
+.card-alt-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .35);
+  background: rgba(0, 0, 0, .62);
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 800;
+  cursor: pointer;
+  line-height: 1;
+}
+.card-alt-btn.active {
+  background: #e2b23b;
+  border-color: #e2b23b;
+  color: #1a1205;
+}
+.card-alt-btn:hover { transform: scale(1.06); }
+.card-image { position: relative; }

@@ -222,7 +222,9 @@ function normalizeImportedCardForGame(card) {
         keywords: Array.isArray(card.keywords) ? card.keywords : [],
         effect: effectText,
         effects: [],
-        image: card.image || ""
+        image: card.image || "",
+        // Optional second artwork; a player can switch to it per device.
+        altArt: card.altArt || ""
     };
 }
 
