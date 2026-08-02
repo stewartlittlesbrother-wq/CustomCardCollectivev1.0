@@ -3892,8 +3892,18 @@ function buildDeckText() {
   }
 
   // Ordered the same way the deck list is shown, for a tidy paste.
+  const shown = new Set();
   deckEntries().forEach(({ card, qty }) => {
+    shown.add(card.id);
     lines.push(`${qty}x ${card.cardNumber || card.id}`);
+  });
+
+  // Export straight from the deck STATE for any entry deckEntries() couldn't
+  // resolve to a pool card (e.g. the shared library hadn't finished loading).
+  // The deck is keyed by the card's id/number, so exporting the key preserves
+  // the card instead of silently dropping it from the list.
+  Object.entries(state.deck || {}).forEach(([id, qty]) => {
+    if (!shown.has(id) && qty > 0) lines.push(`${qty}x ${id}`);
   });
 
   (state.tokens || []).forEach(id => {
@@ -3934,8 +3944,10 @@ function parseDeckShareText(text) {
     const leaderMatch = line.match(/^leader\s*[:=]\s*(.+)$/i);
     if (leaderMatch) {
       const card = resolveDeckLineCard(leaderMatch[1]);
-      if (card) result.leaderId = card.cardNumber || card.id;
-      else result.missing.push(leaderMatch[1].trim());
+      // Keep the leader either way: the resolved id, or the raw number so it's
+      // remembered (and resolves once the pool finishes loading) instead of lost.
+      result.leaderId = card ? (card.id || card.cardNumber) : leaderMatch[1].trim();
+      if (!card) result.missing.push(leaderMatch[1].trim());
       return;
     }
 
@@ -3943,9 +3955,12 @@ function parseDeckShareText(text) {
     if (tokenMatch) {
       // Allow "Token: A, B, C" or one per line.
       tokenMatch[1].split(/[,]/).forEach(part => {
+        const raw = part.trim();
+        if (!raw) return;
         const card = resolveDeckLineCard(part);
-        if (card) { const key = card.cardNumber || card.id; if (!result.tokens.includes(key)) result.tokens.push(key); }
-        else if (part.trim()) result.missing.push(part.trim());
+        const key = card ? (card.id || card.cardNumber) : raw;
+        if (!result.tokens.includes(key)) result.tokens.push(key);
+        if (!card) result.missing.push(raw);
       });
       return;
     }
@@ -3955,29 +3970,33 @@ function parseDeckShareText(text) {
     if (qtyMatch) {
       const qty = Math.max(1, parseInt(qtyMatch[1], 10));
       const card = resolveDeckLineCard(qtyMatch[2]);
-      if (card) {
-        const key = card.cardNumber || card.id;
-        result.deck[key] = (result.deck[key] || 0) + qty;
-      } else {
-        result.missing.push(qtyMatch[2].trim());
-      }
+      // Keep the entry under the resolved id when known, otherwise under the raw
+      // number - so a card the pool can't resolve yet is preserved, not dropped.
+      const key = card ? (card.id || card.cardNumber) : qtyMatch[2].trim();
+      result.deck[key] = (result.deck[key] || 0) + qty;
+      if (!card) result.missing.push(qtyMatch[2].trim());
       return;
     }
 
     // A bare card number with no quantity = 1 copy.
     const bare = resolveDeckLineCard(line);
-    if (bare) {
-      const key = bare.cardNumber || bare.id;
-      result.deck[key] = (result.deck[key] || 0) + 1;
-    } else {
-      result.missing.push(line);
-    }
+    const key = bare ? (bare.id || bare.cardNumber) : line;
+    result.deck[key] = (result.deck[key] || 0) + 1;
+    if (!bare) result.missing.push(line);
   });
 
   return result;
 }
 
 function importDeckFromText(text) {
+  // Importing while the shared library is still loading would fail to resolve
+  // most cards and then overwrite+save the broken result. Block until the pool
+  // is ready so cards can't silently go missing.
+  if (state.cardsLoading || !state.cards.length) {
+    toast("Cards are still loading — wait a moment, then import again");
+    return false;
+  }
+
   const parsed = parseDeckShareText(text);
 
   const cardCount = Object.values(parsed.deck).reduce((sum, qty) => sum + qty, 0);
@@ -4005,6 +4024,10 @@ function importDeckFromText(text) {
 
 // Open the share panel in EXPORT mode: fill it with this deck's text and copy.
 function openDeckExport() {
+  if (state.cardsLoading) {
+    toast("Cards are still loading — wait a moment, then export");
+    return;
+  }
   closeDeckSharePanels();
   const text = buildDeckText();
   if (el.deckShareTitle) el.deckShareTitle.textContent = "Export deck — copy and share this";
