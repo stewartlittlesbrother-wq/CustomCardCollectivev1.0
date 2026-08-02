@@ -5451,6 +5451,25 @@ button.trash-area {
   gap: 8px;
 }
 
+/* Inline checkbox row inside the card creation form (e.g. "remove alt art"). */
+.creation-inline-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.creation-inline-check input {
+  width: auto;
+}
+
+/* "View All" toggle in the collection header, lit when active. */
+.collection-view-all.active {
+  background: #f2c14e;
+  border-color: #f2c14e;
+  color: #1a1205;
+  font-weight: 700;
+}
+
 /* ── Custom DON!! decks ─────────────────────────────────────────────── */
 /* A fixed, scrollable overlay (like the card creator) so it covers the main
    deck view, scrolls its own content, and its fields sit above everything. */

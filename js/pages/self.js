@@ -187,6 +187,8 @@ const playerSlot = urlParams.get("player");
 
 const isOnlineMatch = gameMode === "online";
 window.isSpectatorMode = isSpectator;
+// Player display names. Default to "Player 1/2" until the real nicknames arrive
+// from the match's players node (subscribeToPlayerNames), then get replaced.
 const onlinePlayerLabels = {
     p1: "Player 1",
     p2: "Player 2"
@@ -195,6 +197,7 @@ const onlinePlayerLabels = {
 let onlineMultiplayerService = null;
 let onlineFirebaseApp = null;
 let onlineMatchUnsubscribe = null;
+let onlineNamesUnsubscribe = null;
 let onlinePrivateUnsubscribe = null;
 let onlineUser = null;
 let onlinePublicState = null;
@@ -351,7 +354,7 @@ function applyOnlinePlayerState(playerKey) {
     if (!publicPlayer || !player) return;
 
     const isOwnPlayer = playerKey === getOwnOnlinePlayerKey();
-    player.name = playerKey === "player1" ? "Player 1" : "Player 2";
+    player.name = playerKey === "player1" ? onlinePlayerLabels.p1 : onlinePlayerLabels.p2;
     player.donDeck = Number(publicPlayer.tokenDeckCount ?? 10);
     player.turns = Number(publicPlayer.turns || 0);
 
@@ -1433,7 +1436,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-4");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-5");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1448,6 +1451,7 @@ async function initializeOnlineMultiplayer() {
 
         setupOnlineChat();
         setupOnlinePresence();
+        setupOnlinePlayerNames();
 
         // Multiplayer code reads public board/count state plus this user's private zones only.
         onlineMatchUnsubscribe = onlineMultiplayerService.subscribeToPublicState(
@@ -1477,7 +1481,7 @@ async function initializeSpectatorMatch() {
     showSpectatorBanner();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-4");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-5");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1486,6 +1490,7 @@ async function initializeSpectatorMatch() {
             roomCode,
             (publicState) => applyOnlinePublicState(publicState || {})
         );
+        setupOnlinePlayerNames();
 
         addGameLog(`Spectating online room ${roomCode}.`);
         updateOnlinePhaseButton();
@@ -1503,6 +1508,22 @@ function showSpectatorBanner() {
     banner.className = "spectator-banner";
     banner.innerHTML = `<span class="spectator-banner__dot"></span>SPECTATING &mdash; you are watching this game and cannot make moves.`;
     document.body.appendChild(banner);
+}
+
+// Pull the two players' nicknames from the match and use them everywhere the
+// board would otherwise say "Player 1" / "Player 2". Works for players and
+// spectators alike; updates live if a nickname changes.
+function setupOnlinePlayerNames() {
+    if (!onlineMultiplayerService?.subscribeToPlayerNames) return;
+    onlineNamesUnsubscribe = onlineMultiplayerService.subscribeToPlayerNames(roomCode, (names) => {
+        onlinePlayerLabels.p1 = names.p1 || "Player 1";
+        onlinePlayerLabels.p2 = names.p2 || "Player 2";
+        if (gameState) {
+            if (gameState.player1) gameState.player1.name = onlinePlayerLabels.p1;
+            if (gameState.player2) gameState.player2.name = onlinePlayerLabels.p2;
+        }
+        try { renderOnlineGameState?.(); } catch {}
+    });
 }
 
 // ── Presence / disconnect banner (players only) ──────────

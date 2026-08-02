@@ -16,6 +16,9 @@ const CARD_FILES = [
 // The shipped defaults. Users can add more (and override these) at runtime - see
 // loadCollections / saveCollection. The live list is CARD_COLLECTIONS below.
 const BUILTIN_COLLECTIONS = [
+  // The full official One Piece TCG card list, pulled live from a public API and
+  // hotlinked (no Firebase storage used). Read-only: not editable/deletable.
+  { slug: "official-op", name: "Official One Piece TCG", official: true },
   { slug: "golds-bleach", name: "Goldrush717's Bleach", image: "images/basic/golds-bleach-set.jpg" },
   { slug: "strixs-set", name: "Strix's Set" },
   { slug: "gavilanterns-deltarune", name: "Gavilantern's Deltarune" },
@@ -258,6 +261,7 @@ const el = {
   collectionPicker: document.querySelector("#collectionPicker"),
   collectionBack: document.querySelector("#collectionBack"),
   collectionEdit: document.querySelector("#collectionEdit"),
+  viewAllToggle: document.querySelector("#viewAllToggle"),
   collectionHeading: document.querySelector("#collectionHeading"),
   collectionCountPill: document.querySelector("#collectionCountPill"),
   searchInput: document.querySelector("#searchInput"),
@@ -335,6 +339,8 @@ const el = {
   creationImageUrl: document.querySelector("#creationImageUrl"),
   creationAltArtUrl: document.querySelector("#creationAltArtUrl"),
   creationAltArtImage: document.querySelector("#creationAltArtImage"),
+  creationRemoveAltArt: document.querySelector("#creationRemoveAltArt"),
+  creationRemoveAltArtRow: document.querySelector("#creationRemoveAltArtRow"),
   creationCardNumber: document.querySelector("#creationCardNumber"),
   creationName: document.querySelector("#creationName"),
   creationCategory: document.querySelector("#creationCategory"),
@@ -583,6 +589,130 @@ async function loadSharedCardsForPool() {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Official One Piece TCG card list
+//
+// Pulled live from a free, no-key public API (optcgapi.com) and cached locally
+// for a day so we don't hammer their VPS. Images are HOTLINKED from the API's
+// host - nothing is written to Firebase, so this uses zero shared storage. The
+// cards live in a read-only "official-op" collection and are loaded into the
+// in-memory pool (and, via the same cache, into the game) like any other card.
+// ─────────────────────────────────────────────────────────────────────────
+const OFFICIAL_COLLECTION = "official-op";
+const OFFICIAL_CARDS_KEY = "official-optcg-cards-v1";
+const OFFICIAL_CARDS_TTL_MS = 24 * 60 * 60 * 1000;
+const OPTCG_API_BASE = "https://optcgapi.com/api";
+
+// One optcgapi record -> our raw card shape (normalizeCard finishes the job).
+function officialCardToRaw(c) {
+  const category = normalizeCategory(c.card_type);
+  const colors = String(c.card_color || "").trim().split(/[\s,/]+/).filter(Boolean).join(",").toLowerCase();
+  return {
+    id: c.card_set_id,
+    cardNumber: c.card_set_id,
+    name: c.card_name || "",
+    category,
+    cardType: category,
+    color: colors,
+    cost: category === "leader" ? "" : (c.card_cost ?? ""),
+    life: category === "leader" ? (c.life ?? "") : "",
+    power: c.card_power ?? "",
+    counter: c.counter_amount ?? "",
+    attribute: c.attribute || "",
+    type: c.sub_types || "",
+    subtype: c.sub_types || "",
+    rarity: c.rarity || "",
+    effect: c.card_text || "",
+    image: c.card_image || "",
+    collection: OFFICIAL_COLLECTION,
+    setName: c.set_name || c.set_id || "",
+    official: true,
+    // Not a user upload: keeps Edit/Delete off these cards, and keeps them out
+    // of the local-project / shared-library save paths.
+    imported: false
+  };
+}
+
+// Fetch every set's cards (plus starter-deck and promo cards) and flatten them.
+async function fetchOfficialCardsFromApi() {
+  const setsRes = await fetch(`${OPTCG_API_BASE}/allSets/`);
+  if (!setsRes.ok) throw new Error(`sets HTTP ${setsRes.status}`);
+  const sets = await setsRes.json();
+  const setIds = (Array.isArray(sets) ? sets : []).map(s => s.set_id).filter(Boolean);
+
+  const grab = url => fetch(url).then(r => (r.ok ? r.json() : [])).catch(() => []);
+  const setCardGroups = await Promise.all(setIds.map(id => grab(`${OPTCG_API_BASE}/sets/${id}/`)));
+  const extras = await Promise.all([
+    grab(`${OPTCG_API_BASE}/allSTCards/`),
+    grab(`${OPTCG_API_BASE}/allPromoCards/`)
+  ]);
+
+  const seen = new Set();
+  const raws = [];
+  [...setCardGroups.flat(), ...extras.flat()].forEach(c => {
+    if (!c || !c.card_set_id) return;
+    // DON!! cards aren't playable main-deck cards; they belong to the DON screen.
+    if (String(c.card_type || "").toUpperCase().includes("DON")) return;
+    if (seen.has(c.card_set_id)) return;
+    seen.add(c.card_set_id);
+    raws.push(officialCardToRaw(c));
+  });
+  return raws;
+}
+
+function readOfficialCardCache() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(OFFICIAL_CARDS_KEY) || "null");
+    if (cached && Array.isArray(cached.cards)) return cached;
+  } catch {}
+  return null;
+}
+
+// Normalized official cards, from cache when fresh, else refetched. Never throws
+// - a failed fetch falls back to any (even stale) cache, then to an empty list.
+async function loadOfficialCards() {
+  const cached = readOfficialCardCache();
+  if (cached && (Date.now() - Number(cached.fetchedAt || 0)) < OFFICIAL_CARDS_TTL_MS) {
+    return cached.cards.map(raw => normalizeCard(raw));
+  }
+  try {
+    const raws = await fetchOfficialCardsFromApi();
+    if (raws.length) {
+      // Cache is best-effort: if it's too big for localStorage we just refetch
+      // next time rather than failing.
+      try { localStorage.setItem(OFFICIAL_CARDS_KEY, JSON.stringify({ fetchedAt: Date.now(), cards: raws })); } catch {}
+      return raws.map(raw => normalizeCard(raw));
+    }
+  } catch (error) {
+    console.warn("Official card list fetch failed, using cache if any:", error);
+  }
+  return cached ? cached.cards.map(raw => normalizeCard(raw)) : [];
+}
+
+// Load the official card list and fold it into the in-memory pool without
+// disturbing the user's own cards (they win on any key collision). Runs once
+// per pool load; safe to call even if it's already merged.
+let officialMergeInFlight = false;
+async function mergeOfficialCardsInBackground() {
+  if (officialMergeInFlight) return;
+  officialMergeInFlight = true;
+  try {
+    const official = await loadOfficialCards();
+    if (!official.length) return;
+    const existing = new Set(state.cards.map(cardLibraryKey));
+    const additions = official.filter(card => !existing.has(cardLibraryKey(card)));
+    if (!additions.length) return;
+    state.cards = dedupeCards([...state.cards, ...additions])
+      .sort((a, b) => a.cardNumber.localeCompare(b.cardNumber));
+    populateFilterOptions();
+    renderAll();
+  } catch (error) {
+    console.warn("Official cards merge failed:", error);
+  } finally {
+    officialMergeInFlight = false;
+  }
+}
+
 async function loadCardPool() {
   try {
     const groups = await Promise.all(CARD_FILES.map(loadCardFile));
@@ -612,14 +742,29 @@ async function loadCardPool() {
       .map(normalizeImportedCard)
       .filter(card => !loadedKeys.has(cardLibraryKey(card)));
 
+    // Cards saved to THIS device only (the fallback when the shared library
+    // couldn't be written - e.g. auth not ready yet, rules not published, or a
+    // network blip). Without merging these, a card would save, show for a moment,
+    // then vanish on the next pool reload. Shared/bundled copies still win.
+    legacyCards.forEach(card => loadedKeys.add(cardLibraryKey(card)));
+    const localProjectCards = readLocalProjectCards()
+      .map(normalizeImportedCard)
+      .filter(card => !loadedKeys.has(cardLibraryKey(card))
+        && !deleted.has(projectCardKey(card)));
+
     state.cards = dedupeCards([
       ...pooledCards,
-      ...legacyCards
+      ...legacyCards,
+      ...localProjectCards
     ]).sort((a, b) => a.cardNumber.localeCompare(b.cardNumber));
     state.cardsLoading = false;
     populateFilterOptions();
     renderAll();
     updateImportStatus();
+
+    // The big official-card list loads in the background so your own cards
+    // appear instantly; it merges in and re-renders when ready.
+    mergeOfficialCardsInBackground();
   } catch (error) {
     state.cardsLoading = false;
     el.cardGrid.style.display = "";
@@ -2835,10 +2980,28 @@ async function saveCreatedCard(event) {
     return;
   }
 
+  // Set / card number is required.
+  if (!el.creationCardNumber.value.trim()) {
+    toast("Set / card number is required (e.g. JJBA-001)");
+    return;
+  }
+
+  // Card type must be chosen (the dropdown starts on a blank placeholder).
+  if (!el.creationCategory.value) {
+    toast("Choose a card type");
+    return;
+  }
+
   // A colour is required (there's no "colorless" any more) - a card with no
   // colour would be hidden the moment a leader is picked.
   if (!csvValues(el.creationColors.value).length) {
     toast("Choose a color for the card");
+    return;
+  }
+
+  // Cost (or Life, for leaders) must be chosen.
+  if (el.creationCost.value === "") {
+    toast(el.creationCategory.value === "leader" ? "Choose a life value" : "Choose a cost");
     return;
   }
 
@@ -2864,11 +3027,15 @@ async function saveCreatedCard(event) {
   }
 
   // Optional alt art (second image), resolved the same way. Keeps any existing
-  // alt art when editing and no new one is provided.
+  // alt art when editing and no new one is provided - UNLESS "Remove this card's
+  // alt art" is ticked, which clears it.
   const altUrl = el.creationAltArtUrl?.value.trim() || "";
   const altFile = el.creationAltArtImage?.files?.[0];
+  const removeAltArt = Boolean(el.creationRemoveAltArt?.checked);
   let altArtSource = "";
-  if (altFile) {
+  if (removeAltArt && !altFile && !altUrl) {
+    altArtSource = ""; // explicit removal wins over the keep-existing fallback
+  } else if (altFile) {
     altArtSource = await compressImageDataUrl(await readFileAsDataUrl(altFile));
   } else if (altUrl) {
     altArtSource = (await fetchRemoteImageAsDataUrl(altUrl)) || altUrl;
@@ -2916,6 +3083,9 @@ function clearCreationForm(resetNumber = true) {
   if (resetNumber && el.creationCardNumber) el.creationCardNumber.value = nextImportedCardNumber();
   if (el.creationImagePreview) el.creationImagePreview.innerHTML = `<span>No image yet</span>`;
   if (el.creationStatus) el.creationStatus.textContent = "Ready";
+  // New cards have no alt art to remove.
+  if (el.creationRemoveAltArtRow) el.creationRemoveAltArtRow.hidden = true;
+  if (el.creationRemoveAltArt) el.creationRemoveAltArt.checked = false;
   // Keep filing new cards into whatever collection you're browsing.
   preselectCreationCollection();
 }
@@ -3655,6 +3825,9 @@ function openCardForEditing(card) {
   if (el.creationAltArtUrl) {
     el.creationAltArtUrl.value = card.altArt && !String(card.altArt).startsWith("data:") ? card.altArt : "";
   }
+  // Offer a "remove alt art" option only when this card actually has one.
+  if (el.creationRemoveAltArt) el.creationRemoveAltArt.checked = false;
+  if (el.creationRemoveAltArtRow) el.creationRemoveAltArtRow.hidden = !card.altArt;
   el.creationCardNumber.value = card.cardNumber || card.id;
   el.creationName.value = card.name || "";
   el.creationCategory.value = normalizeCategory(card.category || card.cardType);
@@ -4318,8 +4491,9 @@ function filteredCards() {
     // Leader-first browsing: with no leader picked the grid shows ONLY leaders,
     // so you choose who to build around first; once a leader is chosen it drops
     // out and the grid shows just that leader's colours. Skipped for collections
-    // that have no leaders (otherwise they'd look empty).
-    if (!category && collectionHasLeader) {
+    // that have no leaders (otherwise they'd look empty), and skipped entirely
+    // when "View all" is on.
+    if (!category && collectionHasLeader && !state.viewAll) {
       if (!leader) {
         if (card.category !== "leader") return false;
       } else if (card.category === "leader") {
@@ -4338,8 +4512,10 @@ function filteredCards() {
       && (!el.blockFilter.value || card.block === el.blockFilter.value)
       && (!state.rotationOnly || !/^test/i.test(card.cardNumber))
       // Once a leader is picked the grid is restricted to its colours, so what
-      // you see is what you can actually play. Leaders and tokens are exempt.
-      && (!leader
+      // you see is what you can actually play. Leaders and tokens are exempt, and
+      // "View all" lifts the restriction entirely.
+      && (state.viewAll
+        || !leader
         || card.category === "leader"
         || card.category === "token"
         || card.colors.some(cardColor => leaderColors.has(cardColor)));
@@ -4748,6 +4924,12 @@ function renderCardGrid() {
   if (el.cardGrid) el.cardGrid.style.display = browsing ? "" : "none";
   if (el.collectionBack) el.collectionBack.hidden = !browsing;
   if (el.collectionEdit) el.collectionEdit.hidden = !browsing;
+  if (el.viewAllToggle) {
+    el.viewAllToggle.hidden = !browsing;
+    el.viewAllToggle.classList.toggle("active", Boolean(state.viewAll));
+    el.viewAllToggle.setAttribute("aria-pressed", state.viewAll ? "true" : "false");
+    el.viewAllToggle.textContent = state.viewAll ? "Leader-First" : "View All";
+  }
   if (el.collectionCountPill) el.collectionCountPill.hidden = !browsing;
   if (el.collectionHeading) {
     el.collectionHeading.textContent = browsing
@@ -4770,7 +4952,7 @@ function renderCardGrid() {
   if (el.collectionHint) {
     const leader = getCard(state.leaderId);
     const total = state.cards.length;
-    el.collectionHint.textContent = el.categoryFilter.value
+    el.collectionHint.textContent = (el.categoryFilter.value || state.viewAll)
       ? ""
       : !leader
         ? `Pick a leader to start — showing leaders only (${total} cards in all)`
@@ -5679,6 +5861,12 @@ function bindEvents() {
   el.closeDeckShare?.addEventListener("click", closeDeckSharePanels);
   el.collectionBack?.addEventListener("click", closeCollection);
   el.collectionEdit?.addEventListener("click", () => openCollectionEditor(state.activeCollection));
+  // "View All" lifts the leader-first / leader-colour restriction so every card
+  // in the collection shows, even before (or regardless of) a chosen leader.
+  el.viewAllToggle?.addEventListener("click", () => {
+    state.viewAll = !state.viewAll;
+    renderCardGrid();
+  });
   setupCollectionManagement();
   el.resetFilters.addEventListener("click", () => {
     el.searchInput.value = "";

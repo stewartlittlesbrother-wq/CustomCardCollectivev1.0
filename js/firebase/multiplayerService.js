@@ -436,6 +436,20 @@ export function subscribeToPrivateState(roomCode, uid, callback) {
     });
 }
 
+// The two players' chosen nicknames, so the game board can show real names
+// instead of "Player 1" / "Player 2". Names live on the match's players node.
+export function subscribeToPlayerNames(roomCode, callback) {
+    const playersRef = ref(database, `matches/${cleanRoomCode(roomCode)}/players`);
+
+    return onValue(playersRef, (snapshot) => {
+        const players = snapshot.val() || {};
+        callback({
+            p1: String(players.p1?.name || "").slice(0, 24),
+            p2: String(players.p2?.name || "").slice(0, 24)
+        });
+    });
+}
+
 export async function getMatch(roomCode) {
     const matchRef = ref(database, `matches/${cleanRoomCode(roomCode)}`);
     const snapshot = await get(matchRef);

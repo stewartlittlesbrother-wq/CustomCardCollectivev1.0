@@ -135,13 +135,26 @@ function loadImportedCardsForGame() {
             return [];
         }
     };
+    // The official One Piece card list is cached by the deck builder under its
+    // own key as { fetchedAt, cards: [...] }. Load those too so decks built with
+    // official cards actually work in a game.
+    const readOfficial = () => {
+        try {
+            const cached = JSON.parse(localStorage.getItem("official-optcg-cards-v1") || "null");
+            return cached && Array.isArray(cached.cards) ? cached.cards : [];
+        } catch {
+            return [];
+        }
+    };
+
     // Read BOTH local stores: the legacy imported-cards key AND the project-cards
     // fallback that publishSingleCard writes to when the shared library can't be
     // reached during an import. Without the second one, cards that only saved
     // locally showed up in the deck builder but "didn't work" in a game.
     return dedupeImportedCardsForGame([
         ...read(customCardsStorageKey),
-        ...read("custom-cards-sim-local-project-cards-v1")
+        ...read("custom-cards-sim-local-project-cards-v1"),
+        ...readOfficial()
     ]);
 }
 
