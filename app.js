@@ -1274,8 +1274,16 @@ async function saveDonCard(event) {
   if (el.donCardStatus) el.donCardStatus.textContent = "Publishing…";
   const result = await publishSingleCard(card);
   if (!result) { toast("Could not save the DON!! card"); if (el.donCardStatus) el.donCardStatus.textContent = ""; return; }
-  await loadCardPool();
+
+  // Show it in the pool immediately (optimistic), so it can't seem to "not
+  // appear" while the shared library round-trips. loadCardPool then reconciles.
+  const normalized = normalizeCard(card);
+  if (!state.cards.some(c => cardLibraryKey(c) === cardLibraryKey(normalized))) {
+    state.cards.push(normalized);
+  }
   hideAddDonCardForm();
+  renderDonCardPool();
+  await loadCardPool();
   renderDonCardPool();
   toast(result === "local" ? "DON!! card saved (this device only)" : "DON!! card added to the shared pool");
 }

@@ -44,26 +44,37 @@ const DON_ACTIVE_DECK_KEY = "custom-don-active-deck-v1";
 function getActiveDonDeck() {
     try {
         const id = localStorage.getItem(DON_ACTIVE_DECK_KEY) || "";
-        if (!id) return { count: 10, arts: null };
+        if (!id) return { count: 10, arts: null, nums: null };
         const list = JSON.parse(localStorage.getItem(DON_DECKS_KEY) || "[]");
         const deck = Array.isArray(list) ? list.find(d => d && d.id === id) : null;
-        const cards = deck && Array.isArray(deck.cards) ? deck.cards : null;
-        if (!cards || !cards.length) return { count: 10, arts: null };
-        const arts = cards.slice(0, 10).map(c => (c && typeof c.art === "string" && c.art) ? c.art : donImage);
-        return { count: arts.length, arts };
-    } catch { return { count: 10, arts: null }; }
+        const cards = deck && Array.isArray(deck.cards) ? deck.cards.slice(0, 10) : null;
+        if (!cards || !cards.length) return { count: 10, arts: null, nums: null };
+        // arts = the copy embedded in the deck (fallback); nums = the DON!! card
+        // numbers, synced to the opponent so THEY can look up the same shared art.
+        const arts = cards.map(c => (c && typeof c.art === "string" && c.art) ? c.art : donImage);
+        const nums = cards.map(c => (c && c.n) ? String(c.n) : "");
+        return { count: arts.length, arts, nums };
+    } catch { return { count: 10, arts: null, nums: null }; }
 }
 // Per-player DON!! limit with a sane fallback for older player objects.
 function donMaxFor(player) {
     const max = Number(player?.donMax);
     return max > 0 ? max : 10;
 }
-// Art for a specific DON!! slot (left to right). Custom decks give each DON!! its
-// own art; standard decks return the default image for every slot. Online, only
-// your own DON!! art is known locally (per-slot art isn't synced), so the
-// opponent always uses the default image.
+// Art for a specific DON!! slot (left to right). DON!! cards are shared, so each
+// side resolves the same art from its own card library by card number - meaning
+// BOTH players see the custom art. Falls back to the copy embedded in the deck
+// (own side), then to the default DON!! image.
 function donArtForSlot(player, index) {
-    if (isOnlineMatch && !isSpectator && !isOwnOnlinePlayer(player)) return donImage;
+    // 1. Resolve from the shared card library by number (works on both sides).
+    const nums = player && Array.isArray(player.donNums) ? player.donNums : null;
+    const num = nums && index >= 0 && index < nums.length ? nums[index] : "";
+    if (num && typeof window.getCardById === "function") {
+        const card = window.getCardById(num);
+        const img = card && typeof card.image === "string" ? card.image.trim() : "";
+        if (img) return img;
+    }
+    // 2. Fall back to the art embedded in this player's own deck.
     const arts = player && Array.isArray(player.donArts) ? player.donArts : null;
     const art = arts && index >= 0 && index < arts.length ? arts[index] : null;
     return (typeof art === "string" && art) ? art : donImage;
@@ -79,16 +90,16 @@ function getSavedDonDeckList() {
 
 // Apply a chosen DON!! deck (or null = standard 10) to the local player(s).
 function applyDonDeckSelection(deck) {
-    const arts = deck && Array.isArray(deck.cards) && deck.cards.length
-        ? deck.cards.slice(0, 10).map(c => (c && typeof c.art === "string" && c.art) ? c.art : donImage)
-        : null;
+    const cards = deck && Array.isArray(deck.cards) && deck.cards.length ? deck.cards.slice(0, 10) : null;
+    const arts = cards ? cards.map(c => (c && typeof c.art === "string" && c.art) ? c.art : donImage) : null;
+    const nums = cards ? cards.map(c => (c && c.n) ? String(c.n) : "") : null;
     const count = arts ? arts.length : 10;
-    // Apply to both players. In practice you control both sides; online, the
-    // opponent's art is ignored (donArtForSlot guard) and their count is
-    // overwritten by the synced board, so this only really affects your side.
+    // Apply to both players. In practice you control both sides; online, your
+    // own side is what matters (the opponent's is overwritten by their sync).
     [gameState.player1, gameState.player2].forEach(player => {
         player.donMax = count;
         player.donArts = arts;
+        player.donNums = nums;
     });
     try { localStorage.setItem(DON_ACTIVE_DECK_KEY, deck?.id || ""); } catch {}
     updateDonDisplay();
@@ -324,10 +335,11 @@ function applyBoardToPlayer(player, boardJson) {
     player.floatingDon = Array.isArray(board.floatingDon) ? board.floatingDon : [];
     player.don = Number(board.don || 0);
     player.restedDon = Number(board.restedDon || 0);
-    // Custom DON!! deck size so the opponent's DON!! count renders correctly.
-    // Own player keeps its locally-applied deck; only apply from the board when
-    // it carries a value (older matches won't have it).
+    // Custom DON!! deck size + card numbers so the opponent's DON!! render with
+    // the right count AND the right (shared) art. Own player keeps its
+    // locally-applied deck; only apply from the board when it carries a value.
     if (Number(board.donMax) > 0) player.donMax = Number(board.donMax);
+    if (Array.isArray(board.donNums)) player.donNums = board.donNums;
     // Rebuilt from the counts by getDonSlots if absent or inconsistent.
     player.donOrder = Array.isArray(board.donOrder) ? board.donOrder : null;
 }
@@ -1040,10 +1052,12 @@ function createPublicPlayerStateFromLocal(player) {
         floatingDon: player.floatingDon || [],
         don: Number(player.don || 0),
         restedDon: Number(player.restedDon || 0),
-        // Custom DON!! deck SIZE so the opponent sees the right count. Per-slot
-        // art isn't synced (up to 10 images would bloat every board update); the
-        // opponent renders standard DON!! art, which is fine for counting.
-        donMax: donMaxFor(player)
+        // Custom DON!! deck SIZE plus the per-slot DON!! card NUMBERS. Numbers are
+        // tiny, and because DON!! cards are shared the opponent looks up the same
+        // art from their own library - so both players see the custom art without
+        // syncing any image bytes.
+        donMax: donMaxFor(player),
+        donNums: Array.isArray(player.donNums) ? player.donNums : null
     };
 
     return {
@@ -1833,6 +1847,7 @@ function createInitialPlayerState(playerName, deckDefinition) {
         // Custom DON!! deck limit / art (default 10 + standard image).
         donMax: 10,
         donArts: null,
+        donNums: null,
         turns: 0,
         deck: shuffleDeck(parseDeckText(selectedDeck.deckText)),
         deckName: selectedDeck.name,
@@ -1883,6 +1898,7 @@ function createEmptyPlayerState(playerName) {
         donDeck: 10,
         donMax: 10,
         donArts: null,
+        donNums: null,
         turns: 0,
         deck: [],
         deckName: playerName,
@@ -2069,6 +2085,7 @@ async function initializeGamePage() {
             [gameState.player1, gameState.player2].forEach(player => {
                 player.donMax = activeDon.count;
                 player.donArts = activeDon.arts;
+                player.donNums = activeDon.nums;
             });
         }
 
