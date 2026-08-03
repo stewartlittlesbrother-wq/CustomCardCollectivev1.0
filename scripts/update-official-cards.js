@@ -6,9 +6,12 @@
  * Run server-side (locally or in the daily GitHub Action) - NOT from the browser:
  * cardkaizoku's CDN only allows CORS from its own site, so the site can't fetch
  * it directly. Committing the trimmed file into the repo lets the site load it
- * same-origin with no CORS and no external runtime dependency. Images are still
- * hotlinked from cardkaizoku's CDN (image tags don't need CORS), so nothing is
- * copied into Firebase.
+ * same-origin with no CORS and no external runtime dependency.
+ *
+ * IMAGES: cardkaizoku's card images are referer-locked (they 403 for any site
+ * other than cardkaizoku's own), so they CAN'T be shown on this site. Instead we
+ * point each card's image at optcgapi.com, whose images ARE freely hotlinkable
+ * and use the same card numbers. Still nothing copied into Firebase.
  *
  * Usage: node scripts/update-official-cards.js
  */
@@ -43,7 +46,9 @@ function toCard(c) {
     effect: c.text || "",
     trigger: c.trigger || "",
     setName: c.cardSet || "",
-    image: c.bucketImg || (c.cardImg ? `https://cdn.cardkaizoku.com${c.cardImg}` : "")
+    // optcgapi images are freely hotlinkable and keyed by the same card number;
+    // cardkaizoku's own images 403 for outside sites so they can't be used.
+    image: `https://optcgapi.com/media/static/Card_Images/${c.cardNumber}.jpg`
   };
 }
 
