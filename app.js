@@ -1025,7 +1025,8 @@ function readLocalProjectCards() {
     const cards = JSON.parse(localStorage.getItem(LOCAL_PROJECT_CARDS_KEY) || "[]");
     return Array.isArray(cards) ? cards : [];
   } catch {
-    localStorage.removeItem(LOCAL_PROJECT_CARDS_KEY);
+    // Never auto-delete on a parse hiccup - that would silently wipe the user's
+    // device-only cards. Just treat it as empty for this read.
     return [];
   }
 }
@@ -1431,12 +1432,19 @@ async function saveDonCard(event) {
   // Show it in the pool immediately (optimistic), so it can't seem to "not
   // appear" while the shared library round-trips. loadCardPool then reconciles.
   const normalized = normalizeCard(card);
-  if (!state.cards.some(c => cardLibraryKey(c) === cardLibraryKey(normalized))) {
-    state.cards.push(normalized);
-  }
+  const ensureInPool = () => {
+    if (!state.cards.some(c => cardLibraryKey(c) === cardLibraryKey(normalized))) {
+      state.cards.push(normalized);
+    }
+  };
+  ensureInPool();
   hideAddDonCardForm();
   renderDonCardPool();
   await loadCardPool();
+  // loadCardPool rebuilds state.cards from the shared library + local stores; if
+  // the just-saved card isn't in either yet (a slow shared round-trip, or a
+  // device-only save), re-add it so it can't flash in then vanish.
+  ensureInPool();
   renderDonCardPool();
   toast(result === "local" ? "DON!! card saved (this device only)" : "DON!! card added to the shared pool");
 }
