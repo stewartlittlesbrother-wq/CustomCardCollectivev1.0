@@ -205,6 +205,7 @@ let onlinePrivateState = null;
 let lastOnlineTurnKey = null;
 let onlineProcessedTurnKey = null;
 let onlineLastRevealKey = null;
+let onlineMulliganResolveInFlight = false;
 let onlineLastAttackKey = null;
 let onlineActiveAttackId = null;
 let onlineProcessedDefenderAttackEffectId = null;
@@ -518,6 +519,21 @@ function applyOnlinePublicState(publicState = {}) {
         player1: publicState.player1 || null,
         player2: publicState.player2 || null
     };
+
+    // Self-heal a mulligan deadlock: if BOTH players are marked done but the
+    // phase is still "mulligan" (they both decided at the same instant, so
+    // neither write saw the other and neither advanced the phase), finish the
+    // transition to main. Idempotent + guarded on the server, so it's safe for
+    // both clients to attempt it. Spectators never write.
+    if (!isSpectator && onlinePublicState.phase === "mulligan" && !onlineMulliganResolveInFlight) {
+        const m = onlinePublicState.setup?.mulligan || {};
+        if (m.p1?.done && m.p2?.done) {
+            onlineMulliganResolveInFlight = true;
+            Promise.resolve(onlineMultiplayerService?.resolveMulliganIfBothDone?.(roomCode))
+                .catch(error => console.warn("Mulligan self-heal failed:", error))
+                .finally(() => { onlineMulliganResolveInFlight = false; });
+        }
+    }
 
     // Hide both hands during the dice-roll / turn-order-choice step. Hands are
     // dealt at match start, but you shouldn't be looking at them while deciding
@@ -1436,7 +1452,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-5");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-6");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1481,7 +1497,7 @@ async function initializeSpectatorMatch() {
     showSpectatorBanner();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-5");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-6");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();

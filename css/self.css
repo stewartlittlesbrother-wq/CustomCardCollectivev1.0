@@ -4416,6 +4416,45 @@ body.online-choosing-turn .opponent-hand {
 /* Turned off in Settings: hide the extra slots entirely. */
 body.extra-slots-off .extra-slots-wrap { display: none !important; }
 
+/* ── Compact side piles ────────────────────────────────────
+   The token, face-up and face-down piles are shown as small thumbnails so the
+   whole extra-zones column fits on screen - with the extra slots on, the full
+   card size pushed the opponent's token pile off the top with no way to reach
+   it. Only the green extra slots stay at readable size. Cards in these piles are
+   still right-click-viewable at full size. */
+:root { --extra-pile-scale: .5; }
+.token-zone-area,
+.extra-faceup-area,
+.extra-facedown-area {
+    width: calc(var(--zone-card-w) * var(--extra-pile-scale));
+    height: calc(var(--zone-card-h) * var(--extra-pile-scale));
+}
+.extra-pile-img {
+    width: calc(var(--zone-card-w) * var(--extra-pile-scale)) !important;
+    height: calc(var(--zone-card-h) * var(--extra-pile-scale)) !important;
+}
+/* Empty-pile labels + count badge scale down to match the thumbnails. */
+.extra-faceup-area::after,
+.extra-facedown-area::after,
+.token-empty-label {
+    max-width: calc(var(--zone-card-w) * var(--extra-pile-scale) - 4px);
+    font-size: 8px;
+    line-height: 1.15;
+}
+.extra-pile-count {
+    min-width: 16px;
+    height: 16px;
+    padding: 0 3px;
+    right: 2px;
+    bottom: 2px;
+    font-size: .62rem;
+}
+.token-add-btn {
+    width: 16px;
+    height: 16px;
+    font-size: .72rem;
+}
+
 /* Hoverable revealed-card names in the game log (preview on hover). */
 .log-message .log-card {
     color: #ffd24a;

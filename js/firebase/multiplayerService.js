@@ -940,6 +940,36 @@ export async function setMultiplayerMulligan(roomCode, user, playerSlot, tookMul
     await update(matchRef, updates);
 }
 
+// Rescue a mulligan deadlock. setMultiplayerMulligan reads the match, then
+// writes - so if BOTH players decide at nearly the same instant, each reads the
+// state before the other's write lands and neither sees "both done", so neither
+// advances the phase. The result: both `done` flags are true in the DB but the
+// phase is stuck on "mulligan". Any client that sees that state calls this to
+// finish the transition. Idempotent + guarded, so both clients calling it (or
+// calling it repeatedly) is harmless.
+export async function resolveMulliganIfBothDone(roomCode) {
+    const matchRef = ref(database, `matches/${cleanRoomCode(roomCode)}`);
+    const snapshot = await get(matchRef);
+    if (!snapshot.exists()) return false;
+
+    const publicState = snapshot.val().public || {};
+    if (publicState.phase !== "mulligan") return false;
+
+    const mulligan = publicState.setup?.mulligan || {};
+    if (!(mulligan.p1?.done && mulligan.p2?.done)) return false;
+
+    const firstPlayer = publicState.firstPlayer || publicState.setup?.turnChoice?.firstPlayer || "p1";
+    await update(matchRef, {
+        "public/phase": "main",
+        "public/currentPlayer": firstPlayer,
+        "public/turnNumber": 1,
+        // Match the bothDone branch of setMultiplayerMulligan: the first player's
+        // client runs its own opening turn start, so leave its turn counter at 0.
+        [`public/playerTurns/${firstPlayer}`]: 0
+    });
+    return true;
+}
+
 export async function sendMultiplayerAction(roomCode, user, actionType, payload) {
     if (!user?.uid) {
         throw new Error("User is required for multiplayer actions.");
