@@ -2617,7 +2617,12 @@ body {
     left: 50%;
     top: 50%;
     width: 1724px;
-    height: 1120px;
+    /* Grows by one character-row height per seat that has the extra row on, so
+       the whole board just scales down to fit (never clipped, never scrolled).
+       --board-extra-rows (0/1/2) is set by applyExtraRowLayout(), and
+       fitBoardToViewport() feeds the matching taller design height into the
+       scale maths. */
+    height: calc(1120px + var(--board-extra-rows, 0) * 200px);
     margin: 0;
     gap: 18px;
     transform: translate(-50%, -50%) scale(var(--sim-board-scale));
@@ -3025,6 +3030,40 @@ body {
     height: min(100%, 168px);
     align-self: center;
     justify-self: center;
+}
+
+/* ── Second character row (Extra Slots) ────────────────────
+   Slots 5-9 form a full second character row directly under the first. They act
+   exactly like the top row (same drop/attack/DON logic - it's all slot-index
+   driven). Hidden unless THIS seat turned Extra Slots on; the flag is synced, so
+   the opponent sees your extra row too. The character-area is already a 5-col
+   grid, so the five extra slots wrap into a second row on their own. */
+/* Hidden by default. Uses .play-area .extra-char-slot (two classes) + !important
+   so it beats the later `.character-slot { display: grid !important }` rule that
+   would otherwise force these visible. */
+.play-area .extra-char-slot { display: none !important; }
+.play-area.extra-row-on .extra-char-slot { display: grid !important; }
+
+/* When the row is on, force the character area into a fixed 5-column grid so the
+   ten slots always wrap into two rows of five - regardless of whether the active
+   breakpoint's default is flex or grid. */
+.play-area.extra-row-on .character-area {
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    grid-auto-rows: auto !important;
+    gap: 10px !important;
+    justify-items: center;
+    align-items: center;
+}
+
+/* The old 2-slot side column is replaced by the second character row above. */
+.extra-slots-wrap { display: none !important; }
+
+/* Let the character-area's cell grow to fit its two rows instead of being
+   clamped to the single-row height (which would clip the second row). */
+.play-area.extra-row-on {
+    grid-template-rows: auto 190px;
+    align-items: center;
 }
 
 .board-character-card,

@@ -344,6 +344,7 @@ function applyBoardToPlayer(player, boardJson) {
     // locally-applied deck; only apply from the board when it carries a value.
     if (Number(board.donMax) > 0) player.donMax = Number(board.donMax);
     if (Array.isArray(board.donNums)) player.donNums = board.donNums;
+    if (typeof board.extraRow === "boolean") player.extraRow = board.extraRow;
     // Rebuilt from the counts by getDonSlots if absent or inconsistent.
     player.donOrder = Array.isArray(board.donOrder) ? board.donOrder : null;
 }
@@ -429,6 +430,8 @@ function renderOnlineGameState() {
     clearSelectedCardActions();
     clearSelectedBoardActions();
 
+    // Reflect each seat's extra-row choice (the opponent's arrives via sync).
+    applyExtraRowLayout();
     updateDonDisplay();
     renderDecks();
     renderDonDecks();
@@ -1076,7 +1079,10 @@ function createPublicPlayerStateFromLocal(player) {
         // art from their own library - so both players see the custom art without
         // syncing any image bytes.
         donMax: donMaxFor(player),
-        donNums: Array.isArray(player.donNums) ? player.donNums : null
+        donNums: Array.isArray(player.donNums) ? player.donNums : null,
+        // Whether this seat has its second character row on, so the opponent
+        // renders it too.
+        extraRow: Boolean(player.extraRow)
     };
 
     return {
@@ -1901,6 +1907,8 @@ function createInitialPlayerState(playerName, deckDefinition) {
         // Extra stage-like single-card slots (hold 0 or 1 card each).
         extraSlotA: [],
         extraSlotB: [],
+        // Second character row on this seat (Extra Slots). Synced so both see it.
+        extraRow: false,
         // Face-up pile of token copies created during the match.
         tokens: [],
         // Token TYPES this deck makes available. Copies are created and removed
@@ -1950,14 +1958,21 @@ function createEmptyPlayerState(playerName) {
         extraFaceDown: [],
         extraSlotA: [],
         extraSlotB: [],
+        // Second character row on this seat (Extra Slots). Synced so both see it.
+        extraRow: false,
         tokens: [],
         tokenTypes: []
     };
 }
 
 function createInitialGameState() {
-    // Spectators have no deck of their own - both sides come from public state.
-    if (isSpectator) {
+    // Online players AND spectators get EMPTY starting players: the real decks,
+    // hands and board come from the match's server state (applyOnlinePlayerState /
+    // applyOnlinePrivateState). Building from LOCAL decks here was wrong for online
+    // - it pulled whatever deck happened to be selected/saved on this device (so
+    // both sides showed the same deck), and if that local deck's leader wasn't in
+    // the pool it threw "Failed to load card database" and broke the whole match.
+    if (isSpectator || isOnlineMatch) {
         return {
             player1: createEmptyPlayerState("Player 1"),
             player2: createEmptyPlayerState("Player 2"),
@@ -2085,23 +2100,62 @@ function extraSlotsEnabled() {
     return localStorage.getItem("optcgExtraSlots") === "true";
 }
 
-function applyBoardDisplaySettings() {
-    // Off by default: the extra slots only show when the setting is explicitly on.
-    const showExtraSlots = extraSlotsEnabled();
-    document.body.classList.toggle("extra-slots-off", !showExtraSlots);
+// "Extra Slots" now means a second CHARACTER row on your seat. The flag lives on
+// the player (gameState) and is synced, so the opponent sees your extra row too.
+// extraSlotsEnabled() (localStorage) is just the remembered default for new games.
 
-    // Keep the on-board toggle button's label in step with the current state.
+// Which seat is "mine" to toggle: my own side online, or player1 in solo.
+function ownExtraRowKey() {
+    if (isOnlineMatch && !isSpectator) return getOwnOnlinePlayerKey();
+    return "player1";
+}
+
+function applyBoardDisplaySettings() {
+    applyExtraRowLayout();
+}
+
+// Show/hide each seat's second character row, size the board canvas to match,
+// and keep the toggle button's label in step. Called on load, on toggle, and
+// whenever online state arrives (so the opponent's choice is reflected).
+function applyExtraRowLayout() {
+    const p1On = Boolean(gameState?.player1?.extraRow);
+    const p2On = Boolean(gameState?.player2?.extraRow);
+
+    document.querySelector(".play-area.player-area")?.classList.toggle("extra-row-on", p1On);
+    document.querySelector(".play-area.opponent-area")?.classList.toggle("extra-row-on", p2On);
+
+    // Grow the fixed board canvas one row-height per active seat so the whole
+    // board just scales down to fit - never clipped, never scrolled.
+    document.documentElement.style.setProperty("--board-extra-rows", String((p1On ? 1 : 0) + (p2On ? 1 : 0)));
+
     const btn = document.getElementById("toggleExtraSlotsTool");
-    if (btn) btn.textContent = `▦ Extra Slots: ${showExtraSlots ? "On" : "Off"}`;
+    if (btn) {
+        const mine = Boolean(gameState?.[ownExtraRowKey()]?.extraRow);
+        btn.textContent = `▦ Extra Slots: ${mine ? "On" : "Off"}`;
+    }
+    fitBoardToViewport();
 }
 
 function setupExtraSlotsToggle() {
     const btn = document.getElementById("toggleExtraSlotsTool");
     if (!btn) return;
     btn.addEventListener("click", () => {
-        localStorage.setItem("optcgExtraSlots", String(!extraSlotsEnabled()));
-        applyBoardDisplaySettings();
-        renderExtraSlots();
+        if (!gameState || (isOnlineMatch && isSpectator)) return;
+        const key = ownExtraRowKey();
+        const next = !gameState[key]?.extraRow;
+        if (isOnlineMatch) {
+            // Online: only your own seat.
+            if (gameState[key]) gameState[key].extraRow = next;
+        } else {
+            // Solo: you control both sides, so toggle them together.
+            gameState.player1.extraRow = next;
+            gameState.player2.extraRow = next;
+        }
+        // Remember the choice as the default for future games.
+        try { localStorage.setItem("optcgExtraSlots", String(next)); } catch {}
+        applyExtraRowLayout();
+        renderCharacters();
+        window.scheduleOnlineBoardSync?.();
     });
 }
 
@@ -2124,7 +2178,20 @@ async function initializeGamePage() {
                 player.donArts = activeDon.arts;
                 player.donNums = activeDon.nums;
             });
+
+            // Seed each seat's extra character row from the saved preference. In
+            // solo you control both; online, just your own (the opponent's comes
+            // through the synced board).
+            const defaultExtraRow = extraSlotsEnabled();
+            if (isOnlineMatch) {
+                const key = ownExtraRowKey();
+                if (gameState[key]) gameState[key].extraRow = defaultExtraRow;
+            } else {
+                gameState.player1.extraRow = defaultExtraRow;
+                gameState.player2.extraRow = defaultExtraRow;
+            }
         }
+        applyExtraRowLayout();
 
         ui = createUiBridge();
 
@@ -2191,7 +2258,11 @@ document.addEventListener("DOMContentLoaded", initializeGamePage);
 // at a few breakpoints and ignored the tools sidebar.
 function fitBoardToViewport() {
     const DESIGN_WIDTH = 1680;
-    const DESIGN_HEIGHT = 1120;
+    // Match the .game-layout height, which grows by one character-row (200px)
+    // per seat that has its extra row on, so the scale maths shrink the board to
+    // keep the taller canvas fully on screen.
+    const extraRows = Number(getComputedStyle(document.documentElement).getPropertyValue("--board-extra-rows")) || 0;
+    const DESIGN_HEIGHT = 1120 + extraRows * 200;
     const MARGIN = 16;
 
     const sidebar = document.querySelector(".manual-sidebar");
