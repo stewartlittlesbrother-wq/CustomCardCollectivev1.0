@@ -2121,8 +2121,13 @@ function applyExtraRowLayout() {
     const p1On = Boolean(gameState?.player1?.extraRow);
     const p2On = Boolean(gameState?.player2?.extraRow);
 
-    document.querySelector(".play-area.player-area")?.classList.toggle("extra-row-on", p1On);
-    document.querySelector(".play-area.opponent-area")?.classList.toggle("extra-row-on", p2On);
+    // Find each seat's play-area by the cards it actually holds, NOT by the
+    // .player-area/.opponent-area class - those get SWAPPED when the local player
+    // is p2 (see the seat-swap at match connect), so a hard-coded mapping would
+    // put the extra row on the wrong side of your own screen.
+    const areaFor = key => document.querySelector(`.character-slot[data-player="${key}"]`)?.closest(".play-area");
+    areaFor("player1")?.classList.toggle("extra-row-on", p1On);
+    areaFor("player2")?.classList.toggle("extra-row-on", p2On);
 
     // Grow the fixed board canvas one row-height per active seat so the whole
     // board just scales down to fit - never clipped, never scrolled.
