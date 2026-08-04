@@ -2262,7 +2262,7 @@ function fitBoardToViewport() {
     // per seat that has its extra row on, so the scale maths shrink the board to
     // keep the taller canvas fully on screen.
     const extraRows = Number(getComputedStyle(document.documentElement).getPropertyValue("--board-extra-rows")) || 0;
-    const DESIGN_HEIGHT = 1120 + extraRows * 200;
+    const DESIGN_HEIGHT = 1120 + extraRows * 230;
     const MARGIN = 16;
 
     const sidebar = document.querySelector(".manual-sidebar");
