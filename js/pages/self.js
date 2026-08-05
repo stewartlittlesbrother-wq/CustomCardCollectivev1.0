@@ -2257,30 +2257,42 @@ document.addEventListener("DOMContentLoaded", initializeGamePage);
 // Board Scale-to-Fit
 // =========================
 
-// The board is laid out on a fixed 1680x1120 design canvas (.game-layout) and
-// scaled as one unit so it fits any landscape viewport without internal
-// overlap. This replaces the old stepped media-query scale, which only changed
-// at a few breakpoints and ignored the tools sidebar.
+// The play field is a fixed ~1200-wide design board, scaled to fill the middle
+// region BETWEEN the fixed side rails (Tools sidebar + piles rail on the left,
+// preview/chat rail on the right). The rails stay full size; only the board
+// scales. Also fits the piles rail to the viewport height so the full-size piles
+// are always fully visible with no scrolling.
 function fitBoardToViewport() {
-    const DESIGN_WIDTH = 1680;
-    // Match the .game-layout height, which grows by one character-row (200px)
-    // per seat that has its extra row on, so the scale maths shrink the board to
-    // keep the taller canvas fully on screen.
+    const DESIGN_WIDTH = 1210;
+    // Grows by one character-row (230px) per seat that has its extra row on.
     const extraRows = Number(getComputedStyle(document.documentElement).getPropertyValue("--board-extra-rows")) || 0;
     const DESIGN_HEIGHT = 1120 + extraRows * 230;
     const MARGIN = 16;
 
-    const sidebar = document.querySelector(".manual-sidebar");
-    const sidebarWidth = sidebar ? sidebar.getBoundingClientRect().width : 0;
+    // Rail widths, read from the CSS variables so the two stay in sync.
+    const rootStyle = getComputedStyle(document.documentElement);
+    const railPx = name => parseFloat(rootStyle.getPropertyValue(name)) || 0;
+    const railsWidth = railPx("--tools-w") + railPx("--pile-rail-w") + railPx("--preview-rail-w");
 
-    const availableWidth = window.innerWidth - sidebarWidth - MARGIN;
+    const availableWidth = window.innerWidth - railsWidth - MARGIN;
     const availableHeight = window.innerHeight - MARGIN;
     const scale = Math.max(
         0.15,
         Math.min(availableWidth / DESIGN_WIDTH, availableHeight / DESIGN_HEIGHT, 1)
     );
-
     document.documentElement.style.setProperty("--sim-board-scale", scale.toFixed(4));
+
+    // Fit the piles rail to the viewport height: full size when they fit, shrunk
+    // just enough when they don't, so they're always fully visible, never scrolled.
+    const col = document.getElementById("extraZonesColumn");
+    if (col) {
+        const groups = [...col.querySelectorAll(".extra-zones-group")];
+        // offsetHeight is the pre-transform layout height, so measuring here does
+        // not feed back into the scale we're about to set.
+        const natural = groups.reduce((h, g) => h + g.offsetHeight, 0) + Math.max(0, groups.length - 1) * 12 + 24;
+        const pileScale = natural > 0 ? Math.min(1, (window.innerHeight - 16) / natural) : 1;
+        document.documentElement.style.setProperty("--pile-scale", pileScale.toFixed(4));
+    }
 
     // Arrows/notes are positioned in viewport space, so refresh them on rescale
     window.manualPlay?.reapplyAnnotations?.();

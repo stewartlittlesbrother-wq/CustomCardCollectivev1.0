@@ -4466,43 +4466,108 @@ body.online-choosing-turn .opponent-hand {
 /* Turned off in Settings: hide the extra slots entirely. */
 body.extra-slots-off .extra-slots-wrap { display: none !important; }
 
-/* ── Compact side piles ────────────────────────────────────
-   The token, face-up and face-down piles are shown as small thumbnails so the
-   whole extra-zones column fits on screen - with the extra slots on, the full
-   card size pushed the opponent's token pile off the top with no way to reach
-   it. Only the green extra slots stay at readable size. Cards in these piles are
-   still right-click-viewable at full size. */
-:root { --extra-pile-scale: .5; }
+/* ── Fixed side rails ──────────────────────────────────────
+   The piles, card preview and chat used to sit INSIDE the scaled board, so they
+   shrank with it and left dead space around the edges. They're now FIXED rails
+   at natural size that fill that space; only the play field in the middle
+   scales. Rail widths are shared with fitBoardToViewport() in self.js. */
+:root {
+    --tools-w: 180px;
+    --pile-rail-w: 210px;
+    --preview-rail-w: 440px;
+}
+
+/* LEFT rail: token / face-up / face-down piles at FULL card size, anchored just
+   right of the Tools sidebar so they can never slide under the toolbar (the old
+   fullscreen bug). Scaled down ONLY if they'd be taller than the screen, so
+   they're always fully in view with no scrolling. */
+.extra-zones-column {
+    position: fixed;
+    left: var(--tools-w);
+    right: auto;
+    top: 0;
+    bottom: 0;
+    width: var(--pile-rail-w);
+    max-height: none;
+    margin: 0;
+    padding: 8px 6px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    overflow: hidden;
+    transform: none;
+    z-index: 45;
+}
+.extra-zones-column > .extra-zones-group {
+    transform: scale(var(--pile-scale, 1));
+    transform-origin: center;
+}
+/* Piles restored to full card size. */
 .token-zone-area,
 .extra-faceup-area,
 .extra-facedown-area {
-    width: calc(var(--zone-card-w) * var(--extra-pile-scale));
-    height: calc(var(--zone-card-h) * var(--extra-pile-scale));
+    width: var(--zone-card-w);
+    height: var(--zone-card-h);
 }
-.extra-pile-img {
-    width: calc(var(--zone-card-w) * var(--extra-pile-scale)) !important;
-    height: calc(var(--zone-card-h) * var(--extra-pile-scale)) !important;
+
+/* RIGHT rail: card preview + game log/chat at full size. */
+.card-preview-panel {
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: var(--preview-rail-w);
+    padding: 12px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 45;
 }
-/* Empty-pile labels + count badge scale down to match the thumbnails. */
-.extra-faceup-area::after,
-.extra-facedown-area::after,
-.token-empty-label {
-    max-width: calc(var(--zone-card-w) * var(--extra-pile-scale) - 4px);
-    font-size: 8px;
-    line-height: 1.15;
+.card-preview {
+    width: 100%;
+    height: auto;
+    flex: 1 1 60%;
+    min-height: 0;
 }
-.extra-pile-count {
-    min-width: 16px;
-    height: 16px;
-    padding: 0 3px;
-    right: 2px;
-    bottom: 2px;
-    font-size: .62rem;
+.card-preview .preview-image {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    object-fit: contain;
 }
-.token-add-btn {
-    width: 16px;
-    height: 16px;
-    font-size: .72rem;
+.game-log {
+    flex: 1 1 40%;
+    min-height: 150px;
+    display: flex;
+    flex-direction: column;
+}
+.game-log-messages { flex: 1 1 auto; min-height: 0; }
+
+/* The board now lives in the middle region between the two rails and scales to
+   fill it. */
+.game-layout {
+    position: fixed !important;
+    left: calc(var(--tools-w) + var(--pile-rail-w)) !important;
+    right: var(--preview-rail-w) !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: none !important;
+    overflow: hidden;
+}
+.game-board {
+    transform: scale(var(--sim-board-scale));
+    transform-origin: center;
 }
 
 /* Hoverable revealed-card names in the game log (preview on hover). */

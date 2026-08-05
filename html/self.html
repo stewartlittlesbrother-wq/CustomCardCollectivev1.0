@@ -7,7 +7,7 @@
 
     <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
     <link rel="stylesheet" href="../css/style.css">
-    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-13">
+    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-14">
     <link rel="stylesheet" href="../css/manual-play.css?v=manual-2">
 </head>
 <body>
@@ -129,39 +129,38 @@
 
         <div id="onlineMatchInfo" class="online-match-info hidden"></div>
 
+        <!-- Fixed LEFT rail (right of the Tools sidebar): the token / face-up /
+             face-down piles at full card size. Pulled OUT of the scaled board so
+             it stays full size and fills the left dead space; being fixed at
+             left:180px it can never slide under the toolbar. -->
+        <aside class="extra-zones-column" id="extraZonesColumn">
+            <!-- Labels are set from the player's actual seat in renderExtraPiles. -->
+            <div class="extra-zones-group" id="extraZonesOpponent">
+                <div class="extra-zones-label" id="extraZonesLabelP2">Opponent Piles</div>
+                <div class="area extra-faceup-area token-zone-area" id="player2TokenZoneArea" data-player="player2" data-pile="tokens"></div>
+                <div class="area extra-facedown-area" id="player2ExtraFaceDownArea" data-player="player2" data-pile="extraFaceDown"></div>
+                <div class="area extra-faceup-area" id="player2ExtraFaceUpArea" data-player="player2" data-pile="extraFaceUp"></div>
+                <div class="extra-slots-wrap">
+                    <div class="extra-zones-sublabel">Extra Slots</div>
+                    <div class="area extra-slot-area" id="player2ExtraSlotAArea" data-player="player2" data-pile="extraSlotA" data-empty-label="Extra slot"></div>
+                    <div class="area extra-slot-area" id="player2ExtraSlotBArea" data-player="player2" data-pile="extraSlotB" data-empty-label="Extra slot"></div>
+                </div>
+            </div>
+            <div class="extra-zones-group" id="extraZonesSelf">
+                <div class="extra-slots-wrap">
+                    <div class="area extra-slot-area" id="player1ExtraSlotAArea" data-player="player1" data-pile="extraSlotA" data-empty-label="Extra slot"></div>
+                    <div class="area extra-slot-area" id="player1ExtraSlotBArea" data-player="player1" data-pile="extraSlotB" data-empty-label="Extra slot"></div>
+                    <div class="extra-zones-sublabel">Extra Slots</div>
+                </div>
+                <div class="area extra-faceup-area" id="player1ExtraFaceUpArea" data-player="player1" data-pile="extraFaceUp"></div>
+                <div class="area extra-facedown-area" id="player1ExtraFaceDownArea" data-player="player1" data-pile="extraFaceDown"></div>
+                <div class="area extra-faceup-area token-zone-area" id="player1TokenZoneArea" data-player="player1" data-pile="tokens"></div>
+                <div class="extra-zones-label" id="extraZonesLabelP1">Your Piles</div>
+            </div>
+        </aside>
+
         <div class="game-layout">
             <section class="game-board">
-
-                <!-- Floats just left of the board (absolutely positioned, see
-                     .extra-zones-column) so it never takes width from the
-                     play area. -->
-                <aside class="extra-zones-column" id="extraZonesColumn">
-                    <!-- Labels are set from the player's actual seat in
-                         renderExtraPiles - P2 owns the "player2" group. -->
-                    <div class="extra-zones-group" id="extraZonesOpponent">
-                        <div class="extra-zones-label" id="extraZonesLabelP2">Opponent Piles</div>
-                        <div class="area extra-faceup-area token-zone-area" id="player2TokenZoneArea" data-player="player2" data-pile="tokens"></div>
-                        <div class="area extra-facedown-area" id="player2ExtraFaceDownArea" data-player="player2" data-pile="extraFaceDown"></div>
-                        <div class="area extra-faceup-area" id="player2ExtraFaceUpArea" data-player="player2" data-pile="extraFaceUp"></div>
-                        <div class="extra-slots-wrap">
-                            <div class="extra-zones-sublabel">Extra Slots</div>
-                            <div class="area extra-slot-area" id="player2ExtraSlotAArea" data-player="player2" data-pile="extraSlotA" data-empty-label="Extra slot"></div>
-                            <div class="area extra-slot-area" id="player2ExtraSlotBArea" data-player="player2" data-pile="extraSlotB" data-empty-label="Extra slot"></div>
-                        </div>
-                    </div>
-                    <div class="extra-zones-group" id="extraZonesSelf">
-                        <div class="extra-slots-wrap">
-                            <div class="area extra-slot-area" id="player1ExtraSlotAArea" data-player="player1" data-pile="extraSlotA" data-empty-label="Extra slot"></div>
-                            <div class="area extra-slot-area" id="player1ExtraSlotBArea" data-player="player1" data-pile="extraSlotB" data-empty-label="Extra slot"></div>
-                            <div class="extra-zones-sublabel">Extra Slots</div>
-                        </div>
-                        <div class="area extra-faceup-area" id="player1ExtraFaceUpArea" data-player="player1" data-pile="extraFaceUp"></div>
-                        <div class="area extra-facedown-area" id="player1ExtraFaceDownArea" data-player="player1" data-pile="extraFaceDown"></div>
-                        <div class="area extra-faceup-area token-zone-area" id="player1TokenZoneArea" data-player="player1" data-pile="tokens"></div>
-                        <div class="extra-zones-label" id="extraZonesLabelP1">Your Piles</div>
-                    </div>
-                </aside>
-
 
                 <div class="hand opponent-hand" id="player2Hand"></div>
         
@@ -226,31 +225,32 @@
                 </section>
 
                 <div class="hand player-hand" id="player1Hand"></div>
-        
+
             </section>
-
-            <aside class="card-preview-panel">
-                <div class="card-preview">
-                    <div class="preview-placeholder" id="previewPlaceholder">
-                        Hover a card to preview it
-                    </div>
-
-                    <img id="previewImage" class="preview-image" src="" alt="Card Preview">
-                </div>
-
-                <div class="game-log">
-                    <h3>Game Log</h3>
-                    <div id="gameLogMessages" class="game-log-messages"></div>
-                    <!-- Shown only in online matches (see setupOnlineChat) -->
-                    <form id="chatForm" class="chat-form hidden">
-                        <input id="chatInput" type="text" maxlength="300"
-                               placeholder="Message your opponent…" autocomplete="off">
-                        <button type="submit" id="chatSend">Send</button>
-                    </form>
-                </div>
-            </aside>
-            
         </div>
+
+        <!-- Fixed RIGHT rail: card preview + game log/chat, pulled OUT of the
+             scaled board so they stay full size and fill the right dead space. -->
+        <aside class="card-preview-panel">
+            <div class="card-preview">
+                <div class="preview-placeholder" id="previewPlaceholder">
+                    Hover a card to preview it
+                </div>
+
+                <img id="previewImage" class="preview-image" src="" alt="Card Preview">
+            </div>
+
+            <div class="game-log">
+                <h3>Game Log</h3>
+                <div id="gameLogMessages" class="game-log-messages"></div>
+                <!-- Shown only in online matches (see setupOnlineChat) -->
+                <form id="chatForm" class="chat-form hidden">
+                    <input id="chatInput" type="text" maxlength="300"
+                           placeholder="Message your opponent…" autocomplete="off">
+                    <button type="submit" id="chatSend">Send</button>
+                </form>
+            </div>
+        </aside>
     </main>
 
     <script src="../js/core/phases.js?v=creation-13&t=20260714172304"></script>
@@ -259,7 +259,7 @@
     <script src="../js/cards/decks.js?v=creation-13&t=20260714172304"></script>
     <script src="../js/core/deckParser.js?t=20260714172304"></script>
 
-    <script src="../js/pages/self.js?v=spectate-23&t=20260726000023"></script>
+    <script src="../js/pages/self.js?v=spectate-24&t=20260726000024"></script>
   <script src="../js/rotate-prompt.js"></script>
 
   <script src="../js/version.js"></script>
