@@ -3070,6 +3070,17 @@ body {
 .play-area.extra-row-on .life-area {
     grid-row: 1 / 4 !important;
 }
+/* Leader and stage span the same two top rows as the character block and centre
+   their card, so the leader is a tall, clearly separated target beside the two
+   character rows (instead of a short cell with dead space beneath it that reads
+   as cramped/overlapping the row next to it). */
+.play-area.extra-row-on .leader-area,
+.play-area.extra-row-on .stage-area {
+    grid-row: 1 / 3 !important;
+    align-self: stretch !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
 .play-area.extra-row-on .don-deck-area,
 .play-area.extra-row-on .don-area,
 .play-area.extra-row-on .deck-area,
