@@ -4504,8 +4504,8 @@ body.extra-slots-off .extra-slots-wrap { display: none !important; }
    scales. Rail widths are shared with fitBoardToViewport() in self.js. */
 :root {
     --tools-w: 180px;
-    --pile-rail-w: 210px;
-    --preview-rail-w: 440px;
+    --pile-rail-w: 190px;
+    --preview-rail-w: 400px;
 }
 
 /* LEFT rail: token / face-up / face-down piles at FULL card size, anchored just
@@ -4597,6 +4597,11 @@ body.extra-slots-off .extra-slots-wrap { display: none !important; }
     overflow: hidden;
 }
 .game-board {
+    /* Keep the board at its natural 1200px width - do NOT let flex shrink it to
+       the region, which narrowed the character column and squished the cards.
+       The scale transform (computed from the region) does the fitting. */
+    flex: 0 0 auto;
+    width: 1200px;
     transform: scale(var(--sim-board-scale));
     transform-origin: center;
 }
