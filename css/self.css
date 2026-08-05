@@ -3088,6 +3088,26 @@ body {
     grid-row: 3 !important;
 }
 
+/* The 5-column board variant lays the character area out as a FLEX row of fixed
+   120px slots that don't shrink. Once the board got narrower (side rails), five
+   of them are wider than the character column, so the last slot overflowed to
+   the right and sat on top of the leader. Force a 5-column GRID instead, so the
+   slots always shrink to fit their column and can never spill onto the leader.
+   (.play-area .X is two classes, so it beats the single-class flex rule.) */
+.play-area .character-area {
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    justify-items: center !important;
+    align-items: center !important;
+    gap: 6px !important;
+}
+.play-area .character-slot {
+    flex: none !important;
+    width: 100% !important;
+    max-width: var(--zone-card-w) !important;
+    justify-self: center !important;
+}
+
 .board-character-card,
 .character-slot > img {
     width: 100%;
