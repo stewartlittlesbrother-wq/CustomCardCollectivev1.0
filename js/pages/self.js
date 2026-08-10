@@ -34,6 +34,67 @@ function cardArtSrc(card) {
 const donBackImage = "../images/basic/card-back-don.webp";
 const donImage = "../images/basic/card-front-don.webp";
 
+// Player-uploaded board cosmetics (playmat, card back, DON!! back). Saved as
+// data URLs in localStorage from the Settings tab, and applied PER SEAT: your
+// cosmetics show on YOUR field, your opponent's on theirs. Online they're synced
+// through the match (matches/{room}/cosmetics/{slot}) so each player sees the
+// other's. Unset = the built-in look (the CSS var fallbacks).
+const CUSTOM_IMAGE_KEYS = {
+    playmat: "custom-img-playmat-v1",
+    cardBack: "custom-img-cardback-v1",
+    donBack: "custom-img-donback-v1"
+};
+let onlineCosmetics = {}; // { p1: {...}, p2: {...} } from the match
+
+function getLocalCosmetics() {
+    const read = key => { try { return localStorage.getItem(key) || ""; } catch { return ""; } };
+    return {
+        playmat: read(CUSTOM_IMAGE_KEYS.playmat),
+        cardBack: read(CUSTOM_IMAGE_KEYS.cardBack),
+        donBack: read(CUSTOM_IMAGE_KEYS.donBack)
+    };
+}
+
+// A seat's cosmetics live on its play area (deck / DON!! / life) and its hand
+// (face-down backs). CSS custom properties inherit, so setting them there scopes
+// the images to just that seat's cards.
+function cosmeticTargetsForSeat(playerKey) {
+    const targets = [];
+    const pa = document.querySelector(`.character-slot[data-player="${playerKey}"]`)?.closest(".play-area");
+    if (pa) targets.push(pa);
+    const hand = document.getElementById(playerKey === "player1" ? "player1Hand" : "player2Hand");
+    if (hand) targets.push(hand);
+    return targets;
+}
+
+function applyCosmeticsToSeat(playerKey, cos = {}) {
+    const isData = v => typeof v === "string" && v.startsWith("data:");
+    const set = (el, name, val) => { if (val) el.style.setProperty(name, val); else el.style.removeProperty(name); };
+    cosmeticTargetsForSeat(playerKey).forEach(el => {
+        set(el, "--custom-playmat-bg", isData(cos.playmat) ? `url("${cos.playmat}") center / cover no-repeat` : "");
+        set(el, "--custom-card-back", isData(cos.cardBack) ? `url("${cos.cardBack}")` : "");
+        set(el, "--custom-don-back", isData(cos.donBack) ? `url("${cos.donBack}")` : "");
+    });
+}
+
+function applyAllCosmetics() {
+    if (isSpectator) {
+        applyCosmeticsToSeat("player1", onlineCosmetics.p1 || {});
+        applyCosmeticsToSeat("player2", onlineCosmetics.p2 || {});
+        return;
+    }
+    const own = getLocalCosmetics();
+    if (!isOnlineMatch) {
+        applyCosmeticsToSeat("player1", own);   // solo: your field
+        applyCosmeticsToSeat("player2", {});
+        return;
+    }
+    const ownKey = getOwnOnlinePlayerKey();
+    const foeKey = ownKey === "player1" ? "player2" : "player1";
+    applyCosmeticsToSeat(ownKey, own);
+    applyCosmeticsToSeat(foeKey, onlineCosmetics[getOnlineSlotFromPlayerKey(foeKey)] || {});
+}
+
 // Custom DON!! decks, built in the Deck Builder (app.js) and stored in
 // localStorage. A DON!! deck is a list of up to 10 DON!! cards, each with its
 // own art. The active selection sets how many DON!! a player can draw (the deck
@@ -432,6 +493,7 @@ function renderOnlineGameState() {
 
     // Reflect each seat's extra-row choice (the opponent's arrives via sync).
     applyExtraRowLayout();
+    applyAllCosmetics();
     updateDonDisplay();
     renderDecks();
     renderDonDecks();
@@ -1458,7 +1520,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-6");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-7");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1474,6 +1536,7 @@ async function initializeOnlineMultiplayer() {
         setupOnlineChat();
         setupOnlinePresence();
         setupOnlinePlayerNames();
+        setupOnlineCosmetics();
 
         // Multiplayer code reads public board/count state plus this user's private zones only.
         onlineMatchUnsubscribe = onlineMultiplayerService.subscribeToPublicState(
@@ -1503,7 +1566,7 @@ async function initializeSpectatorMatch() {
     showSpectatorBanner();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-6");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-7");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1513,6 +1576,7 @@ async function initializeSpectatorMatch() {
             (publicState) => applyOnlinePublicState(publicState || {})
         );
         setupOnlinePlayerNames();
+        setupOnlineCosmetics();
 
         addGameLog(`Spectating online room ${roomCode}.`);
         updateOnlinePhaseButton();
@@ -1545,6 +1609,22 @@ function setupOnlinePlayerNames() {
             if (gameState.player2) gameState.player2.name = onlinePlayerLabels.p2;
         }
         try { renderOnlineGameState?.(); } catch {}
+    });
+}
+
+// Publish this player's cosmetics once, and keep both seats' cosmetics in sync so
+// each player sees the other's playmat / card back / DON!! back on their field.
+let onlineCosmeticsUnsubscribe = null;
+function setupOnlineCosmetics() {
+    if (!onlineMultiplayerService?.subscribeToCosmetics) return;
+    // Players publish their own cosmetics; spectators only read.
+    if (!isSpectator && playerSlot && onlineMultiplayerService.setMatchCosmetics) {
+        onlineMultiplayerService.setMatchCosmetics(roomCode, playerSlot, getLocalCosmetics())
+            .catch(error => console.warn("Could not publish cosmetics:", error));
+    }
+    onlineCosmeticsUnsubscribe = onlineMultiplayerService.subscribeToCosmetics(roomCode, (cos) => {
+        onlineCosmetics = cos || {};
+        applyAllCosmetics();
     });
 }
 
@@ -2164,9 +2244,71 @@ function setupExtraSlotsToggle() {
     });
 }
 
+// =========================
+// Dice & coin roller
+// =========================
+// A player rolls a coin / d6 / d12 and the result is shown to BOTH players: in
+// an online match it's broadcast through the same chat channel both clients
+// already listen to; in practice it's written to the local game log. Works the
+// same in both modes because they share this page.
+const ROLL_EMOJI = { coin: "🪙", d6: "🎲", d12: "🎲" };
+
+function rollResult(kind) {
+    if (kind === "coin") return Math.random() < 0.5 ? "Heads" : "Tails";
+    const sides = kind === "d12" ? 12 : 6;
+    return String(1 + Math.floor(Math.random() * sides));
+}
+
+function diceRollText(kind, result) {
+    if (kind === "coin") return `flipped a coin → ${result}`;
+    return `rolled a ${kind.toUpperCase()} → ${result}`;
+}
+
+function ownRollerName() {
+    if (isOnlineMatch) return onlinePlayerLabels[playerSlot === "p2" ? "p2" : "p1"] || "Player";
+    return "You";
+}
+
+async function broadcastRoll(kind) {
+    const result = rollResult(kind);
+    const text = diceRollText(kind, result);
+    const emoji = ROLL_EMOJI[kind] || "🎲";
+
+    // Online: push it through the match chat so BOTH players render it. The
+    // sender comes back through our own chat subscription, so there's no local
+    // echo to add. The "🎲 name" sender label keeps it distinct from normal chat
+    // and isn't anyone's own-chat name, so it renders identically for both sides.
+    if (isOnlineMatch && onlineMultiplayerService?.sendChatMessage) {
+        if (isSpectator) return;   // spectators watch, they don't roll
+        try {
+            await onlineMultiplayerService.sendChatMessage(roomCode, `${emoji} ${ownRollerName()}`, text);
+        } catch (error) {
+            console.warn("Could not broadcast roll:", error);
+            // Fallback log uses only the fixed roll text (no user-set nickname),
+            // since addGameLog renders as HTML.
+            addGameLog(`${emoji} ${text}`);
+        }
+        return;
+    }
+
+    // Practice / solo: no opponent to sync with, so log it locally. The name is
+    // the fixed "You", so it's safe to interpolate into the HTML log.
+    addGameLog(`${emoji} You ${text}`);
+}
+
+function setupDiceRoller() {
+    const bind = (id, kind) => {
+        document.getElementById(id)?.addEventListener("click", () => broadcastRoll(kind));
+    };
+    bind("rollCoinBtn", "coin");
+    bind("rollD6Btn", "d6");
+    bind("rollD12Btn", "d12");
+}
+
 async function initializeGamePage() {
     applyBoardDisplaySettings();
     setupExtraSlotsToggle();
+    setupDiceRoller();
     setupDeckViewerInspect();
     try {
         await loadCardDatabase();
@@ -2197,6 +2339,7 @@ async function initializeGamePage() {
             }
         }
         applyExtraRowLayout();
+        applyAllCosmetics();
 
         ui = createUiBridge();
 

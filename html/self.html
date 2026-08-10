@@ -7,8 +7,8 @@
 
     <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
     <link rel="stylesheet" href="../css/style.css">
-    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-17">
-    <link rel="stylesheet" href="../css/manual-play.css?v=manual-2">
+    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-18">
+    <link rel="stylesheet" href="../css/manual-play.css?v=manual-3">
 </head>
 <body>
     <!-- Manual Play Sidebar -->
@@ -42,6 +42,18 @@
             <button class="tool-btn secondary" id="nextTurnBtn" style="width: 100%; margin-top: 8px;">Next Turn</button>
             <!-- Online matches only; shown by updateOnlinePhaseButton. -->
             <button class="tool-btn warning hidden" id="concedeBtn" style="width: 100%; margin-top: 6px;">I Lose</button>
+        </div>
+
+        <div class="separator"></div>
+
+        <div class="dice-roller">
+            <div class="dice-roller-title">Dice &amp; Coin</div>
+            <div class="dice-roller-buttons">
+                <button class="tool-btn secondary" id="rollCoinBtn">🪙 Coin</button>
+                <button class="tool-btn secondary" id="rollD6Btn">🎲 D6</button>
+                <button class="tool-btn secondary" id="rollD12Btn">🎲 D12</button>
+            </div>
+            <div class="dice-roller-hint">Result shows in the game log for both players.</div>
         </div>
 
         <div class="separator"></div>
@@ -255,11 +267,11 @@
 
     <script src="../js/core/phases.js?v=creation-13&t=20260714172304"></script>
     <script src="../js/manual-play.js?v=manual-6&t=20260726000012"></script>
-    <script src="../js/cards/cardDatabase.js?v=cardnum-3"></script>
+    <script src="../js/cards/cardDatabase.js?v=cardnum-4"></script>
     <script src="../js/cards/decks.js?v=creation-13&t=20260714172304"></script>
     <script src="../js/core/deckParser.js?t=20260714172304"></script>
 
-    <script src="../js/pages/self.js?v=spectate-24&t=20260726000024"></script>
+    <script src="../js/pages/self.js?v=spectate-27&t=20260810000001"></script>
   <script src="../js/rotate-prompt.js"></script>
 
   <script src="../js/version.js"></script>

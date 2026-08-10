@@ -499,7 +499,11 @@ function normalizeCard(raw, category) {
     setName: raw.setName || "",
     printType: raw.printType || "",
     addedAt: raw.addedAt || raw.importedAt || "",
-    lastEditedAt: raw.lastEditedAt || ""
+    lastEditedAt: raw.lastEditedAt || "",
+    // Exact shared-library key this card loaded from (set by loadSharedCards).
+    // Kept so edit/delete can target the real entry even if it lives under a
+    // legacy number-only key. Client-only: stripped before any Firebase write.
+    __storageKey: raw.__storageKey || ""
   };
 }
 
@@ -553,8 +557,12 @@ function cardLibraryKey(card) {
     .toLowerCase()
     .replace(/\s+/g, " ");
   const number = String(card.cardNumber || card.id || "").trim().toLowerCase();
+  // A card is unique by number AND collection: the same set number in two
+  // different collections is two different cards and both must show in the pool.
+  // Same number + same collection collapses to one (the newer copy wins).
+  const collection = String(card.collection || "").trim().toLowerCase();
 
-  return `${category}:${number || name}`;
+  return `${category}:${number || name}:${collection}`;
 }
 
 function dedupeCards(cards) {
@@ -739,7 +747,7 @@ async function loadCardPool() {
       // ("token:jjba-001"), which never matches - use projectCardKey().
       // A deleted card must not come back from the bundled JSON file; that's
       // what made deleting a bundled card look like it silently failed.
-      if (!deleted.has(projectCardKey(card))) byKey.set(cardLibraryKey(card), card);
+      if (!isCardTombstoned(deleted, card)) byKey.set(cardLibraryKey(card), card);
     });
     // Shared copies win: they're the edited/newer version of a bundled card.
     sharedCards.forEach(card => byKey.set(cardLibraryKey(card), card));
@@ -758,7 +766,7 @@ async function loadCardPool() {
     const localProjectCards = readLocalProjectCards()
       .map(normalizeImportedCard)
       .filter(card => !loadedKeys.has(cardLibraryKey(card))
-        && !deleted.has(projectCardKey(card)));
+        && !isCardTombstoned(deleted, card));
 
     state.cards = dedupeCards([
       ...pooledCards,
@@ -864,7 +872,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-1")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-2")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -874,8 +882,27 @@ function getCardLibrary() {
   return cardLibraryPromise;
 }
 
+// The shared-library STORAGE key. MUST stay byte-for-byte identical to
+// cardLibraryService.cardLibraryKey(), because tombstones (the `deleted` set)
+// are keyed this way and are matched against it. Number + collection, sanitized
+// to a legal Firebase path segment, with the plain number kept when there's no
+// collection (legacy / bundled cards).
 function projectCardKey(card) {
-  return String(card?.cardNumber || card?.id || "").trim();
+  const number = String(card?.cardNumber || card?.id || "").trim().replace(/[.#$/\[\]]/g, "-");
+  if (!number) return "";
+  const collection = String(card?.collection || "").trim().replace(/[.#$/\[\]]/g, "-");
+  return collection ? `${number}__${collection}` : number;
+}
+
+// The pre-collection storage key for the same card. Tombstones written before
+// collections were part of the key live at the bare number, so a card must be
+// checked against BOTH to stay deleted after this migration.
+function legacyProjectKey(card) {
+  return String(card?.cardNumber || card?.id || "").trim().replace(/[.#$/\[\]]/g, "-");
+}
+
+function isCardTombstoned(deleted, card) {
+  return deleted.has(projectCardKey(card)) || deleted.has(legacyProjectKey(card));
 }
 
 // Work out exactly WHY the shared library isn't reachable, rather than just
@@ -1079,7 +1106,7 @@ async function loadProjectCards() {
   // 1. Cards that ship with the repo are the baseline.
   shipped.forEach(card => {
     const key = projectCardKey(card);
-    if (key && !deleted.has(key)) merged.set(key, card);
+    if (key && !isCardTombstoned(deleted, card)) merged.set(key, card);
   });
 
   // 2. The shared Firebase library layers on top - this is what makes a card
@@ -1147,8 +1174,12 @@ async function saveProjectCardsLocally(cards) {
 
 function projectCardsToObject(cards) {
   return cards.reduce((result, card) => {
-    const key = String(card.cardNumber || card.id || "").trim();
+    // Key by number+collection so the same set number in two collections keeps
+    // both on-device (mirrors the shared library). cardNumber below stays the
+    // human number, never this compound key.
+    const key = projectCardKey(card);
     if (!key) return result;
+    const number = String(card.cardNumber || card.id || "").trim();
     const effects = dedupeEffects(card.effects || []);
     const effectKeys = new Set(effects.map(effectDedupeKey));
     const customEffectV2 = dedupeCustomEffectV2([], card.customEffectV2)
@@ -1156,8 +1187,8 @@ function projectCardsToObject(cards) {
     const effectBlocks = dedupeEffects(card.effectBlocks || []);
     result[key] = {
       ...card,
-      id: card.id || key,
-      cardNumber: card.cardNumber || key,
+      id: card.id || number || key,
+      cardNumber: number || key,
       effects,
       customEffectV2,
       effectBlocks,
@@ -3064,15 +3095,24 @@ async function saveCreatedCard(event) {
   const [card] = await compressImportedCardImages([creationCardFromForm(imageSource, altArtSource)]);
   if (!await publishSingleCard(card)) return;
 
-  // Editing a card and changing its number used to leave the original behind as
-  // a duplicate: the old entry was filtered out of the list above, but the sync
-  // deliberately never deletes by omission (that behaviour once wiped the whole
-  // library). Remove the old key explicitly instead.
+  // Editing a card so its IDENTITY moves - a new number OR a new collection -
+  // used to leave the original behind as a duplicate: the old entry was filtered
+  // out of the list above, but the sync deliberately never deletes by omission
+  // (that behaviour once wiped the whole library). Remove the old entry
+  // explicitly. Identity is now number+collection, so a card moved to another
+  // collection (its number unchanged) must clear its old-collection entry too.
+  // Deleting by the old card object uses its exact stored key, which correctly
+  // targets a legacy number-only entry as well as a new compound one.
   const previousKey = state.editingCardId;
-  if (previousKey && previousKey !== card.cardNumber && previousKey !== card.id) {
+  const previousCard = previousKey ? getCard(previousKey) : null;
+  const previousStorageKey = previousCard
+    ? (previousCard.__storageKey || projectCardKey(previousCard))
+    : String(previousKey || "").trim();
+  const newStorageKey = projectCardKey(card);
+  if (previousStorageKey && previousStorageKey !== newStorageKey) {
     const library = await getCardLibrary();
     try {
-      if (library) await library.deleteSharedCard(previousKey);
+      if (library) await library.deleteSharedCard(previousCard || previousStorageKey);
     } catch (error) {
       console.warn("Could not remove the pre-edit card:", error);
     }
@@ -3601,7 +3641,7 @@ async function deleteImportedCard(cardId) {
   const library = await getCardLibrary();
   if (library) {
     try {
-      const { tombstoned } = await library.deleteSharedCard(card.cardNumber || cardId);
+      const { tombstoned } = await library.deleteSharedCard(card || card.cardNumber || cardId);
       if (!tombstoned) {
         toast("Deleted, but publish database.rules.json or it may come back");
       }
@@ -3649,7 +3689,7 @@ async function clearCollectionCards(slug) {
   if (library) {
     for (const card of cards) {
       try {
-        await library.deleteSharedCard(card.cardNumber || card.id);
+        await library.deleteSharedCard(card);
       } catch (error) {
         console.error("Failed to delete", card.cardNumber, error);
         failed++;
@@ -3692,7 +3732,7 @@ async function removeCollectionEntirely(slug) {
   const library = await getCardLibrary();
   if (library) {
     for (const card of cards) {
-      try { await library.deleteSharedCard(card.cardNumber || card.id); } catch {}
+      try { await library.deleteSharedCard(card); } catch {}
       delete state.deck[card.id];
     }
     try { if (library.deleteSharedCollection) await library.deleteSharedCollection(slug); } catch {}
@@ -3723,6 +3763,70 @@ function populateCollectionManageSelect() {
   if (previous && CARD_COLLECTIONS.some(entry => entry.slug === previous)) {
     select.value = previous;
   }
+}
+
+// ── Custom board images (playmat / card back / DON!! back) ────────────────
+// Uploaded in Settings, stored as data URLs in localStorage, and read by the
+// game (self.js applyCustomImages) as CSS variables. Personal per device. Keys
+// must match self.js's CUSTOM_IMAGE_KEYS.
+const CUSTOM_IMAGE_KEYS = {
+  playmat: "custom-img-playmat-v1",
+  cardBack: "custom-img-cardback-v1",
+  donBack: "custom-img-donback-v1"
+};
+const CUSTOM_IMAGE_PREVIEW_IDS = {
+  playmat: "customPlaymatPreview",
+  cardBack: "customCardBackPreview",
+  donBack: "customDonBackPreview"
+};
+
+function readCustomImage(kind) {
+  try { return localStorage.getItem(CUSTOM_IMAGE_KEYS[kind]) || ""; } catch { return ""; }
+}
+
+function refreshCustomImagePreview(kind) {
+  const data = readCustomImage(kind);
+  const preview = document.getElementById(CUSTOM_IMAGE_PREVIEW_IDS[kind]);
+  if (preview) {
+    preview.style.backgroundImage = data ? `url("${data}")` : "";
+    preview.classList.toggle("has-image", Boolean(data));
+  }
+  const clearBtn = document.querySelector(`[data-custom-image-clear="${kind}"]`);
+  if (clearBtn) clearBtn.hidden = !data;
+}
+
+async function handleCustomImageUpload(kind, file) {
+  if (!file) return;
+  try {
+    const compressed = await compressImageDataUrl(await readFileAsDataUrl(file));
+    localStorage.setItem(CUSTOM_IMAGE_KEYS[kind], compressed);
+    refreshCustomImagePreview(kind);
+    toast("Image saved — it shows in your next game");
+  } catch (error) {
+    console.warn(error);
+    // localStorage quota is the usual failure for a big image.
+    toast("Couldn't save that image — try a smaller one");
+  }
+}
+
+function clearCustomImage(kind) {
+  try { localStorage.removeItem(CUSTOM_IMAGE_KEYS[kind]); } catch {}
+  refreshCustomImagePreview(kind);
+  toast("Image removed");
+}
+
+function setupCustomImages() {
+  document.querySelectorAll("[data-custom-image-input]").forEach(input => {
+    input.addEventListener("change", event => {
+      const kind = input.getAttribute("data-custom-image-input");
+      handleCustomImageUpload(kind, event.target.files?.[0]);
+      input.value = "";
+    });
+  });
+  document.querySelectorAll("[data-custom-image-clear]").forEach(btn => {
+    btn.addEventListener("click", () => clearCustomImage(btn.getAttribute("data-custom-image-clear")));
+  });
+  Object.keys(CUSTOM_IMAGE_KEYS).forEach(refreshCustomImagePreview);
 }
 
 function setupCollectionManagement() {
@@ -5894,6 +5998,7 @@ function bindEvents() {
     renderCardGrid();
   });
   setupCollectionManagement();
+  setupCustomImages();
   el.resetFilters.addEventListener("click", () => {
     el.searchInput.value = "";
     el.filterQuick.value = "";
@@ -6297,15 +6402,33 @@ function parseUntapFile(text) {
   return { meta, cards };
 }
 
-// Does this mapped card already exist in the pool? Match on the Untap id first
-// (survives edits to the number), then on the sim card number.
+// Does this mapped card already exist in the pool *in the same collection*? A
+// card is a duplicate only when its number AND collection match, so importing a
+// number that also exists in another collection is NOT a clash - both are kept.
+// The Untap id match is likewise scoped to the same collection.
 function findExistingCardForImport(card) {
   const untapId = card.untapId;
-  const number = projectCardKey(card).toLowerCase();
+  const number = String(card.cardNumber || card.id || "").trim().toLowerCase();
+  const collection = String(card.collection || "").trim().toLowerCase();
   return state.cards.find(existing => {
+    if (String(existing.collection || "").trim().toLowerCase() !== collection) return false;
     if (untapId && existing.untapId && existing.untapId === untapId) return true;
-    return projectCardKey(existing).toLowerCase() === number;
+    return String(existing.cardNumber || existing.id || "").trim().toLowerCase() === number;
   }) || null;
+}
+
+// Recompute whether every review entry clashes with the pool and reset its
+// default action. Called after a collection change, since the clash depends on
+// which collection each card is going into.
+function refreshUntapDupFlags() {
+  untapReview.entries.forEach(entry => {
+    const dup = findExistingCardForImport(entry.card);
+    entry.dup = dup;
+    // Keep an explicit user choice; otherwise default new clashes to "skip" and
+    // clear a stale "skip/replace" once a card no longer clashes.
+    if (!dup) { if (entry.action === "skip" || entry.action === "replace") entry.action = "add"; }
+    else if (entry.action === "add") entry.action = "skip";
+  });
 }
 
 function untapEntryInvalid(entry) {
@@ -6489,6 +6612,10 @@ function handleUntapReviewEvent(event) {
     entry.action = event.target.value;
   } else if (event.target.matches(".untap-col")) {
     entry.card.collection = normalizeCollectionSlug(event.target.value);
+    // The clash check is per-collection, so re-evaluate this row and refresh the
+    // badge/skip-replace controls.
+    refreshUntapDupFlags();
+    renderUntapReview();
   } else if (event.target.matches("[data-edit]")) {
     applyUntapEdit(entry, event.target);
   }
@@ -6634,6 +6761,8 @@ function initUntapImporter() {
   untapEl.untapBatchCollection?.addEventListener("change", () => {
     const slug = normalizeCollectionSlug(untapEl.untapBatchCollection.value);
     untapReview.entries.forEach(entry => { entry.card.collection = slug; });
+    // Clash detection is per-collection - re-evaluate the whole batch.
+    refreshUntapDupFlags();
     renderUntapReview();
   });
   untapEl.untapReviewList?.addEventListener("input", handleUntapReviewEvent);

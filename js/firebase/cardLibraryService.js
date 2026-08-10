@@ -43,8 +43,14 @@ const INDEX_PATH = "cardIndex";
 // step required.
 
 const DB_NAME = "custom-cards-library";
-const DB_VERSION = 1;
+// v2: the cache is keyed by the shared-library storage key (number+collection)
+// instead of the bare cardNumber. The old keyPath collapsed two cards that share
+// a number across collections into one, and mis-matched cards stored under a
+// legacy number-only key. The cache is only a performance layer, so the upgrade
+// simply drops the old store and lets everything re-download once.
+const DB_VERSION = 2;
 const STORE = "cards";
+const CACHE_KEY_PATH = "__storageKey";
 
 // ── IndexedDB cache ──────────────────────────────────────
 
@@ -53,9 +59,9 @@ function openCache() {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
         request.onupgradeneeded = () => {
             const db = request.result;
-            if (!db.objectStoreNames.contains(STORE)) {
-                db.createObjectStore(STORE, { keyPath: "cardNumber" });
-            }
+            // Drop any prior store (old keyPath) and recreate on the new key.
+            if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE);
+            db.createObjectStore(STORE, { keyPath: CACHE_KEY_PATH });
         };
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -98,8 +104,25 @@ async function writeCachedCards(cards, removedKeys = []) {
 
 // ── Public API ───────────────────────────────────────────
 
+// Firebase keys may not contain . # $ [ ] / (or control chars). Card numbers are
+// usually clean but not guaranteed; collection slugs are already kebab-case.
+// Scrub both so the compound key is always a legal path segment.
+function sanitizeKeyPart(value) {
+    return String(value ?? "").trim().replace(/[.#$/\[\]]/g, "-");
+}
+
+// The storage identity of a card. A card is unique by its NUMBER *and* its
+// COLLECTION: the same set number can live in two different collections and both
+// must survive (uploading "JJK1" to collection A then to collection B keeps
+// both). Same number + same collection overwrites, which is the intended
+// "replace this card" behaviour. Cards with no collection (legacy uploads,
+// bundled cards from before collections existed) keep the plain number key so
+// they still load and match their existing entries.
 export function cardLibraryKey(card) {
-    return String(card?.cardNumber || card?.id || "").trim();
+    const number = sanitizeKeyPart(card?.cardNumber || card?.id || "");
+    if (!number) return "";
+    const collection = sanitizeKeyPart(card?.collection || "");
+    return collection ? `${number}__${collection}` : number;
 }
 
 // Card numbers present in the JSON file bundled with the repo. Needed so a
@@ -133,7 +156,11 @@ export async function loadSharedCards() {
     const liveKeys = wantedKeys.filter(key => !deleted.has(key));
 
     const cached = await readCachedCards();
-    const cachedByKey = new Map(cached.map(card => [cardLibraryKey(card), card]));
+    // Key by the EXACT storage key each card was cached under (its keyPath), not
+    // a key recomputed from content - a legacy card stored at "JJK1" whose body
+    // now carries a collection would otherwise recompute to "JJK1__collection",
+    // miss its own index entry, and re-download on every single load.
+    const cachedByKey = new Map(cached.map(card => [card[CACHE_KEY_PATH] || cardLibraryKey(card), card]));
 
     // A card needs downloading if we've never seen it, or the server copy is
     // newer than ours. Tombstoned keys have no body to fetch.
@@ -158,6 +185,8 @@ export async function loadSharedCards() {
         const card = snapshot.val();
         if (card) {
             card.updatedAt = Number(index[key]?.updatedAt || 0);
+            // Stamp the storage key so it's the cache keyPath and the load hint.
+            card[CACHE_KEY_PATH] = key;
             downloaded.push(card);
             cachedByKey.set(key, card);
         }
@@ -167,7 +196,15 @@ export async function loadSharedCards() {
     removed.forEach(key => cachedByKey.delete(key));
 
     return {
-        cards: liveKeys.map(key => cachedByKey.get(key)).filter(Boolean),
+        // Stamp each card with the EXACT index key it loaded from. A card stored
+        // under a legacy number-only key ("JJK1") won't recompute to the same key
+        // once it has a collection ("JJK1__collection"), so edit/delete rely on
+        // this to remove the real entry instead of orphaning it.
+        cards: liveKeys.map(key => {
+            const card = cachedByKey.get(key);
+            if (card) card.__storageKey = key;
+            return card;
+        }).filter(Boolean),
         // Callers merge the repo's bundled JSON with this library; they need the
         // tombstones so a deleted bundled card doesn't come back from the file.
         deleted,
@@ -210,7 +247,8 @@ export async function syncSharedCards(cards) {
         if (!key) return;
         desired.add(key);
 
-        const payload = { ...card, cardNumber: key, id: card.id || key };
+        const { __storageKey, ...clean } = card;
+        const payload = { ...clean, cardNumber: clean.cardNumber || key, id: clean.id || key };
         const mine = cachedByKey.get(key);
 
         // Upload when it's new to the server, its content differs from the copy
@@ -247,8 +285,9 @@ export async function syncSharedCards(cards) {
         const byKey = new Map(cards.map(card => [cardLibraryKey(card), card]));
         await writeCachedCards(
             changedKeys.map(key => {
-                const card = byKey.get(key);
-                return { ...card, cardNumber: key, id: card.id || key,
+                const { __storageKey, ...card } = byKey.get(key);
+                return { ...card, cardNumber: card.cardNumber || key, id: card.id || key,
+                         [CACHE_KEY_PATH]: key,
                          updatedAt: Number(freshIndex[key]?.updatedAt || 0) };
             }),
             removedKeys
@@ -269,7 +308,11 @@ export async function saveSharedCard(card) {
     const key = cardLibraryKey(card);
     if (!key) throw new Error("A card needs a card number before it can be shared.");
 
-    const payload = { ...card, cardNumber: key, id: card.id || key };
+    // The key is number+collection now, but cardNumber must stay the human number
+    // (never the compound key), or the card would display "JJK1__collection".
+    // __storageKey is a client-only load hint - never write it to the database.
+    const { __storageKey, ...clean } = card;
+    const payload = { ...clean, cardNumber: clean.cardNumber || key, id: clean.id || key };
 
     await update(ref(database), {
         [`${CARDS_PATH}/${key}`]: payload,
@@ -284,17 +327,23 @@ export async function saveSharedCard(card) {
     // Re-read the resolved server timestamp so the local cache matches the index
     // and this card isn't re-downloaded on the next load.
     const stamp = await get(ref(database, `${INDEX_PATH}/${key}/updatedAt`));
-    await writeCachedCards([{ ...payload, updatedAt: Number(stamp.val() || 0) }]);
+    await writeCachedCards([{ ...payload, [CACHE_KEY_PATH]: key, updatedAt: Number(stamp.val() || 0) }]);
 
     return payload;
 }
 
-// Remove ONE card, by key. This is the only path that deletes anything, so a
-// bad read can never cascade into losing the library.
-export async function deleteSharedCard(cardNumber) {
+// Remove ONE card. Accepts either a raw storage key (legacy callers) or a whole
+// card object. When given a card, its __storageKey (the exact key it loaded
+// under) is used so a legacy number-only entry is removed instead of tombstoning
+// a never-existed compound key and leaving the real body behind. This is the
+// only path that deletes anything, so a bad read can never cascade into losing
+// the library.
+export async function deleteSharedCard(target) {
     await waitForUser();
 
-    const key = String(cardNumber || "").trim();
+    const key = (target && typeof target === "object")
+        ? String(target.__storageKey || cardLibraryKey(target) || "").trim()
+        : String(target || "").trim();
     if (!key) return { tombstoned: false };
 
     // Drop the card body, and mark the index entry as a tombstone so the card
@@ -363,7 +412,8 @@ export async function clearSharedCards() {
     ]);
 
     const cached = await readCachedCards();
-    await writeCachedCards([], cached.map(cardLibraryKey).filter(Boolean));
+    // Delete by the cache keyPath (the exact stored key), not a recomputed one.
+    await writeCachedCards([], cached.map(card => card[CACHE_KEY_PATH] || cardLibraryKey(card)).filter(Boolean));
 }
 
 // Cards this browser has cached that the shared library no longer contains.
@@ -381,7 +431,11 @@ export async function findRecoverableCards() {
     }
 
     return cached.filter(card => {
-        const key = cardLibraryKey(card);
+        // Check the card's REAL stored key against the index. Recomputing the key
+        // from content would flag every legacy number-only card as missing (its
+        // content now yields a compound key the index doesn't have) and restore
+        // it as a duplicate.
+        const key = card[CACHE_KEY_PATH] || cardLibraryKey(card);
         return key && !index[key];
     });
 }
@@ -395,9 +449,11 @@ export async function restoreCardsFromCache() {
 
     const updates = {};
     missing.forEach(card => {
-        const key = cardLibraryKey(card);
-        const { updatedAt, ...payload } = card;
-        updates[`${CARDS_PATH}/${key}`] = { ...payload, cardNumber: key, id: card.id || key };
+        // Restore to the SAME slot the card was cached under, and keep its human
+        // card number intact.
+        const key = card[CACHE_KEY_PATH] || cardLibraryKey(card);
+        const { updatedAt, __storageKey, ...payload } = card;
+        updates[`${CARDS_PATH}/${key}`] = { ...payload, cardNumber: payload.cardNumber || key, id: payload.id || key };
         // Replacing the whole entry clears any `deleted: true` marker, so a
         // restored card isn't still treated as tombstoned.
         updates[`${INDEX_PATH}/${key}`] = { updatedAt: serverTimestamp() };
@@ -405,7 +461,7 @@ export async function restoreCardsFromCache() {
 
     await update(ref(database), updates);
 
-    return { restored: missing.length, cards: missing.map(c => `${cardLibraryKey(c)} ${c.name || ""}`.trim()) };
+    return { restored: missing.length, cards: missing.map(c => `${c[CACHE_KEY_PATH] || cardLibraryKey(c)} ${c.name || ""}`.trim()) };
 }
 
 // Seed the shared library from the JSON file that ships with the repo. Existing
@@ -424,8 +480,15 @@ export async function seedSharedCardsFrom(cards) {
         // Skip cards already shared, AND cards someone deliberately deleted -
         // an index entry exists in both cases (a tombstone carries deleted:true),
         // so seeding can never resurrect a deletion.
-        if (!key || existing[key]) return;
-        updates[`${CARDS_PATH}/${key}`] = { ...card, cardNumber: key, id: card.id || key };
+        //
+        // Also skip when the card already lives under its pre-collection
+        // number-only key: bundled cards seeded before collections were part of
+        // the key are already present, and re-seeding them under the new compound
+        // key would just duplicate every shipped card in the database.
+        const legacyKey = sanitizeKeyPart(card?.cardNumber || card?.id || "");
+        if (!key || existing[key] || existing[legacyKey]) return;
+        const { __storageKey, ...clean } = card;
+        updates[`${CARDS_PATH}/${key}`] = { ...clean, cardNumber: clean.cardNumber || key, id: clean.id || key };
         updates[`${INDEX_PATH}/${key}/updatedAt`] = serverTimestamp();
         seeded++;
     });

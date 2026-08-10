@@ -2638,10 +2638,12 @@ body {
     width: 490px;
 }
 
+/* --custom-playmat-bg (set by applyCustomImages when a player uploads a playmat)
+   replaces the default gradient on both play areas. */
 .play-area {
-    background:
+    background: var(--custom-playmat-bg,
         linear-gradient(180deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, .02)),
-        linear-gradient(135deg, #d8e7f6 0%, #7da9cb 36%, #2d6399 68%, #183d68 100%);
+        linear-gradient(135deg, #d8e7f6 0%, #7da9cb 36%, #2d6399 68%, #183d68 100%));
     border-color: #050505;
     box-shadow:
         inset 0 0 0 2px rgba(255, 255, 255, .1),
@@ -2649,9 +2651,9 @@ body {
 }
 
 .opponent-area {
-    background:
+    background: var(--custom-playmat-bg,
         linear-gradient(180deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, .02)),
-        linear-gradient(135deg, #d5dde7 0%, #8a9db5 38%, #4f6384 68%, #273650 100%);
+        linear-gradient(135deg, #d5dde7 0%, #8a9db5 38%, #4f6384 68%, #273650 100%));
 }
 
 .hand,
@@ -2717,23 +2719,27 @@ body {
 }
 
 .life-card:not(:has(img)) {
-    background-image: url("../images/basic/card-back-custom.png");
+    background-image: var(--custom-card-back, url("../images/basic/card-back-custom.png"));
     background-size: cover;
     background-position: center;
 }
 
+/* Card back (deck cards, hand backs, face-down life). Overridable by a player's
+   uploaded image via the --custom-card-back variable (see applyCustomImages). */
 .deck-area .deck-card-img,
 .life-card-img[src*="card-back-normal"],
 .life-card-img[src*="card-back"] {
-    content: url("../images/basic/card-back-normal.jpg");
+    content: var(--custom-card-back, url("../images/basic/card-back-normal.jpg"));
 }
 
+/* DON!! card art, overridable via --custom-don-back. */
 .don-card-img {
-    content: url("../images/basic/don-card-custom.png");
+    content: var(--custom-don-back, url("../images/basic/don-card-custom.png"));
 }
 
+/* DON!! deck pile back - uses the custom DON!! image too when set. */
 .don-deck-area .deck-card-img {
-    content: url("../images/basic/card-back-don.webp");
+    content: var(--custom-don-back, url("../images/basic/card-back-don.webp"));
 }
 
 .don-deck-area .deck-count-badge,

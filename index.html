@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=1280">
   <title>Custom Cards Simulator</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=creation-24">
+  <link rel="stylesheet" href="styles.css?v=creation-25">
 </head>
 <body>
   <div class="app-shell">
@@ -114,6 +114,57 @@
                 <small>Show two extra single-card slots on the board that act like the Stage slot. You can also toggle these with the "Extra Slots" button in the game's Tools panel.</small>
               </span>
             </label>
+          </section>
+
+          <section class="settings-group" aria-label="Custom board images">
+            <h2>Custom Board Images</h2>
+            <p class="settings-group-note">
+              Upload your own images for the board. These are personal — they show
+              on your screen in Practice and Multiplayer. Square-ish card images
+              work best for the card and DON!! backs.
+            </p>
+
+            <div class="custom-image-row" data-custom-image="playmat">
+              <div class="custom-image-preview" id="customPlaymatPreview"></div>
+              <div class="custom-image-body">
+                <strong>Playmat</strong>
+                <small>The background behind both play areas.</small>
+                <div class="custom-image-actions">
+                  <label class="red-button custom-image-upload">Upload
+                    <input type="file" accept="image/png,image/jpeg,image/webp" data-custom-image-input="playmat" hidden>
+                  </label>
+                  <button type="button" class="ghost" data-custom-image-clear="playmat" hidden>Remove</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="custom-image-row" data-custom-image="cardBack">
+              <div class="custom-image-preview" id="customCardBackPreview"></div>
+              <div class="custom-image-body">
+                <strong>Card Back</strong>
+                <small>Shown on your deck, face-down cards and hidden life.</small>
+                <div class="custom-image-actions">
+                  <label class="red-button custom-image-upload">Upload
+                    <input type="file" accept="image/png,image/jpeg,image/webp" data-custom-image-input="cardBack" hidden>
+                  </label>
+                  <button type="button" class="ghost" data-custom-image-clear="cardBack" hidden>Remove</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="custom-image-row" data-custom-image="donBack">
+              <div class="custom-image-preview" id="customDonBackPreview"></div>
+              <div class="custom-image-body">
+                <strong>DON!! Card Back</strong>
+                <small>The art used for your DON!! cards and DON!! deck.</small>
+                <div class="custom-image-actions">
+                  <label class="red-button custom-image-upload">Upload
+                    <input type="file" accept="image/png,image/jpeg,image/webp" data-custom-image-input="donBack" hidden>
+                  </label>
+                  <button type="button" class="ghost" data-custom-image-clear="donBack" hidden>Remove</button>
+                </div>
+              </div>
+            </div>
           </section>
 
           <section class="settings-group" aria-label="Collection management">
@@ -772,7 +823,7 @@
   <script src="js/rotate-prompt.js"></script>
   <script src="js/cards/decks.js?v=creation-8"></script>
   <script src="js/manual-play.js?v=manual-3"></script>
-  <script src="app.js?v=creation-42"></script>
+  <script src="app.js?v=creation-44"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).

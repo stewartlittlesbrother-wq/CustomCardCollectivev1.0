@@ -436,6 +436,24 @@ export function subscribeToPrivateState(roomCode, uid, callback) {
     });
 }
 
+// Per-seat board cosmetics (playmat / card back / DON!! back, as data URLs).
+// Written once on connect and read by both players so each sees the other's
+// cosmetics on their field. Kept on its own node (not the frequently-synced
+// public board) so the image data isn't re-sent on every board update.
+export async function setMatchCosmetics(roomCode, playerSlot, cosmetics) {
+    if (playerSlot !== "p1" && playerSlot !== "p2") return;
+    await update(ref(database, `matches/${cleanRoomCode(roomCode)}/cosmetics`), {
+        [playerSlot]: cosmetics || null
+    });
+}
+
+export function subscribeToCosmetics(roomCode, callback) {
+    const cosmeticsRef = ref(database, `matches/${cleanRoomCode(roomCode)}/cosmetics`);
+    return onValue(cosmeticsRef, (snapshot) => {
+        callback(snapshot.val() || {});
+    });
+}
+
 // The two players' chosen nicknames, so the game board can show real names
 // instead of "Player 1" / "Player 2". Names live on the match's players node.
 export function subscribeToPlayerNames(roomCode, callback) {

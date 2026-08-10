@@ -31,7 +31,7 @@ async function loadJson(path) {
 // dynamically. Any failure here is non-fatal: the bundled files still load.
 async function loadSharedCardsForGame() {
     try {
-        const library = await import("../firebase/cardLibraryService.js");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-2");
         const { cards, deleted } = await library.loadSharedCards();
         return { cards: cards || [], deleted: deleted || new Set() };
     } catch (error) {
@@ -57,10 +57,27 @@ async function loadCardDatabase() {
         if (card.cardNumber && card.cardNumber !== card.id) target[card.cardNumber] = card;
     };
 
+    // A shared-library tombstone is keyed by number+collection now (e.g.
+    // "JJK1__collection"), but was historically just the bare number. A bundled
+    // card is considered deleted when its exact key, its collection-qualified
+    // key, OR any collection variant of its number is tombstoned - so removing a
+    // card from the library still keeps it out of the game.
+    const sanitizePart = (value) => String(value ?? "").trim().replace(/[.#$/\[\]]/g, "-");
+    const isDeletedForGame = (card) => {
+        const number = sanitizePart(card.cardNumber || card.id || "");
+        if (!number) return false;
+        if (deleted.has(number)) return true;
+        const collection = sanitizePart(card.collection || "");
+        if (collection && deleted.has(`${number}__${collection}`)) return true;
+        const prefix = `${number}__`;
+        for (const key of deleted) if (key.startsWith(prefix)) return true;
+        return false;
+    };
+
     // Bundled cards first, minus anything deleted from the shared library, so a
     // card removed there doesn't reappear from the repo's JSON file.
     loadedCards
-        .filter(card => !deleted.has(String(card.cardNumber || card.id || "").trim()))
+        .filter(card => !isDeletedForGame(card))
         .forEach(place);
 
     // Shared cards layer on top - they're the newest version of a card.

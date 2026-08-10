@@ -5476,6 +5476,48 @@ button.trash-area {
   font-weight: 700;
 }
 
+/* ── Custom board images (Settings) ─────────────────────────────────── */
+.custom-image-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(255, 255, 255, .08);
+}
+.custom-image-preview {
+  width: 88px;
+  height: 88px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, .18);
+  background: rgba(0, 0, 0, .3) center / cover no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, .35);
+  font-size: 11px;
+  text-align: center;
+}
+.custom-image-preview:not(.has-image)::after { content: "No image"; }
+.custom-image-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.custom-image-body small { opacity: .72; }
+.custom-image-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+.custom-image-upload {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
 /* ── Custom DON!! decks ─────────────────────────────────────────────── */
 /* A fixed, scrollable overlay (like the card creator) so it covers the main
    deck view, scrolls its own content, and its fields sit above everything. */
