@@ -6036,6 +6036,24 @@ button.trash-area {
 }
 @keyframes collectionSpin { to { transform: rotate(360deg); } }
 
+/* Full-width banner above the collection tiles while uploaded cards download. */
+.collection-sync-note {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: .9rem;
+  font-weight: 600;
+  opacity: .8;
+}
+.collection-sync-note .collection-loading-spinner {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
 /* Collection management buttons (Settings) */
 .collection-manage-unlock {
   display: flex;

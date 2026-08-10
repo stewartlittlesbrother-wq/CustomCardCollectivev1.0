@@ -203,6 +203,10 @@ const state = {
   // True until the first card-pool load finishes, so the collection screen can
   // show a "Loading…" message instead of an empty grid / "0 cards".
   cardsLoading: true,
+  // True while the shared library is still downloading in the background after
+  // the bundled cards have already painted. Lets the picker say "syncing" instead
+  // of looking like a user's uploaded cards vanished.
+  sharedSyncing: false,
   leaderId: "",
   deck: {},
   // Token types this deck makes available in game. Deliberately a separate list
@@ -729,51 +733,69 @@ async function ensureOfficialCardsLoaded() {
   }
 }
 
+// Build the in-memory pool from the bundled cards, the shared library, this
+// device's imported/local cards, and the shared tombstones. Pulled out of
+// loadCardPool so the builder can paint the bundled cards immediately and then
+// re-run once the shared library finishes downloading.
+function assembleCardPool(loadedCards, sharedCards, deleted) {
+  const byKey = new Map();
+  loadedCards.forEach(card => {
+    // NOTE: the tombstone set is keyed by the shared STORAGE key. app.js's
+    // cardLibraryKey() returns a category-prefixed dedupe key
+    // ("token:jjba-001:coll"), which never matches - use isCardTombstoned().
+    // A deleted card must not come back from the bundled JSON file; that's
+    // what made deleting a bundled card look like it silently failed.
+    if (!isCardTombstoned(deleted, card)) byKey.set(cardLibraryKey(card), card);
+  });
+  // Shared copies win: they're the edited/newer version of a bundled card.
+  sharedCards.forEach(card => byKey.set(cardLibraryKey(card), card));
+  const pooledCards = [...byKey.values()];
+
+  const loadedKeys = new Set(pooledCards.map(cardLibraryKey));
+  const legacyCards = loadImportedCards()
+    .map(normalizeImportedCard)
+    .filter(card => !loadedKeys.has(cardLibraryKey(card)));
+
+  // Cards saved to THIS device only (the fallback when the shared library
+  // couldn't be written - e.g. auth not ready yet, rules not published, or a
+  // network blip). Without merging these, a card would save, show for a moment,
+  // then vanish on the next pool reload. Shared/bundled copies still win.
+  legacyCards.forEach(card => loadedKeys.add(cardLibraryKey(card)));
+  const localProjectCards = readLocalProjectCards()
+    .map(normalizeImportedCard)
+    .filter(card => !loadedKeys.has(cardLibraryKey(card))
+      && !isCardTombstoned(deleted, card));
+
+  return dedupeCards([
+    ...pooledCards,
+    ...legacyCards,
+    ...localProjectCards
+  ]).sort((a, b) => a.cardNumber.localeCompare(b.cardNumber));
+}
+
 async function loadCardPool() {
   try {
     const groups = await Promise.all(CARD_FILES.map(loadCardFile));
     const loadedCards = groups.flat();
 
+    // Paint the collection picker RIGHT AWAY from the bundled + local cards, so
+    // the builder is usable in a blink instead of blocking on the shared-library
+    // download (which can be large and, right after a cache-format bump, has to
+    // re-fetch every card). The uploaded cards fold in a moment later.
+    state.cards = assembleCardPool(loadedCards, [], new Set());
+    state.cardsLoading = false;
+    state.sharedSyncing = true;
+    populateFilterOptions();
+    renderAll();
+    updateImportStatus();
+
     // Cards uploaded by players live ONLY in the shared library - they are not
-    // written back into the bundled JSON files. Without merging them here the
-    // pool showed nothing but what ships in the repo, which is why a card could
-    // save successfully to Firebase and still never appear on the site.
+    // written back into the bundled JSON files. Fetch them (downloads now run in
+    // parallel) and merge them in without blocking that first paint.
     const { cards: sharedCards, deleted } = await loadSharedCardsForPool();
 
-    const byKey = new Map();
-    loadedCards.forEach(card => {
-      // NOTE: the tombstone set is keyed by CARD NUMBER. app.js's
-      // cardLibraryKey() returns a category-prefixed dedupe key
-      // ("token:jjba-001"), which never matches - use projectCardKey().
-      // A deleted card must not come back from the bundled JSON file; that's
-      // what made deleting a bundled card look like it silently failed.
-      if (!isCardTombstoned(deleted, card)) byKey.set(cardLibraryKey(card), card);
-    });
-    // Shared copies win: they're the edited/newer version of a bundled card.
-    sharedCards.forEach(card => byKey.set(cardLibraryKey(card), card));
-    const pooledCards = [...byKey.values()];
-
-    const loadedKeys = new Set(pooledCards.map(cardLibraryKey));
-    const legacyCards = loadImportedCards()
-      .map(normalizeImportedCard)
-      .filter(card => !loadedKeys.has(cardLibraryKey(card)));
-
-    // Cards saved to THIS device only (the fallback when the shared library
-    // couldn't be written - e.g. auth not ready yet, rules not published, or a
-    // network blip). Without merging these, a card would save, show for a moment,
-    // then vanish on the next pool reload. Shared/bundled copies still win.
-    legacyCards.forEach(card => loadedKeys.add(cardLibraryKey(card)));
-    const localProjectCards = readLocalProjectCards()
-      .map(normalizeImportedCard)
-      .filter(card => !loadedKeys.has(cardLibraryKey(card))
-        && !isCardTombstoned(deleted, card));
-
-    state.cards = dedupeCards([
-      ...pooledCards,
-      ...legacyCards,
-      ...localProjectCards
-    ]).sort((a, b) => a.cardNumber.localeCompare(b.cardNumber));
-    state.cardsLoading = false;
+    state.cards = assembleCardPool(loadedCards, sharedCards, deleted);
+    state.sharedSyncing = false;
     populateFilterOptions();
     renderAll();
     updateImportStatus();
@@ -783,6 +805,7 @@ async function loadCardPool() {
     // "Official One Piece TCG" collection (see openCollection).
   } catch (error) {
     state.cardsLoading = false;
+    state.sharedSyncing = false;
     el.cardGrid.style.display = "";
     el.cardGrid.innerHTML = `<div class="empty">Card data could not be loaded. Run this through the included local server, then refresh.</div>`;
     if (el.phaseLog) el.phaseLog.textContent = error.message;
@@ -872,7 +895,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-2")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-3")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -4977,6 +5000,16 @@ function renderCollectionPicker() {
   if (!el.collectionPicker) return;
   const counts = collectionCounts();
   el.collectionPicker.innerHTML = "";
+
+  // While the shared library is still downloading in the background, uploaded
+  // collections may show a low/zero count for a moment. Say so, so it doesn't
+  // read as "my cards are gone".
+  if (state.sharedSyncing) {
+    const note = document.createElement("div");
+    note.className = "collection-sync-note";
+    note.innerHTML = `<span class="collection-loading-spinner"></span>Syncing uploaded cards…`;
+    el.collectionPicker.appendChild(note);
+  }
 
   CARD_COLLECTIONS.forEach(entry => {
     const tile = document.createElement("button");

@@ -179,11 +179,22 @@ export async function loadSharedCards() {
     // means the cache can be used to restore the library.
     const removed = [...cachedByKey.keys()].filter(key => deleted.has(key));
 
+    // Download stale bodies in PARALLEL batches. This used to be a plain
+    // `for … await` loop - one sequential round-trip per card - so a cold cache
+    // (e.g. right after a cache-format bump) meant waiting on hundreds of
+    // requests back-to-back. Batching keeps it fast without opening an unbounded
+    // number of sockets at once.
     const downloaded = [];
-    for (const key of stale) {
-        const snapshot = await get(ref(database, `${CARDS_PATH}/${key}`));
-        const card = snapshot.val();
-        if (card) {
+    const CONCURRENCY = 16;
+    for (let i = 0; i < stale.length; i += CONCURRENCY) {
+        const batch = stale.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(batch.map(key =>
+            get(ref(database, `${CARDS_PATH}/${key}`))
+                .then(snapshot => [key, snapshot.val()])
+                .catch(() => [key, null])
+        ));
+        for (const [key, card] of results) {
+            if (!card) continue;
             card.updatedAt = Number(index[key]?.updatedAt || 0);
             // Stamp the storage key so it's the cache keyPath and the load hint.
             card[CACHE_KEY_PATH] = key;
