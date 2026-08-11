@@ -4658,6 +4658,12 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
         } else if (destination === "hand") {
             player.hand.push(...shown);
             window.renderHands?.();
+        } else if (destination === "bottom") {
+            // Bottom of the deck is the FRONT of the array (top of deck = end).
+            // Same target as the per-card "↓ Bottom" button, even when peeking a
+            // pile other than the deck. Relative order is preserved.
+            player.deck.unshift(...shown);
+            window.renderDecks?.();
         }
 
         peekIds.clear();
@@ -4668,12 +4674,17 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
     }
 
     if (peekIds) {
-        // Peek mode: act on exactly the cards being looked at.
-        const trashShownBtn = mkBtn("Send shown \u2192 Trash", "#F44336");
-        trashShownBtn.onclick = () => sendShownTo("trash", "trash");
-        toolbar.appendChild(trashShownBtn);
+        // Peek mode: these act on EXACTLY the cards still being looked at (the
+        // remaining snapshot) and send the whole group at once.
+        const bottomAllBtn = mkBtn("Send all \u2192 Bottom", "#9C27B0");
+        bottomAllBtn.onclick = () => sendShownTo("bottom", "the bottom of the deck");
+        toolbar.appendChild(bottomAllBtn);
 
-        const handShownBtn = mkBtn("Send shown \u2192 Hand", "#FF9800");
+        const trashAllBtn = mkBtn("Send all \u2192 Trash", "#F44336");
+        trashAllBtn.onclick = () => sendShownTo("trash", "trash");
+        toolbar.appendChild(trashAllBtn);
+
+        const handShownBtn = mkBtn("Send all \u2192 Hand", "#FF9800");
         handShownBtn.onclick = () => sendShownTo("hand", "hand");
         toolbar.appendChild(handShownBtn);
     } else {
@@ -5222,6 +5233,85 @@ function renderLifeCards() {
     renderPlayerLife(gameState.player1, "opponentLifeArea");
 }
 
+// Dropdown for the life-area hamburger button: quick ways to arrange your OWN
+// life cards. Anchored to the button, opens upward (the life pile sits low on
+// the board) and flips below if there's no room. Closes on the next click.
+function openLifeMenu(anchorBtn, player) {
+    document.getElementById("lifeMenuDropdown")?.remove();
+
+    const menu = document.createElement("div");
+    menu.id = "lifeMenuDropdown";
+    menu.className = "context-menu life-menu-dropdown";
+    menu.style.cssText =
+        "position:fixed;z-index:10002;min-width:190px;padding:6px;border:1px solid #666;" +
+        "border-radius:8px;background:rgba(20,20,20,.98);box-shadow:0 12px 32px rgba(0,0,0,.55);" +
+        "display:flex;flex-direction:column;gap:3px;";
+
+    const close = () => menu.remove();
+
+    const shuffleLife = () => {
+        if (!Array.isArray(player.life) || player.life.length < 2) {
+            window.addGameLog?.("Not enough life cards to shuffle");
+            return;
+        }
+        shuffleDeck(player.life);
+        // Shuffling should scramble what you privately knew - drop private peeks.
+        player.life.forEach(card => { if (card) card.peeked = false; });
+        renderLifeCards();
+        window.addGameLog?.(`${player.name} shuffled their life cards`);
+        window.scheduleOnlineBoardSync?.();
+    };
+
+    const setAllFace = (faceUp) => {
+        (player.life || []).forEach(card => {
+            if (!card) return;
+            card.faceUp = faceUp;
+            if (faceUp) card.peeked = false;   // a public reveal supersedes a peek
+        });
+        renderLifeCards();
+        window.addGameLog?.(`${player.name} ${faceUp ? "revealed" : "hid"} all life cards`);
+        window.scheduleOnlineBoardSync?.();
+    };
+
+    const items = [
+        { label: "🔀 Shuffle Life Cards", action: shuffleLife },
+        { label: "🔓 Reveal All (both see)", action: () => setAllFace(true) },
+        { label: "🔒 Hide All", action: () => setAllFace(false) }
+    ];
+
+    items.forEach(item => {
+        const button = document.createElement("button");
+        button.textContent = item.label;
+        button.style.cssText =
+            "padding:8px 10px;border:0;border-radius:5px;background:transparent;color:#fff;" +
+            "font-size:12px;font-weight:700;text-align:left;cursor:pointer;white-space:nowrap;";
+        button.onmouseenter = () => { button.style.background = "rgba(255,255,255,.12)"; };
+        button.onmouseleave = () => { button.style.background = "transparent"; };
+        button.onclick = (event) => { event.stopPropagation(); close(); item.action(); };
+        menu.appendChild(button);
+    });
+
+    document.body.appendChild(menu);
+
+    // Position relative to the button. Prefer opening upward; fall back to below.
+    const anchor = anchorBtn.getBoundingClientRect();
+    const box = menu.getBoundingClientRect();
+    let left = anchor.right - box.width;
+    let top = anchor.top - box.height - 6;
+    if (top < 8) top = anchor.bottom + 6;
+    if (left < 8) left = 8;
+    if (left + box.width > window.innerWidth) left = window.innerWidth - box.width - 8;
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+
+    // Close on the next click/right-click anywhere (deferred so this same click
+    // doesn't immediately dismiss it).
+    setTimeout(() => {
+        document.addEventListener("click", close, { once: true });
+        document.addEventListener("contextmenu", close, { once: true });
+    }, 0);
+}
+
 function renderPlayerLife(player, lifeAreaId) {
     const lifeArea = document.getElementById(lifeAreaId);
 
@@ -5229,6 +5319,7 @@ function renderPlayerLife(player, lifeAreaId) {
 
     lifeArea.querySelectorAll(".life-card").forEach(card => card.remove());
     lifeArea.querySelectorAll(".life-count").forEach(counter => counter.remove());
+    lifeArea.querySelectorAll(".life-menu-btn").forEach(btn => btn.remove());
     lifeArea.querySelectorAll(".life-drop-zone").forEach(zone => zone.remove());
 
     const playerKey = player === gameState.player1 ? "player1" : "player2";
@@ -5404,6 +5495,29 @@ function renderPlayerLife(player, lifeAreaId) {
     count.textContent = player.life.length;
 
     lifeArea.appendChild(count);
+
+    // A little hamburger button next to the count that opens a menu of life-card
+    // actions (shuffle, reveal/hide all). Only on a life pile you actually
+    // control - your own side online, either side in solo, never as a spectator.
+    const canControlLife = !isSpectator && (!isOnlineMatch || isOwnOnlinePlayer(player));
+    if (canControlLife) {
+        const menuBtn = document.createElement("button");
+        menuBtn.type = "button";
+        menuBtn.className = "life-menu-btn";
+        menuBtn.title = "Life card options";
+        menuBtn.setAttribute("aria-label", "Life card options");
+        menuBtn.innerHTML = "<span></span><span></span><span></span>";
+        menuBtn.addEventListener("click", (event) => {
+            // Don't let the click bubble to the life area (which toggles its
+            // expanded view).
+            event.stopPropagation();
+            event.preventDefault();
+            const open = document.getElementById("lifeMenuDropdown");
+            if (open) { open.remove(); return; }   // toggle closed if already open
+            openLifeMenu(menuBtn, player);
+        });
+        lifeArea.appendChild(menuBtn);
+    }
 
     // The container itself collapses to ~0 height because every child is
     // position:absolute — grow it to match the pile so the whole stack

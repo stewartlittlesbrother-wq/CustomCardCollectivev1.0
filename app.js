@@ -587,17 +587,21 @@ function dedupeCards(cards) {
 // Failures are non-fatal: the site still runs on the bundled files.
 async function loadSharedCardsForPool() {
   const library = await getCardLibrary();
-  if (!library) return { cards: [], deleted: new Set() };
+  // `ok` distinguishes a real read from a failure/absence, so callers can tell
+  // "the library is genuinely empty" from "the read failed" and avoid wiping the
+  // cards they already have on a transient error.
+  if (!library) return { cards: [], deleted: new Set(), ok: false };
 
   try {
     const { cards, deleted } = await library.loadSharedCards();
     return {
       cards: cards.map(card => normalizeCard(card, card.category || card.cardType)),
-      deleted: deleted || new Set()
+      deleted: deleted || new Set(),
+      ok: true
     };
   } catch (error) {
     console.warn("Shared cards not loaded into the pool:", error);
-    return { cards: [], deleted: new Set() };
+    return { cards: [], deleted: new Set(), ok: false };
   }
 }
 
@@ -773,37 +777,61 @@ function assembleCardPool(loadedCards, sharedCards, deleted) {
   ]).sort((a, b) => a.cardNumber.localeCompare(b.cardNumber));
 }
 
+// The last shared-library snapshot we successfully loaded. Kept so a reload can
+// paint immediately WITHOUT dropping the shared cards it already had, and so a
+// transient shared-load failure (a Firebase blip returning nothing) doesn't wipe
+// every uploaded card - including DON!! cards, which live ONLY in the shared
+// library and so would otherwise "appear then vanish" on the next reload.
+let lastSharedPool = { cards: [], deleted: new Set() };
+// Guards against overlapping loads: only the most recent call may write state.
+let poolLoadToken = 0;
+
 async function loadCardPool() {
+  const token = ++poolLoadToken;
   try {
     const groups = await Promise.all(CARD_FILES.map(loadCardFile));
     const loadedCards = groups.flat();
 
-    // Paint the collection picker RIGHT AWAY from the bundled + local cards, so
-    // the builder is usable in a blink instead of blocking on the shared-library
-    // download (which can be large and, right after a cache-format bump, has to
-    // re-fetch every card). The uploaded cards fold in a moment later.
-    state.cards = assembleCardPool(loadedCards, [], new Set());
-    state.cardsLoading = false;
-    state.sharedSyncing = true;
-    populateFilterOptions();
-    renderAll();
-    updateImportStatus();
+    // Paint the collection picker RIGHT AWAY, but seed it with the LAST KNOWN
+    // shared cards (not an empty set) so a reload never flashes the pool down to
+    // just the bundled cards - that flash is what made a freshly-uploaded DON!!
+    // card seem to disappear for a moment. First load has an empty snapshot, so
+    // this is just the bundled cards then.
+    if (token === poolLoadToken) {
+      state.cards = assembleCardPool(loadedCards, lastSharedPool.cards, lastSharedPool.deleted);
+      state.cardsLoading = false;
+      state.sharedSyncing = true;
+      populateFilterOptions();
+      renderAll();
+      updateImportStatus();
+    }
 
     // Cards uploaded by players live ONLY in the shared library - they are not
     // written back into the bundled JSON files. Fetch them (downloads now run in
     // parallel) and merge them in without blocking that first paint.
-    const { cards: sharedCards, deleted } = await loadSharedCardsForPool();
+    const fresh = await loadSharedCardsForPool();
 
-    state.cards = assembleCardPool(loadedCards, sharedCards, deleted);
-    state.sharedSyncing = false;
-    populateFilterOptions();
-    renderAll();
-    updateImportStatus();
+    // If the read FAILED (offline, rules hiccup, dropped index read), keep the
+    // last good snapshot instead of wiping every shared/DON!! card. A successful
+    // read always wins - even an empty one, so real deletions still take effect.
+    const useShared = fresh.ok ? fresh : lastSharedPool;
+    lastSharedPool = useShared;
+
+    // Only the most recent load writes state, so overlapping reloads can't clobber
+    // a newer result with a staler one.
+    if (token === poolLoadToken) {
+      state.cards = assembleCardPool(loadedCards, useShared.cards, useShared.deleted);
+      state.sharedSyncing = false;
+      populateFilterOptions();
+      renderAll();
+      updateImportStatus();
+    }
 
     // NOTE: the big official-card list is NOT loaded here - it would slow down
     // the whole builder. It's loaded lazily the first time you open the
     // "Official One Piece TCG" collection (see openCollection).
   } catch (error) {
+    if (token !== poolLoadToken) return;
     state.cardsLoading = false;
     state.sharedSyncing = false;
     el.cardGrid.style.display = "";
