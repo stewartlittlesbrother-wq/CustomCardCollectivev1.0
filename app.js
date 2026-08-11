@@ -1485,6 +1485,15 @@ async function saveDonCard(event) {
   } catch { image = url; }
   if (!image) { toast("Could not read that image"); if (el.donCardStatus) el.donCardStatus.textContent = ""; return; }
 
+  // Compress the art exactly like the card creator does before saving. An
+  // UPLOADED file becomes a full-resolution base64 data URL that can be several
+  // megabytes - too big for the shared write to store, which is why file-based
+  // DON!! uploads got stuck/vanished while image URLs (a short string, or a
+  // proxied+shrunk copy) worked fine. compressImageDataUrl leaves plain URLs
+  // untouched, so URL uploads behave exactly as before.
+  if (el.donCardStatus) el.donCardStatus.textContent = "Optimizing image…";
+  image = await compressImageDataUrl(image);
+
   // A unique DON!! card number; the id/cardNumber convention matches other cards.
   // Store the RAW card shape (with `image`, like creationCardFromForm) - NOT a
   // pre-normalized one - so the art survives the save→reload round-trip
@@ -1507,12 +1516,8 @@ async function saveDonCard(event) {
     untapId: cardNumber
   };
 
-  if (el.donCardStatus) el.donCardStatus.textContent = "Publishing…";
-  const result = await publishSingleCard(card);
-  if (!result) { toast("Could not save the DON!! card"); if (el.donCardStatus) el.donCardStatus.textContent = ""; return; }
-
-  // Show it in the pool immediately (optimistic), so it can't seem to "not
-  // appear" while the shared library round-trips. loadCardPool then reconciles.
+  // Show it in the pool IMMEDIATELY, before any network call, so it can never
+  // seem to "not appear" while the shared library round-trips.
   const normalized = normalizeCard(card);
   const ensureInPool = () => {
     if (!state.cards.some(c => cardLibraryKey(c) === cardLibraryKey(normalized))) {
@@ -1522,13 +1527,53 @@ async function saveDonCard(event) {
   ensureInPool();
   hideAddDonCardForm();
   renderDonCardPool();
-  await loadCardPool();
-  // loadCardPool rebuilds state.cards from the shared library + local stores; if
-  // the just-saved card isn't in either yet (a slow shared round-trip, or a
-  // device-only save), re-add it so it can't flash in then vanish.
+
+  // Publish to the shared library, but NEVER let a stalled write hang the UI on
+  // "Publishing…" forever (which is what made uploads look permanently stuck).
+  // Race it against a timeout; whatever happens, the card is also saved to this
+  // device below, so it survives a reload and can be used to build a DON!! deck.
+  if (el.donCardStatus) el.donCardStatus.textContent = "Publishing…";
+  let result = null;
+  try {
+    result = await Promise.race([
+      publishSingleCard(card),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("publish-timeout")), 15000))
+    ]);
+  } catch (error) {
+    console.warn("DON!! card publish stalled or failed:", error);
+  }
+
+  // If it didn't make it to the shared library, guarantee a device-local copy so
+  // it can't vanish on reload. (publishSingleCard already writes locally when it
+  // returns "local"; this also covers the timeout case, where it never returned.)
+  if (result !== "shared") {
+    try {
+      const existing = (await loadProjectCards())
+        .filter(other => projectCardKey(other) !== projectCardKey(card));
+      if (saveProjectCardsLocally([...existing, card])) result = result || "local";
+    } catch (error) {
+      console.warn("Could not save DON!! card locally:", error);
+    }
+  }
+
+  // Reconcile with the shared library in the background - don't block the status
+  // (or the user) on it, since that reload is exactly what could stall.
+  Promise.resolve(loadCardPool())
+    .then(() => { ensureInPool(); renderDonCardPool(); })
+    .catch(() => {});
+
   ensureInPool();
   renderDonCardPool();
-  toast(result === "local" ? "DON!! card saved (this device only)" : "DON!! card added to the shared pool");
+
+  // ALWAYS resolve the status - never leave it stuck on "Publishing…".
+  if (el.donCardStatus) {
+    el.donCardStatus.textContent = result === "shared"
+      ? "Added to the shared pool ✓"
+      : "Saved on this device — shared library was unreachable";
+  }
+  toast(result === "shared"
+    ? "DON!! card added to the shared pool"
+    : "DON!! card saved (this device only)");
 }
 
 async function deleteDonCard(cardNumber) {
