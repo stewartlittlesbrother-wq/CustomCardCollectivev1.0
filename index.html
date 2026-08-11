@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=1280">
   <title>Custom Cards Simulator</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=creation-26">
+  <link rel="stylesheet" href="styles.css?v=creation-27">
 </head>
 <body>
   <div class="app-shell">
@@ -388,18 +388,13 @@
                         <input id="creationOcrToggle" type="checkbox">
                         <span>Auto-scan card images (OCR)</span>
                       </label>
-                      <label>
-                        Alt Art URL <small style="opacity:.65">(optional — a second image players can switch to)</small>
-                        <input id="creationAltArtUrl" type="url" placeholder="https://example.com/alt.png">
-                      </label>
-                      <label>
-                        Or upload Alt Art <small style="opacity:.65">(optional)</small>
-                        <input id="creationAltArtImage" type="file" accept="image/png,image/jpeg,image/webp">
-                      </label>
-                      <label class="creation-inline-check" id="creationRemoveAltArtRow" hidden>
-                        <input id="creationRemoveAltArt" type="checkbox">
-                        <span>Remove this card's alt art</span>
-                      </label>
+                      <div class="alt-arts-block">
+                        <div class="alt-arts-head">
+                          <span>Alt Arts <small style="opacity:.65">(optional — extra images players can cycle through in-game)</small></span>
+                          <button type="button" id="creationAddAltArt" class="ghost">+ Add alt art</button>
+                        </div>
+                        <div id="creationAltArtList" class="alt-arts-list"></div>
+                      </div>
                       <label>
                         Card #
                         <input id="creationCardNumber" type="text" placeholder="JJBA-001" required>
@@ -823,7 +818,7 @@
   <script src="js/rotate-prompt.js"></script>
   <script src="js/cards/decks.js?v=creation-8"></script>
   <script src="js/manual-play.js?v=manual-3"></script>
-  <script src="app.js?v=creation-48"></script>
+  <script src="app.js?v=creation-49"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).

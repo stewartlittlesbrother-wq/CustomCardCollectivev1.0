@@ -198,6 +198,16 @@ function dedupeImportedCardsForGame(cards) {
     return deduped;
 }
 
+// A card's alt arts, tolerant of the shapes they arrive in: an array, a single
+// legacy `altArt` string, or a Firebase object ({0:…,1:…}).
+function normalizeAltArtsForGame(card) {
+    const raw = card?.altArts;
+    const source = Array.isArray(raw) ? raw
+        : (raw && typeof raw === "object") ? Object.values(raw)
+        : (card?.altArt ? [card.altArt] : []);
+    return [...new Set(source.map(a => String(a || "").trim()).filter(Boolean))];
+}
+
 // Keyed by CARD NUMBER for every category - see the matching note on
 // cardLibraryKey() in app.js. Leaders used to key by name, which silently
 // merged different leaders that share one (this set has five separate cards
@@ -253,8 +263,11 @@ function normalizeImportedCardForGame(card) {
         effect: effectText,
         effects: [],
         image: card.image || "",
-        // Optional second artwork; a player can switch to it per device.
-        altArt: card.altArt || ""
+        // Extra artworks a player can cycle through per device. `altArt` kept as
+        // the first one for anything still reading the legacy single field.
+        // Firebase can return an array as an object, so normalize that here too.
+        altArts: normalizeAltArtsForGame(card),
+        altArt: normalizeAltArtsForGame(card)[0] || ""
     };
 }
 

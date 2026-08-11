@@ -162,28 +162,52 @@ function normalizeCollectionSlug(value) {
 }
 
 // ── Alt art ──────────────────────────────────────────────
-// A card can carry a second image (altArt). Whether a player SEES the alt is a
-// per-device preference keyed by card number, so each player picks which art
-// they want without changing the card for everyone.
+// A card can carry several extra images (altArts). Which one a player SEES is a
+// per-device preference keyed by card number: an INDEX into the art cycle
+// [default, ...altArts]. 0 (or absent) = the default art. Each player cycles
+// their own art without changing the card for everyone. (Legacy prefs stored a
+// boolean `true` for "show the one alt art" - that's read as index 1.)
 const ALT_ART_PREFS_KEY = "custom-cards-alt-art-prefs-v1";
 function getAltArtPrefs() {
   try { return JSON.parse(localStorage.getItem(ALT_ART_PREFS_KEY) || "{}") || {}; }
   catch { return {}; }
 }
-function isAltArtPreferred(card) {
-  const key = card?.cardNumber || card?.id;
-  return Boolean(key && card?.altArt && getAltArtPrefs()[key]);
+// Every artwork for a card, default first, then its alt arts (deduped, no blanks).
+function cardArtList(card) {
+  const main = card?.imageUrl || card?.image || "";
+  const alts = Array.isArray(card?.altArts)
+    ? card.altArts
+    : (card?.altArt ? [card.altArt] : []);
+  return [...new Set([main, ...alts].filter(Boolean))];
 }
-function toggleAltArtPref(card) {
+// The art index this player has selected for a card, clamped to what exists.
+function altArtIndexFor(card) {
+  const key = card?.cardNumber || card?.id;
+  if (!key) return 0;
+  const raw = getAltArtPrefs()[key];
+  let idx = raw === true ? 1 : (Number(raw) || 0);   // legacy boolean = first alt
+  const count = cardArtList(card).length;
+  if (!Number.isInteger(idx) || idx < 0 || idx >= count) idx = 0;
+  return idx;
+}
+function isAltArtPreferred(card) {
+  return altArtIndexFor(card) > 0;
+}
+// Advance to the next artwork, wrapping past the last back to the default.
+function cycleAltArtPref(card) {
   const key = card?.cardNumber || card?.id;
   if (!key) return;
+  const count = cardArtList(card).length;
+  if (count <= 1) return;
   const prefs = getAltArtPrefs();
-  if (prefs[key]) delete prefs[key]; else prefs[key] = true;
+  const next = (altArtIndexFor(card) + 1) % count;
+  if (next === 0) delete prefs[key]; else prefs[key] = next;
   try { localStorage.setItem(ALT_ART_PREFS_KEY, JSON.stringify(prefs)); } catch {}
 }
-// The image a card should display for THIS player (alt if they've switched to it).
+// The image a card should display for THIS player (their selected art).
 function preferredCardImageUrl(card) {
-  return isAltArtPreferred(card) ? card.altArt : card.imageUrl;
+  const list = cardArtList(card);
+  return list[altArtIndexFor(card)] || card.imageUrl;
 }
 
 const CARD_BACK_IMAGE = "images/basic/card-back-custom.png";
@@ -341,10 +365,8 @@ const el = {
   cardCreationForm: document.querySelector("#cardCreationForm"),
   creationImage: document.querySelector("#creationImage"),
   creationImageUrl: document.querySelector("#creationImageUrl"),
-  creationAltArtUrl: document.querySelector("#creationAltArtUrl"),
-  creationAltArtImage: document.querySelector("#creationAltArtImage"),
-  creationRemoveAltArt: document.querySelector("#creationRemoveAltArt"),
-  creationRemoveAltArtRow: document.querySelector("#creationRemoveAltArtRow"),
+  creationAddAltArt: document.querySelector("#creationAddAltArt"),
+  creationAltArtList: document.querySelector("#creationAltArtList"),
   creationCardNumber: document.querySelector("#creationCardNumber"),
   creationName: document.querySelector("#creationName"),
   creationCategory: document.querySelector("#creationCategory"),
@@ -451,6 +473,15 @@ function normalizeCard(raw, category) {
         .join("\n")
     : String(raw.effect || raw.text || "");
 
+  // Alt arts: a card can carry several extra images players cycle through. New
+  // cards store an `altArts` array; older ones stored a single `altArt` string.
+  // Firebase can hand an array back as an object ({0:…,1:…}), so accept that too.
+  const rawAlts = raw.altArts;
+  const altArtsSource = Array.isArray(rawAlts) ? rawAlts
+    : (rawAlts && typeof rawAlts === "object") ? Object.values(rawAlts)
+    : (raw.altArt ? [raw.altArt] : []);
+  const altArts = [...new Set(altArtsSource.map(normalizeImagePath).filter(Boolean))];
+
   return {
     id,
     cardNumber,
@@ -477,8 +508,10 @@ function normalizeCard(raw, category) {
     customEffectV2,
     effectBlocks: blockEffects,
     imageUrl: normalizeImagePath(raw.image || ""),
-    // Optional second artwork players can switch to (see alt-art prefs).
-    altArt: normalizeImagePath(raw.altArt || ""),
+    // Extra artworks players can cycle through (see alt-art prefs). `altArt`
+    // stays as the first one for anything still reading the legacy single field.
+    altArts,
+    altArt: altArts[0] || "",
     // DON!! cards are shared library cards used only to build custom DON!! decks.
     // Flagged so they're kept out of the normal deck-building pool.
     donCard: Boolean(raw.donCard),
@@ -3068,7 +3101,55 @@ function effectsToCardScript(card) {
 }
 
 
-function creationCardFromForm(imageDataUrl, altArtSource = "") {
+// ── Alt-art rows in the card creator ─────────────────────
+// Each "Add alt art" click appends a row (URL box + file picker + remove). An
+// EXISTING alt art (when editing) is added as a row that already holds its image
+// and shows a thumbnail, so it's kept unless the row is removed.
+function makeAltArtRow(existingImage = "") {
+  const row = document.createElement("div");
+  row.className = "alt-art-row";
+  row._existingImage = existingImage || "";
+  row.innerHTML = `
+    <div class="alt-art-thumb"${existingImage ? "" : " hidden"}>${existingImage ? `<img src="${escapeAttr(existingImage)}" alt="">` : ""}</div>
+    <div class="alt-art-fields">
+      <input type="url" class="alt-art-url" placeholder="Alt art image URL">
+      <input type="file" class="alt-art-file" accept="image/png,image/jpeg,image/webp">
+    </div>
+    <button type="button" class="alt-art-remove" title="Remove this alt art">✕</button>
+  `;
+  row.querySelector(".alt-art-remove").addEventListener("click", () => row.remove());
+  return row;
+}
+
+function addAltArtRow(existingImage = "") {
+  if (!el.creationAltArtList) return;
+  el.creationAltArtList.appendChild(makeAltArtRow(existingImage));
+}
+
+function clearAltArtRows() {
+  if (el.creationAltArtList) el.creationAltArtList.innerHTML = "";
+}
+
+// Resolve every alt-art row to a final image (uploaded file > pasted URL >
+// existing image), compressed and deduped, dropping empty rows.
+async function collectAltArtSources() {
+  const rows = el.creationAltArtList
+    ? [...el.creationAltArtList.querySelectorAll(".alt-art-row")]
+    : [];
+  const arts = [];
+  for (const row of rows) {
+    const file = row.querySelector(".alt-art-file")?.files?.[0];
+    const url = (row.querySelector(".alt-art-url")?.value || "").trim();
+    let img = "";
+    if (file) img = await compressImageDataUrl(await readFileAsDataUrl(file));
+    else if (url) img = await compressImageDataUrl((await fetchRemoteImageAsDataUrl(url)) || url);
+    else if (row._existingImage) img = row._existingImage;
+    if (img) arts.push(img);
+  }
+  return [...new Set(arts.filter(Boolean))];
+}
+
+function creationCardFromForm(imageDataUrl, altArts = []) {
   const cardNumber = el.creationCardNumber.value.trim() || nextImportedCardNumber();
   const category = normalizeCategory(el.creationCategory.value);
   const colors = csvValues(el.creationColors.value).map(color => color.toLowerCase());
@@ -3097,7 +3178,7 @@ function creationCardFromForm(imageDataUrl, altArtSource = "") {
     keywords,
     effect: effectText,
     image: imageDataUrl,
-    altArt: altArtSource || "",
+    altArts: Array.isArray(altArts) ? altArts.filter(Boolean) : (altArts ? [altArts] : []),
     // Which collection to file this card under. Defaults to the collection the
     // browser is currently showing, then to Goldrush717's Bleach.
     collection: normalizeCollectionSlug(
@@ -3169,26 +3250,14 @@ async function saveCreatedCard(event) {
     imageSource = state.creationImageData;
   }
 
-  // Optional alt art (second image), resolved the same way. Keeps any existing
-  // alt art when editing and no new one is provided - UNLESS "Remove this card's
-  // alt art" is ticked, which clears it.
-  const altUrl = el.creationAltArtUrl?.value.trim() || "";
-  const altFile = el.creationAltArtImage?.files?.[0];
-  const removeAltArt = Boolean(el.creationRemoveAltArt?.checked);
-  let altArtSource = "";
-  if (removeAltArt && !altFile && !altUrl) {
-    altArtSource = ""; // explicit removal wins over the keep-existing fallback
-  } else if (altFile) {
-    altArtSource = await compressImageDataUrl(await readFileAsDataUrl(altFile));
-  } else if (altUrl) {
-    altArtSource = (await fetchRemoteImageAsDataUrl(altUrl)) || altUrl;
-  } else if (state.editingCardId) {
-    altArtSource = getCard(state.editingCardId)?.altArt || "";
-  }
+  // Alt arts: whatever the "Add alt art" rows resolve to (uploaded files, pasted
+  // URLs, or kept-existing images). Rows the user removed are simply gone, so no
+  // separate "remove alt art" control is needed any more.
+  const altArts = await collectAltArtSources();
 
   // Compress just this card's artwork, then publish only this card - no need to
   // load, diff and re-upload the entire library to add one entry.
-  const [card] = await compressImportedCardImages([creationCardFromForm(imageSource, altArtSource)]);
+  const [card] = await compressImportedCardImages([creationCardFromForm(imageSource, altArts)]);
   if (!await publishSingleCard(card)) return;
 
   // Editing a card so its IDENTITY moves - a new number OR a new collection -
@@ -3235,9 +3304,8 @@ function clearCreationForm(resetNumber = true) {
   if (resetNumber && el.creationCardNumber) el.creationCardNumber.value = nextImportedCardNumber();
   if (el.creationImagePreview) el.creationImagePreview.innerHTML = `<span>No image yet</span>`;
   if (el.creationStatus) el.creationStatus.textContent = "Ready";
-  // New cards have no alt art to remove.
-  if (el.creationRemoveAltArtRow) el.creationRemoveAltArtRow.hidden = true;
-  if (el.creationRemoveAltArt) el.creationRemoveAltArt.checked = false;
+  // Start a new card with no alt-art rows.
+  clearAltArtRows();
   // Keep filing new cards into whatever collection you're browsing.
   preselectCreationCollection();
 }
@@ -4035,15 +4103,10 @@ function openCardForEditing(card) {
   state.creationImageData = card.imageUrl || "";
 
   if (el.creationImage) el.creationImage.value = "";
-  // Show the existing alt art in the URL field when it's a link; a stored
-  // (data:) alt art is kept via the editingCardId fallback in saveCreatedCard.
-  if (el.creationAltArtImage) el.creationAltArtImage.value = "";
-  if (el.creationAltArtUrl) {
-    el.creationAltArtUrl.value = card.altArt && !String(card.altArt).startsWith("data:") ? card.altArt : "";
-  }
-  // Offer a "remove alt art" option only when this card actually has one.
-  if (el.creationRemoveAltArt) el.creationRemoveAltArt.checked = false;
-  if (el.creationRemoveAltArtRow) el.creationRemoveAltArtRow.hidden = !card.altArt;
+  // Rebuild the alt-art rows from this card's existing arts, each holding its
+  // stored image (kept unless the row is removed). New rows can be added on top.
+  clearAltArtRows();
+  cardArtList(card).slice(1).forEach(art => addAltArtRow(art));
   el.creationCardNumber.value = card.cardNumber || card.id;
   el.creationName.value = card.name || "";
   el.creationCategory.value = normalizeCategory(card.category || card.cardType);
@@ -5227,17 +5290,19 @@ function renderCardGrid() {
       editButton.hidden = false;
     }
 
-    // Alt-art toggle - only shown for cards that actually have a second image.
-    // Switches which art THIS player sees/plays with (stored per device).
-    if (card.altArt) {
+    // Alt-art cycle - only shown for cards that actually have extra art.
+    // Cycles which art THIS player sees/plays with (stored per device).
+    const artList = cardArtList(card);
+    if (artList.length > 1) {
+      const idx = altArtIndexFor(card);
       const altBtn = document.createElement("button");
       altBtn.type = "button";
-      altBtn.className = "card-alt-btn" + (isAltArtPreferred(card) ? " active" : "");
-      altBtn.textContent = isAltArtPreferred(card) ? "★ Alt" : "☆ Alt";
-      altBtn.title = "Switch between this card's default and alternate art";
+      altBtn.className = "card-alt-btn" + (idx > 0 ? " active" : "");
+      altBtn.textContent = `${idx > 0 ? "★" : "☆"} Art ${idx + 1}/${artList.length}`;
+      altBtn.title = "Cycle this card's artwork (default + alt arts)";
       altBtn.addEventListener("click", (event) => {
         event.stopPropagation();
-        toggleAltArtPref(card);
+        cycleAltArtPref(card);
         renderCardGrid();
       });
       (image || article).appendChild(altBtn);
@@ -6235,6 +6300,7 @@ function bindEvents() {
   el.cardCreationForm?.addEventListener("submit", saveCreatedCard);
   el.creationImage?.addEventListener("change", previewCreationImage);
   el.creationImageUrl?.addEventListener("change", previewCreationImageUrl);
+  el.creationAddAltArt?.addEventListener("click", () => addAltArtRow());
 
   // OCR toggle inside the Card Creator, kept in sync with the home-screen
   // "Enable Automatic Card Scanning" checkbox (same localStorage key).

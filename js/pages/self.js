@@ -12,24 +12,36 @@ const cardBackImage = "../images/basic/card-back-normal.jpg";
 // board. Callers that show a face-down card pass the back directly.
 // Which image to show for a card. If this device has switched a card to its alt
 // art (stored per card number in localStorage), use the alt.
-function altArtPreferredFor(card) {
+// All artworks for a card (default first, then alt arts), matching app.js's
+// cardArtList. New cards carry an `altArts` array; older ones a single `altArt`.
+function cardArtListForGame(card) {
+    const main = (card && typeof card.image === "string") ? card.image.trim() : "";
+    const alts = Array.isArray(card?.altArts)
+        ? card.altArts
+        : (card?.altArt ? [card.altArt] : []);
+    const cleaned = alts.map(a => (typeof a === "string" ? a.trim() : "")).filter(Boolean);
+    return [...new Set([main, ...cleaned].filter(Boolean))];
+}
+
+// The art index this device picked for the card in the deck builder's alt-art
+// cycle, clamped to what exists. A legacy boolean `true` means index 1.
+function altArtIndexForGame(card) {
     const key = card?.cardNumber || card?.id;
-    if (!key || !card?.altArt) return false;
+    if (!key) return 0;
+    let idx = 0;
     try {
-        const prefs = JSON.parse(localStorage.getItem("custom-cards-alt-art-prefs-v1") || "{}");
-        return Boolean(prefs && prefs[key]);
-    } catch {
-        return false;
-    }
+        const prefs = JSON.parse(localStorage.getItem("custom-cards-alt-art-prefs-v1") || "{}") || {};
+        const raw = prefs[key];
+        idx = raw === true ? 1 : (Number(raw) || 0);
+    } catch { idx = 0; }
+    const count = cardArtListForGame(card).length;
+    if (!Number.isInteger(idx) || idx < 0 || idx >= count) idx = 0;
+    return idx;
 }
 
 function cardArtSrc(card) {
-    if (altArtPreferredFor(card)) {
-        const alt = typeof card.altArt === "string" ? card.altArt.trim() : "";
-        if (alt) return alt;
-    }
-    const src = card && typeof card.image === "string" ? card.image.trim() : "";
-    return src || cardBackImage;
+    const list = cardArtListForGame(card);
+    return list[altArtIndexForGame(card)] || list[0] || cardBackImage;
 }
 const donBackImage = "../images/basic/card-back-don.webp";
 const donImage = "../images/basic/card-front-don.webp";
