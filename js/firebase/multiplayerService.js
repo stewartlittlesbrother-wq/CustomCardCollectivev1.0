@@ -436,6 +436,39 @@ export function subscribeToPrivateState(roomCode, uid, callback) {
     });
 }
 
+// Spectator helper: watch BOTH players' private zones (hand/deck/life) at once.
+// It follows the players node to learn each seat's uid, then subscribes to that
+// uid's private state, re-wiring if a seat's uid changes (e.g. p2 joins later).
+// Calls back with { p1, p2 } raw private states (either may be null until known).
+export function subscribeToAllPrivateState(roomCode, callback) {
+    const code = cleanRoomCode(roomCode);
+    const latest = { p1: null, p2: null };
+    const uids = { p1: null, p2: null };
+    const privateUnsub = { p1: null, p2: null };
+
+    const watchPrivate = (slot, uid) => {
+        if (privateUnsub[slot]) { privateUnsub[slot](); privateUnsub[slot] = null; }
+        if (!uid) { latest[slot] = null; callback({ ...latest }); return; }
+        privateUnsub[slot] = onValue(
+            ref(database, `matches/${code}/private/${uid}`),
+            (snapshot) => { latest[slot] = snapshot.val(); callback({ ...latest }); }
+        );
+    };
+
+    const playersUnsub = onValue(ref(database, `matches/${code}/players`), (snapshot) => {
+        const players = snapshot.val() || {};
+        ["p1", "p2"].forEach(slot => {
+            const uid = players[slot]?.uid || null;
+            if (uid !== uids[slot]) { uids[slot] = uid; watchPrivate(slot, uid); }
+        });
+    });
+
+    return () => {
+        playersUnsub();
+        Object.values(privateUnsub).forEach(unsub => unsub && unsub());
+    };
+}
+
 // Per-seat board cosmetics (playmat / card back / DON!! back, as data URLs).
 // Written once on connect and read by both players so each sees the other's
 // cosmetics on their field. Kept on its own node (not the frequently-synced

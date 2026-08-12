@@ -272,6 +272,10 @@ let onlineFirebaseApp = null;
 let onlineMatchUnsubscribe = null;
 let onlineNamesUnsubscribe = null;
 let onlinePrivateUnsubscribe = null;
+// Spectator view of BOTH players' private zones (hand/deck/life), so a spectator
+// sees every card face-up. { p1, p2 } raw private states, either may be null.
+let spectatorPrivate = { p1: null, p2: null };
+let onlineSpectatorPrivateUnsub = null;
 let onlineUser = null;
 let onlinePublicState = null;
 let onlinePrivateState = null;
@@ -433,6 +437,12 @@ function applyOnlinePlayerState(playerKey) {
     player.donDeck = Number(publicPlayer.tokenDeckCount ?? 10);
     player.turns = Number(publicPlayer.turns || 0);
 
+    // Spectators see BOTH sides fully revealed - hand, life and board all face-up.
+    if (isSpectator) {
+        applySpectatorPlayerState(player, playerKey, publicPlayer);
+        return;
+    }
+
     if (isOwnPlayer) {
         const phase = onlinePublicState?.phase;
         const inSetup = ONLINE_SETUP_PHASES.has(phase);
@@ -493,6 +503,43 @@ function applyOnlinePlayerState(playerKey) {
             player.life[index] = hydrateCard({ ...entry.card, faceUp: true });
         }
     });
+}
+
+// Reveal a player fully for a spectator: board from the public snapshot, hand /
+// life from their private state (subscribed to directly), everything face-up.
+function applySpectatorPlayerState(player, playerKey, publicPlayer) {
+    applyBoardToPlayer(player, publicPlayer.boardJson);
+
+    const slot = getOnlineSlotFromPlayerKey(playerKey);   // "p1" | "p2"
+    const rawPriv = slot ? spectatorPrivate?.[slot] : null;
+    const reveal = (cards) => hydrateCards(cards || []).map(c => (c ? { ...c, faceUp: true } : c));
+
+    if (rawPriv) {
+        const zones = safeParseJson(rawPriv.zonesJson, null) || {
+            hand: rawPriv.hand || [], deck: rawPriv.deck || [], life: rawPriv.life || []
+        };
+        player.hand = reveal(zones.hand);
+        player.deck = hydrateCards(zones.deck || []);   // deck stays a face-down stack
+        player.life = reveal(zones.life);
+    } else {
+        // Private state hasn't arrived yet - fall back to hidden counts so the
+        // zones aren't empty for the first instant of spectating.
+        player.hand = createHiddenCards(publicPlayer.handCount);
+        player.deck = createHiddenCards(publicPlayer.deckCount);
+        player.life = createHiddenCards(publicPlayer.lifeCount);
+    }
+
+    // Any face-down cards sitting on the board are revealed for spectators too.
+    const face = (card) => (card ? { ...card, faceUp: true } : card);
+    player.leader = face(player.leader);
+    player.stage = face(player.stage);
+    player.characters = (player.characters || []).map(face);
+    player.extraFaceUp = (player.extraFaceUp || []).map(face);
+    player.extraFaceDown = (player.extraFaceDown || []).map(face);
+    player.extraSlotA = (player.extraSlotA || []).map(face);
+    player.extraSlotB = (player.extraSlotB || []).map(face);
+    player.trash = (player.trash || []).map(face);
+    player.tokens = (player.tokens || []).map(face);
 }
 
 function renderOnlineGameState() {
@@ -1532,7 +1579,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-7");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-8");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1573,12 +1620,29 @@ async function initializeOnlineMultiplayer() {
 // Spectator connect: read the public board of BOTH players, never write, never
 // touch private zones (a spectator can't see anyone's hand). All interactive
 // controls are disabled via the spectator-mode body class + guards elsewhere.
+// Spectators can hover cards to inspect them, but must never change the board.
+// Rather than killing pointer-events (which also kills hover), we let hover
+// through and block every ACTION gesture here in the capture phase, before any
+// card handler runs. The sidebar log/chat and the preview panel stay usable.
+function installSpectatorInteractionGuard() {
+    if (!isSpectator) return;
+    const allow = ".game-log, .card-preview-panel, .manual-sidebar, .btn-back, #onlineMatchInfo, .spectator-banner";
+    const block = (event) => {
+        if (event.target.closest && event.target.closest(allow)) return;
+        event.stopPropagation();
+        event.preventDefault();
+    };
+    ["click", "dblclick", "contextmenu", "mousedown", "pointerdown", "dragstart"]
+        .forEach(type => document.addEventListener(type, block, true));
+}
+
 async function initializeSpectatorMatch() {
     document.body.classList.add("spectator-mode");
     showSpectatorBanner();
+    installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-7");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-8");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1587,6 +1651,16 @@ async function initializeSpectatorMatch() {
             roomCode,
             (publicState) => applyOnlinePublicState(publicState || {})
         );
+
+        // Spectators watch BOTH players' private zones so hands and life show
+        // face-up, not as card backs. Re-apply the board whenever they change.
+        if (onlineMultiplayerService.subscribeToAllPrivateState) {
+            onlineSpectatorPrivateUnsub = onlineMultiplayerService.subscribeToAllPrivateState(
+                roomCode,
+                (priv) => { spectatorPrivate = priv || { p1: null, p2: null }; applyOnlineStateToGame(); }
+            );
+        }
+
         setupOnlinePlayerNames();
         setupOnlineCosmetics();
 
@@ -4205,10 +4279,11 @@ function updateExtraZoneLabels() {
 
 function renderExtraPiles() {
     updateExtraZoneLabels();
+    // Spectators see the face-down piles revealed too.
     renderExtraPile(gameState.player1, "player1", "extraFaceUp", "player1ExtraFaceUpArea", true);
-    renderExtraPile(gameState.player1, "player1", "extraFaceDown", "player1ExtraFaceDownArea", false);
+    renderExtraPile(gameState.player1, "player1", "extraFaceDown", "player1ExtraFaceDownArea", isSpectator);
     renderExtraPile(gameState.player2, "player2", "extraFaceUp", "player2ExtraFaceUpArea", true);
-    renderExtraPile(gameState.player2, "player2", "extraFaceDown", "player2ExtraFaceDownArea", false);
+    renderExtraPile(gameState.player2, "player2", "extraFaceDown", "player2ExtraFaceDownArea", isSpectator);
     renderExtraSlots();
     renderTokenZones();
 }
@@ -5000,8 +5075,9 @@ function shuffleDeck(deck) {
 
 function renderHands() {
     if (isOnlineMatch) {
-        renderPlayerHand(gameState.player1, "player1Hand", playerSlot !== "p1");
-        renderPlayerHand(gameState.player2, "player2Hand", playerSlot !== "p2");
+        // Spectators see both hands face-up; a player sees only their own.
+        renderPlayerHand(gameState.player1, "player1Hand", !isSpectator && playerSlot !== "p1");
+        renderPlayerHand(gameState.player2, "player2Hand", !isSpectator && playerSlot !== "p2");
         window.manualPlay?.reapplyAnnotations?.();
         return;
     }
@@ -5038,7 +5114,7 @@ function renderPlayerHand(player, handElementId, hidden) {
 
             cardElement.appendChild(img);
         } else {
-            cardElement.setAttribute("data-card-image", card.image);
+            cardElement.setAttribute("data-card-image", cardArtSrc(card));
             cardElement.setAttribute("data-player", player === gameState.player1 ? "player1" : "player2");
             cardElement.setAttribute("data-card-instance-id", card.instanceId);
             cardElement.classList.add("selectable-card");
@@ -5579,7 +5655,7 @@ function renderLeader(player, areaId) {
     img.alt = player.leader.name;
     img.className = "leader-card-img board-leader-card";
 
-    img.setAttribute("data-card-image", player.leader.image);
+    img.setAttribute("data-card-image", cardArtSrc(player.leader));
     img.setAttribute("data-player", playerKey);
     img.setAttribute("data-board-card-type", "leader");
 
@@ -5657,7 +5733,7 @@ function renderPlayerCharacters(player, playerKey) {
         img.alt = card.name;
         img.className = "board-card-img board-character-card";
 
-        img.setAttribute("data-card-image", card.image);
+        img.setAttribute("data-card-image", cardArtSrc(card));
         img.setAttribute("data-player", playerKey);
         img.setAttribute("data-character-slot", index);
 
@@ -5819,7 +5895,7 @@ function renderPlayerStage(player, stageAreaId) {
     img.alt = player.stage.name;
     img.className = "deck-card-img board-card-img board-stage-card";
 
-    img.setAttribute("data-card-image", player.stage.image);
+    img.setAttribute("data-card-image", cardArtSrc(player.stage));
     img.setAttribute("data-player", playerKey);
     img.setAttribute("data-board-card-type", "stage");
 
@@ -5911,7 +5987,7 @@ function renderExtraSlot(player, playerKey, slotKey, areaId) {
     img.setAttribute("data-card-source", "extra");
     img.setAttribute("data-player", playerKey);
     img.setAttribute("data-pile", slotKey);
-    img.setAttribute("data-card-image", card.image || "");
+    img.setAttribute("data-card-image", cardArtSrc(card));
 
     const state = card.state || "active";
     img.dataset.cardState = state;
@@ -5987,7 +6063,7 @@ function renderPlayerTrash(player, trashAreaId) {
         img.src = cardArtSrc(topCard);
         img.alt = topCard.name;
         img.className = "deck-card-img life-card-img board-card-img";
-        img.setAttribute("data-card-image", topCard.image);
+        img.setAttribute("data-card-image", cardArtSrc(topCard));
         img.setAttribute("data-player", getPlayerKey(player));
         applyCardAnimationClass(img, takeCardAnimationClass(topCard));
 
@@ -6042,7 +6118,7 @@ function showTrashViewer(player) {
         img.src = cardArtSrc(card);
         img.alt = card.name;
         img.className = "look-top-card-img";
-        img.setAttribute("data-card-image", card.image);
+        img.setAttribute("data-card-image", cardArtSrc(card));
         img.style.width = "120px";
         img.style.height = "180px";
         img.style.objectFit = "cover";

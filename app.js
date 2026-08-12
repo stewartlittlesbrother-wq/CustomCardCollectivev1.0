@@ -5781,9 +5781,12 @@ function updatePracticePreview(card) {
     return;
   }
 
-  if (card.imageUrl) {
+  // Show the player's chosen art (alt art if they've cycled to one), not just
+  // the base image.
+  const previewSrc = preferredCardImageUrl(card);
+  if (previewSrc) {
     el.previewImage.hidden = false;
-    el.previewImage.src = card.imageUrl;
+    el.previewImage.src = previewSrc;
     el.previewImage.alt = card.name;
     el.previewPlaceholder.hidden = true;
     return;
@@ -6092,8 +6095,9 @@ function bindEvents() {
   const showHoverPreview = (article, pointerX) => {
     if (!el.builderHoverPreview || !article) return;
     const card = getCard(article.dataset.id);
-    if (!card?.imageUrl) { hideHoverPreview(); return; }
-    el.builderHoverPreviewImg.src = card.imageUrl;
+    const hoverSrc = card ? preferredCardImageUrl(card) : "";
+    if (!hoverSrc) { hideHoverPreview(); return; }
+    el.builderHoverPreviewImg.src = hoverSrc;
     el.builderHoverPreviewImg.alt = card.name || "";
     // Show the big preview on the side AWAY from the card you're hovering, so it
     // never sits on top of that card's Edit / + buttons. Left-side cards -> preview

@@ -4383,15 +4383,22 @@ body {
 }
 
 /* ── Spectator mode ────────────────────────────────────── */
-/* Watching a game: the board is read-only. Block every interaction on the
-   play field and hand rows so a spectator can never drag or click a card into
-   a different state. The sidebar log/chat stay usable. */
+/* Watching a game: the board is read-only, but a spectator can still HOVER a
+   card to inspect it. So we keep pointer events (hover) alive and instead block
+   every action GESTURE (click / double-click / right-click / drag) from a
+   capturing guard in JS (installSpectatorInteractionGuard). Dragging is also
+   disabled here as a belt-and-suspenders. */
 body.spectator-mode .game-board,
 body.spectator-mode .play-area,
 body.spectator-mode .player-hand,
 body.spectator-mode .opponent-hand,
 body.spectator-mode #extraZonesColumn {
-    pointer-events: none !important;
+    -webkit-user-drag: none;
+    user-select: none;
+    cursor: default;
+}
+body.spectator-mode [draggable="true"] {
+    -webkit-user-drag: none;
 }
 
 .spectator-banner {
