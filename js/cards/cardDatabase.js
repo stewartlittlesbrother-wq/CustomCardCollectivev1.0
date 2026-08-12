@@ -95,6 +95,24 @@ async function loadCardDatabase() {
         .filter(card => !loadedKeys.has(cardLibraryKeyForGame(card)))
         .forEach(place);
 
+    // The special all-access omni leader (every colour) exists only in code, so
+    // add it here too or a deck built around it wouldn't resolve its leader.
+    place(normalizeImportedCardForGame({
+        id: "OMNI-999",
+        cardNumber: "OMNI-999",
+        name: "Ichigo & Luffy & Naruto",
+        category: "leader",
+        cardType: "leader",
+        color: "red,green,blue,purple,black,yellow",
+        colors: ["red", "green", "blue", "purple", "black", "yellow"],
+        life: 5,
+        power: 5000,
+        attribute: "Ranged",
+        // Game pages live under /html/, so this art path is relative to there.
+        image: "../images/basic/omni-leader.webp",
+        effect: "This Leader is treated as a card with all card names, types, and attributes according to the rules."
+    }));
+
     cardDatabase = mainCards;
     leaders = leaderCards;
 

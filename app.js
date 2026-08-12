@@ -32,6 +32,39 @@ const BUILTIN_COLLECTIONS = [
 const COLLECTION_DEFAULT = "golds-bleach";
 const CUSTOM_COLLECTIONS_KEY = "custom-card-collections-v1";
 
+// ── All-Access omni leader ───────────────────────────────
+// A special built-in leader that is EVERY colour and can build from EVERY
+// collection at once. It lives in its own virtual "all-access" view, opened from
+// a dedicated tile on the collections page, which merges every collection's
+// cards into one grid. Picking it lifts the leader colour restriction entirely.
+const ALL_ACCESS_COLLECTION = "all-access";
+const OMNI_LEADER_NUMBER = "OMNI-999";
+// Save the attached art here to give the leader its picture (any missing image
+// just falls back to the generated placeholder - the card still works).
+const OMNI_LEADER_IMAGE = "images/basic/omni-leader.webp";
+const OMNI_LEADER_RAW = {
+  id: OMNI_LEADER_NUMBER,
+  cardNumber: OMNI_LEADER_NUMBER,
+  name: "Ichigo & Luffy & Naruto",
+  category: "leader",
+  cardType: "leader",
+  color: "red,green,blue,purple,black,yellow",
+  colors: ["red", "green", "blue", "purple", "black", "yellow"],
+  cost: "",
+  life: 5,
+  power: 5000,
+  attribute: "Ranged",
+  effect: "This Leader is treated as a card with all card names, types, and attributes according to the rules.",
+  image: OMNI_LEADER_IMAGE,
+  collection: ALL_ACCESS_COLLECTION,
+  omniLeader: true,
+  imported: false,
+  copyLimit: 1
+};
+function getOmniLeaderCard() {
+  return normalizeCard(OMNI_LEADER_RAW, "leader");
+}
+
 // The LIVE collection list = built-ins + user-created ones (which may also
 // override a built-in's name/image). Rebuilt by applyCustomCollections. Kept as
 // a mutable array so every reader (picker, selects, normalize) sees new ones.
@@ -148,12 +181,16 @@ function collectionSlugFromName(name) {
 }
 
 function collectionName(slug) {
+  if (slug === ALL_ACCESS_COLLECTION) return "All Collections";
   return CARD_COLLECTIONS.find(entry => entry.slug === slug)?.name || "Everything else";
 }
 
 function normalizeCollectionSlug(value) {
   const text = String(value || "").trim().toLowerCase();
   if (!text) return COLLECTION_DEFAULT;
+  // The virtual all-access view isn't a real collection tile, but its leader
+  // stores this slug - preserve it so the leader stays out of every real set.
+  if (text === ALL_ACCESS_COLLECTION) return ALL_ACCESS_COLLECTION;
   const direct = CARD_COLLECTIONS.find(entry => entry.slug === text);
   if (direct) return direct.slug;
   // Allow matching by display name too (older imports may have stored the name).
@@ -519,6 +556,8 @@ function normalizeCard(raw, category) {
     // existed have no value and fall back to Goldrush717's Bleach. DON!! cards
     // keep their own unregistered slug so they never inflate a real collection.
     collection: raw.donCard ? "don-cards" : normalizeCollectionSlug(raw.collection),
+    // Special all-access leader: every colour, builds from every collection.
+    omniLeader: Boolean(raw.omniLeader),
     effectScript: raw.effectScript || raw.script || "",
     imported: Boolean(raw.imported || raw.needsCoding),
     needsCoding: Boolean(raw.needsCoding),
@@ -804,6 +843,8 @@ function assembleCardPool(loadedCards, sharedCards, deleted) {
       && !isCardTombstoned(deleted, card));
 
   return dedupeCards([
+    // The all-access omni leader is always present, from code (never Firebase).
+    getOmniLeaderCard(),
     ...pooledCards,
     ...legacyCards,
     ...localProjectCards
@@ -4755,15 +4796,24 @@ function filteredCards() {
         card.category === "leader")
     : false;
 
+  // The all-access view merges EVERY collection into one grid (opened from the
+  // omni leader's tile). The collection gate is lifted there.
+  const inAllAccess = state.activeCollection === ALL_ACCESS_COLLECTION;
+
   return state.cards.filter(card => {
     // DON!! cards live in their own screen and must never appear in the normal
     // deck-building pool.
     if (card.donCard) return false;
 
-    // Collections gate everything: the grid only ever shows the collection the
-    // user opened from the picker. With no collection chosen nothing shows (the
-    // picker screen is displayed in its place).
-    if (!state.activeCollection || (card.collection || COLLECTION_DEFAULT) !== state.activeCollection) {
+    if (inAllAccess) {
+      // Show cards from every collection at once. (The omni leader itself has
+      // collection "all-access", so it appears here as a pickable leader.)
+    } else if (!state.activeCollection
+        || (card.collection || COLLECTION_DEFAULT) !== state.activeCollection) {
+      // Collections gate everything else: the grid only ever shows the collection
+      // the user opened from the picker. With no collection chosen nothing shows
+      // (the picker screen is displayed in its place). The omni leader never
+      // appears inside a normal collection.
       return false;
     }
 
@@ -4791,9 +4841,11 @@ function filteredCards() {
       && (!el.blockFilter.value || card.block === el.blockFilter.value)
       && (!state.rotationOnly || !/^test/i.test(card.cardNumber))
       // Once a leader is picked the grid is restricted to its colours, so what
-      // you see is what you can actually play. Leaders and tokens are exempt, and
-      // "View all" lifts the restriction entirely.
+      // you see is what you can actually play. Leaders and tokens are exempt,
+      // "View all" lifts the restriction entirely, and the all-access omni leader
+      // (every colour) can play anything.
       && (state.viewAll
+        || leader?.omniLeader
         || !leader
         || card.category === "leader"
         || card.category === "token"
@@ -5146,6 +5198,21 @@ function renderCollectionPicker() {
     note.innerHTML = `<span class="collection-loading-spinner"></span>Syncing uploaded cards…`;
     el.collectionPicker.appendChild(note);
   }
+
+  // Special all-access leader tile: opens EVERY collection at once (the omni
+  // leader plays any card, any colour). Placed first so it stands out.
+  const omniTile = document.createElement("button");
+  omniTile.type = "button";
+  omniTile.className = "collection-tile collection-tile-omni has-art";
+  omniTile.dataset.collection = ALL_ACCESS_COLLECTION;
+  omniTile.style.backgroundImage =
+    `linear-gradient(180deg, rgba(0,0,0,.1), rgba(0,0,0,.72)), url("${escapeAttr(OMNI_LEADER_IMAGE)}")`;
+  omniTile.innerHTML = `
+    <span class="collection-tile-name">Ichigo &amp; Luffy &amp; Naruto</span>
+    <span class="collection-tile-count">All collections</span>
+  `;
+  omniTile.addEventListener("click", () => openCollection(ALL_ACCESS_COLLECTION));
+  el.collectionPicker.appendChild(omniTile);
 
   CARD_COLLECTIONS.forEach(entry => {
     const tile = document.createElement("button");
