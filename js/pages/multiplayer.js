@@ -157,8 +157,15 @@ async function joinWithCode(code) {
 }
 
 // ── Lobby view ────────────────────────────────────────
-function openLobbyView() {
+function openLobbyView(preferredDeckId = "") {
     populateDecks(lobbyDeckSelect);
+    // Carry over the deck the player already picked (e.g. on the create screen)
+    // so entering the lobby doesn't silently reset their choice back to the first
+    // deck in the list.
+    if (preferredDeckId
+        && [...lobbyDeckSelect.options].some(o => o.value === preferredDeckId)) {
+        lobbyDeckSelect.value = preferredDeckId;
+    }
     clearError(mpLobbyError);
     mpLobbyMsg.textContent = "Choose your deck and ready up.";
     isReady = false;
@@ -428,8 +435,8 @@ btnConfirmCreate.addEventListener("click", async () => {
         currentRoomCode = created.roomCode;
         playerSlot = "p1";
 
-        // Save selected deck ready for ready-up
-        openLobbyView();
+        // Carry the deck chosen on the create screen into the lobby's picker.
+        openLobbyView(createDeckSelect.value);
 
         // Private rooms are joined by code, so always surface it to the host.
         lobbyCodeBox.classList.remove("hidden");

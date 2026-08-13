@@ -1513,7 +1513,11 @@ let onlineChatUnsubscribe = null;
 let renderedChatIds = new Set();
 
 function getOwnChatName() {
-    return playerSlot === "p2" ? "Player 2" : "Player 1";
+    if (isSpectator) return "Spectator";
+    // Use the player's chosen nickname (from the match's players node, via
+    // setupOnlinePlayerNames) rather than a hardcoded "Player 1/2".
+    const slot = playerSlot === "p2" ? "p2" : "p1";
+    return onlinePlayerLabels[slot] || (slot === "p2" ? "Player 2" : "Player 1");
 }
 
 function appendChatMessage(message) {
@@ -1674,6 +1678,8 @@ async function initializeSpectatorMatch() {
 
         setupOnlinePlayerNames();
         setupOnlineCosmetics();
+        // Spectators can read AND type in the match chat (as "Spectator").
+        setupOnlineChat();
 
         addGameLog(`Spectating online room ${roomCode}.`);
         updateOnlinePhaseButton();

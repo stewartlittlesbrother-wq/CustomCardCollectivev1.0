@@ -4028,9 +4028,13 @@ body {
     box-shadow:
         0 24px 70px rgba(0, 0, 0, .55),
         inset 0 0 0 1px rgba(255, 255, 255, .1);
-    transform: translate(-50%, -50%) scale(.92);
-    opacity: 0;
-    animation: turnBannerIn .34s cubic-bezier(.16, 1, .3, 1) forwards;
+    /* Resting state is VISIBLE, so the banner shows even if the entrance
+       animation never runs (reduced-motion, or a browser that drops the
+       keyframes). The animation is just a fade-in flourish over the top. That
+       reliance on the animation is why "YOUR TURN" stopped popping up. */
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+    animation: turnBannerIn .34s cubic-bezier(.16, 1, .3, 1);
     pointer-events: none;
 }
 
@@ -4054,11 +4058,13 @@ body {
     animation: turnBannerOut .45s ease forwards;
 }
 
+/* Entrance is a subtle scale "pop" only - it deliberately does NOT animate
+   opacity, so the banner is ALWAYS visible (opacity stays at its base 1) even if
+   the animation is disabled or doesn't run. That's what keeps "YOUR TURN" from
+   silently staying invisible. */
 @keyframes turnBannerIn {
-    to {
-        opacity: 1;
-        transform: translate(-50%, -50%) scale(1);
-    }
+    from { transform: translate(-50%, -50%) scale(.92); }
+    to   { transform: translate(-50%, -50%) scale(1); }
 }
 
 @keyframes turnBannerOut {

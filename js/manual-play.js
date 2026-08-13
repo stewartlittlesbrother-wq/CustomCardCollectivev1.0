@@ -3,6 +3,19 @@
 
 const NOTE_COLORS = ["#ffd93d", "#4fc3f7", "#81c784", "#ff8a65", "#ba68c8"];
 
+// The stage zone holds a single card. Playing/dropping a card onto it DISPLACES
+// whatever's already there - and the displaced card goes to the TRASH, it isn't
+// silently destroyed (that was the "the stage under it just disappears" bug).
+function placeCardOnStage(player, card) {
+    if (!player) return;
+    if (player.stage && player.stage !== card) {
+        (player.trash = player.trash || []).push(player.stage);
+        window.renderTrash?.();
+    }
+    player.stage = card;
+    window.renderStages?.();
+}
+
 const manualPlay = {
     state: {
         life: 0,
@@ -759,9 +772,7 @@ const manualPlay = {
                 return true;
             }
             if (e.target.closest(".stage-area")) {
-                if (player.stage) return false;
-                player.stage = card;
-                window.renderStages?.();
+                placeCardOnStage(player, card);
                 return true;
             }
             if (e.target.closest(".trash-area")) {
@@ -897,9 +908,8 @@ const manualPlay = {
                 window.renderCharacters?.();
                 window.renderDecks?.();
             } else if (stageArea) {
-                player.stage = card;
+                placeCardOnStage(player, card);
                 console.log("✓ Added to stage");
-                window.renderStages?.();
                 window.renderDecks?.();
             } else if (trashArea) {
                 if (!player.trash) player.trash = [];
@@ -987,9 +997,8 @@ const manualPlay = {
                 window.renderCharacters?.();
                 window.renderLifeCards?.();
             } else if (stageArea) {
-                player.stage = card;
+                placeCardOnStage(player, card);
                 console.log("✓ Added to stage");
-                window.renderStages?.();
                 window.renderLifeCards?.();
             } else if (trashArea) {
                 if (!player.trash) player.trash = [];
@@ -1115,9 +1124,8 @@ const manualPlay = {
                 window.renderCharacters?.();
                 needsHandRender = true;
             } else if (zone.classList.contains("stage-area")) {
-                player.stage = card;
+                placeCardOnStage(player, card);
                 console.log("✓ Added to stage");
-                window.renderStages?.();
                 needsHandRender = true;
             } else if (zone.classList.contains("trash-area")) {
                 if (!player.trash) player.trash = [];
@@ -1296,10 +1304,9 @@ const manualPlay = {
                 if (fromZoneType === "stage") window.renderStages?.();
                 if (fromZoneType === "trash") window.renderTrash?.();
             } else if (zone.classList.contains("stage-area")) {
-                player.stage = card;
+                placeCardOnStage(player, card);
                 console.log("✓ Added to stage");
-                window.renderStages?.();
-                
+
                 // Also render the old zone to clear it
                 if (fromZoneType === "characters") window.renderCharacters?.();
                 if (fromZoneType === "trash") window.renderTrash?.();
