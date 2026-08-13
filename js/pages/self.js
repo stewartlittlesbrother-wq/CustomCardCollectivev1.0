@@ -41,7 +41,15 @@ function altArtIndexForGame(card) {
 
 function cardArtSrc(card) {
     const list = cardArtListForGame(card);
-    return list[altArtIndexForGame(card)] || list[0] || cardBackImage;
+    // A synced card carries the OWNER'S chosen art index (see stripCardForSync),
+    // so an opponent (and spectators) see the art YOU picked - just like playing
+    // an alt art in real life. For cards that aren't synced (your own board,
+    // solo play) fall back to this device's own alt-art preference.
+    let idx = (card && Number.isInteger(card.artIndex))
+        ? card.artIndex
+        : altArtIndexForGame(card);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= list.length) idx = 0;
+    return list[idx] || list[0] || cardBackImage;
 }
 const donBackImage = "../images/basic/card-back-don.webp";
 const donImage = "../images/basic/card-front-don.webp";
@@ -1257,11 +1265,14 @@ async function syncOnlineStateFromLocal() {
 
     const publicKey = getOnlinePublicPlayerKey(ownPlayerKey);
 
+    // Write ONLY this player's own turn count, as a deep path key. Writing the
+    // whole playerTurns object (merged from our LAST-SEEN, often stale, copy of
+    // the opponent's count) meant every board action reverted the opponent's turn
+    // number - which corrupted the turn-start guard and made turns double-fire,
+    // skip draws/DON, and pass to the wrong player. A path key touches only our
+    // slot and never clobbers theirs.
     const publicState = {
-        playerTurns: {
-            ...(onlinePublicState?.playerTurns || {}),
-            [playerSlot]: Number(ownPlayer.turns || 0)
-        },
+        [`playerTurns/${playerSlot}`]: Number(ownPlayer.turns || 0),
         [publicKey]: createPublicPlayerStateFromLocal(ownPlayer)
     };
 
@@ -1579,7 +1590,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-8");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-9");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1642,7 +1653,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-8");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-9");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1913,11 +1924,20 @@ async function handleOnlinePassTurn() {
                 return;
             }
 
-            await syncOnlineStateFromLocal();
-            await syncOnlineAllPublicBoardsFromLocal();
+            // Push OUR final board only. Never write the opponent's board here:
+            // our copy of it is a stale reflection, and writing it back clobbered
+            // their real state. Best-effort too - a failed board sync must NOT
+            // stop the turn from passing, or the game freezes on your turn.
+            try {
+                await syncOnlineStateFromLocal();
+            } catch (syncError) {
+                console.warn("End-of-turn board sync failed (passing turn anyway):", syncError);
+            }
         }
 
-        // Multiplayer turn owner writes private/public snapshot, then flips public turn pointer.
+        // Multiplayer turn owner flips the public turn pointer. This transaction is
+        // the authoritative turn change, so it runs even if the board sync above
+        // hiccupped.
         const result = await onlineMultiplayerService.passTurn(roomCode, onlinePublicState.currentPlayer);
 
         if (!result?.committed) {

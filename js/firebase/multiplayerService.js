@@ -35,10 +35,31 @@ function cloneData(value) {
 // made a single match document several megabytes and every sync painfully slow.
 // Never send artwork over the wire - strip it before writing and rebuild it from
 // the local card database on read (see hydrateSyncedCard).
+// This device's chosen alt-art index for a card number (the deck-builder pick).
+// A legacy boolean `true` means "the one alt art" = index 1. Runs on the card
+// OWNER's device, so the choice can travel with the card to the opponent.
+const ALT_ART_PREFS_KEY = "custom-cards-alt-art-prefs-v1";
+function ownAltArtIndex(cardNumber) {
+    if (!cardNumber) return 0;
+    try {
+        const prefs = JSON.parse(localStorage.getItem(ALT_ART_PREFS_KEY) || "{}") || {};
+        const raw = prefs[cardNumber];
+        const idx = raw === true ? 1 : Number(raw) || 0;
+        return Number.isInteger(idx) && idx > 0 ? idx : 0;
+    } catch { return 0; }
+}
+
 export function stripCardForSync(card) {
     if (!card || typeof card !== "object") return card;
 
     const slim = { ...card };
+
+    // Carry the OWNER'S chosen art so the opponent sees the art you picked, just
+    // like playing an alt-art card in real life. Only sent when it's not the
+    // default (0), to keep the payload tiny; the opponent's cardArtSrc uses it.
+    const artIndex = ownAltArtIndex(card.cardNumber || card.id);
+    if (artIndex > 0) slim.artIndex = artIndex;
+    else delete slim.artIndex;
     // Only base64 data URLs are too large to transmit (~88KB each). A plain
     // image URL is a few dozen bytes, so keep it - that way a custom card still
     // renders for an opponent whose local card pool doesn't contain it.
@@ -49,6 +70,10 @@ export function stripCardForSync(card) {
     if (typeof slim.altArt === "string" && slim.altArt.startsWith("data:")) {
         delete slim.altArt;
     }
+    // The alt-art LIST can hold several big base64 images. Never send it - the
+    // opponent rebuilds it from their own copy of the card (by number) and then
+    // applies artIndex, so they see the exact art you chose.
+    delete slim.altArts;
     delete slim.effects;
     delete slim.aliases;
 
@@ -73,9 +98,9 @@ export function stripCardsForSync(cards) {
 // database so rendering is unchanged despite the slim network payload.
 export function hydrateSyncedCard(card) {
     if (!card || typeof card !== "object") return card;
-    // Fast path: image present AND alt art not stripped (undefined) - nothing to
-    // rebuild. A stripped base64 alt art comes back as undefined and needs the DB.
-    if (card.image && card.altArt !== undefined) return card;
+    // Fast path: image, single alt art AND the alt-art list all present - nothing
+    // to rebuild. Any of them stripped (undefined) means we need the local DB.
+    if (card.image && card.altArt !== undefined && card.altArts !== undefined) return card;
 
     const key = card.cardNumber || card.id;
 
@@ -103,6 +128,11 @@ export function hydrateSyncedCard(card) {
         ...card,
         image: lookup.image || card.image,
         altArt: card.altArt || lookup.altArt || "",
+        // Rebuild the alt-art list from the local card so the carried artIndex
+        // resolves to the same art the owner picked.
+        altArts: (Array.isArray(card.altArts) && card.altArts.length)
+            ? card.altArts
+            : (Array.isArray(lookup.altArts) ? lookup.altArts : []),
         effects: card.effects || lookup.effects || [],
         aliases: card.aliases || lookup.aliases || []
     };
@@ -257,7 +287,12 @@ function createPublicCardSnapshot(card) {
         effects: card.effects || [],
         instanceId: card.instanceId,
         state: card.state || "active",
-        faceUp: Boolean(card.faceUp)
+        faceUp: Boolean(card.faceUp),
+        // Carry the owner's chosen art (e.g. a revealed life card) so the opponent
+        // sees the alt you picked. 0/default is omitted to keep it slim.
+        ...(ownAltArtIndex(card.cardNumber || card.id) > 0
+            ? { artIndex: ownAltArtIndex(card.cardNumber || card.id) }
+            : {})
     };
 }
 
