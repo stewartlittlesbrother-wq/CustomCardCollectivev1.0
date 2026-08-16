@@ -2533,8 +2533,14 @@ function fitBoardToViewport() {
     const railPx = name => parseFloat(rootStyle.getPropertyValue(name)) || 0;
     const railsWidth = railPx("--tools-w") + railPx("--pile-rail-w") + railPx("--preview-rail-w");
 
-    const availableWidth = window.innerWidth - railsWidth - MARGIN;
-    const availableHeight = window.innerHeight - MARGIN;
+    // Use the LAYOUT viewport (clientWidth/Height). On phones we render inside a
+    // fixed-width (1980px) viewport so the whole desktop layout scales to fit;
+    // window.innerWidth can lag that, but documentElement.clientWidth is the real
+    // layout width, so the board sizes correctly against the rails either way.
+    const vw = document.documentElement.clientWidth || window.innerWidth;
+    const vh = document.documentElement.clientHeight || window.innerHeight;
+    const availableWidth = vw - railsWidth - MARGIN;
+    const availableHeight = vh - MARGIN;
     const scale = Math.max(
         0.15,
         Math.min(availableWidth / DESIGN_WIDTH, availableHeight / DESIGN_HEIGHT, 1)
@@ -2549,7 +2555,7 @@ function fitBoardToViewport() {
         // offsetHeight is the pre-transform layout height, so measuring here does
         // not feed back into the scale we're about to set.
         const natural = groups.reduce((h, g) => h + g.offsetHeight, 0) + Math.max(0, groups.length - 1) * 12 + 24;
-        const pileScale = natural > 0 ? Math.min(1, (window.innerHeight - 16) / natural) : 1;
+        const pileScale = natural > 0 ? Math.min(1, (vh - 16) / natural) : 1;
         document.documentElement.style.setProperty("--pile-scale", pileScale.toFixed(4));
     }
 

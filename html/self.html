@@ -5,6 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VS Self - Custom Cards</title>
 
+    <!-- On phones/tablets, render the FULL desktop game layout in a fixed-width
+         viewport so the browser scales the whole thing to fit the screen - it
+         looks 1:1 with desktop, just smaller, instead of the squished mobile
+         reflow. The wide viewport also stops the mobile @media rules from firing.
+         Runs before the stylesheets/body so there's no layout flash. -->
+    <script>
+    (function () {
+        try {
+            if (window.matchMedia && window.matchMedia("(max-width: 820px)").matches) {
+                var vp = document.querySelector('meta[name="viewport"]');
+                if (vp) vp.setAttribute("content", "width=1980, user-scalable=yes");
+            }
+        } catch (e) {}
+    })();
+    </script>
+
     <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
     <link rel="stylesheet" href="../css/style.css">
     <link rel="stylesheet" href="../css/self.css?v=bleach-effects-21">
@@ -272,7 +288,7 @@
     <script src="../js/cards/decks.js?v=creation-13&t=20260714172304"></script>
     <script src="../js/core/deckParser.js?t=20260714172304"></script>
 
-    <script src="../js/pages/self.js?v=spectate-38&t=20260810000015"></script>
+    <script src="../js/pages/self.js?v=spectate-39&t=20260810000016"></script>
   <script src="../js/rotate-prompt.js"></script>
 
   <script src="../js/version.js"></script>
