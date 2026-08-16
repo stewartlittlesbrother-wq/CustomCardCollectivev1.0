@@ -380,3 +380,22 @@
     color: #fff;
     font-weight: 600;
 }
+
+/* ─── Touch: kill double-tap-to-zoom ────────────────────────────────────────
+   On a phone the browser's native double-tap gesture zooms the page and eats
+   the second tap, so double-click actions (rest a card, rest DON) never fire
+   and every double-tap just annoyingly zooms. `manipulation` disables ONLY the
+   double-tap zoom (and the old 300ms tap delay) while keeping pinch-to-zoom and
+   panning, so two taps now register as two real clicks and resting works.
+   Inert on desktop (touch-action does nothing without a touchscreen). */
+.game-layout,
+.game-layout * {
+    touch-action: manipulation;
+}
+
+/* Cards we drag with our own touch shim: tell the browser hands-off entirely so
+   a drag is never mistaken for a page pan. Placed after the rule above so it
+   wins for draggable elements. Tap still fires a click, so resting is unaffected. */
+.game-layout [draggable="true"] {
+    touch-action: none;
+}
