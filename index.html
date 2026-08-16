@@ -6,9 +6,23 @@
        down to fit (i.e. "zoomed out") instead of a cramped device-width layout.
        Desktop browsers ignore this and use their real window width. -->
   <meta name="viewport" content="width=1280">
+  <!-- Tag touch devices so the page can SCROLL (the desktop layout locks to
+       100vh with overflow:hidden, which clips everything below the fold on a
+       short phone screen). Runs before render so there's no flash. Classes (not
+       viewport changes) are honored by iOS Safari too. -->
+  <script>
+  (function () {
+    try {
+      if ((window.matchMedia && (matchMedia("(pointer: coarse)").matches || matchMedia("(any-pointer: coarse)").matches))
+          || navigator.maxTouchPoints > 0 || "ontouchstart" in window) {
+        document.documentElement.classList.add("touch-device");
+      }
+    } catch (e) {}
+  })();
+  </script>
   <title>Custom Cards Simulator</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=creation-28">
+  <link rel="stylesheet" href="styles.css?v=creation-29">
 </head>
 <body>
   <div class="app-shell">

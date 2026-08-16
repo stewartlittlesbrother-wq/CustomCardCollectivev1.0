@@ -1,12 +1,18 @@
 /* ── Root & background ─────────────────────────────── */
 .mp-root {
     position: relative;
-    overflow: hidden;
+    /* Scroll vertically instead of clipping: when the lobby is taller than the
+       screen (e.g. a short landscape phone), "safe center" top-aligns it so the
+       whole thing - including the Join/Create buttons - can be scrolled to,
+       rather than being centred-and-clipped and unreachable. */
+    overflow-x: hidden;
+    overflow-y: auto;
     min-height: 100vh;
     display: flex;
-    align-items: center;
+    align-items: safe center;
     justify-content: center;
     padding: 2rem 1rem;
+    box-sizing: border-box;
 }
 
 /* Faded character artwork flanking the lobby, matching the home screen:

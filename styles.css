@@ -6192,3 +6192,55 @@ button.trash-area {
 }
 .card-alt-btn:hover { transform: scale(1.06); }
 .card-image { position: relative; }
+
+/* ── Touch devices: let the page SCROLL ────────────────────────────────────
+   The deck builder is a fixed-100vh app with internal-scroll panels - lovely on
+   a tall desktop, but on a short phone screen (especially landscape) it locks
+   everything to one screen with overflow:hidden, so the sidebar, the card grid,
+   and everything below the fold get cut off with no way to reach them.
+   On touch devices (detected by JS -> html.touch-device) we unlock the heights
+   and let the whole page scroll, so nothing is cut off. Desktop is untouched. */
+html.touch-device,
+html.touch-device body {
+    height: auto !important;
+    min-height: 100vh;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+}
+html.touch-device .app-shell {
+    height: auto !important;
+    min-height: 100vh;
+    overflow: visible !important;
+}
+html.touch-device main {
+    overflow: visible !important;
+}
+html.touch-device .view.active {
+    height: auto !important;
+    min-height: 0;
+}
+/* Panels that were clipped to the short viewport now flow with the scrolling
+   page so their full content is reachable. */
+html.touch-device .deck-panel,
+html.touch-device .filter-stack,
+html.touch-device .deck-table,
+html.touch-device .creation-layout,
+html.touch-device .don-deck-panel {
+    position: static !important;
+    max-height: none !important;
+    overflow: visible !important;
+}
+/* The collection grid can hold thousands of cards, so keep it scrolling inside
+   a sensible window rather than dumping everything into the page. */
+html.touch-device .card-grid,
+html.touch-device .collection-picker {
+    max-height: 78vh;
+    overflow-y: auto;
+}
+/* Pop-up dialogs (card inspect, importers, etc.) fit the screen and scroll
+   inside instead of running off the bottom. */
+html.touch-device dialog {
+    max-width: 96vw;
+    max-height: 94vh;
+    overflow: auto;
+}
