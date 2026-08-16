@@ -6140,7 +6140,15 @@ function bindEvents() {
   el.cardGrid.addEventListener("click", event => {
     const action = event.target.closest("[data-action]")?.dataset.action;
     const article = event.target.closest(".card-tile");
-    if (!action || !article) return;
+    if (!article) return;
+    // On touch devices, tapping the card ART (not one of the little buttons) adds
+    // 4 copies (or sets the leader). The per-card buttons are tiny and hard to hit
+    // on a phone, and adding a playset is the common action.
+    if (!action && document.documentElement.classList.contains("touch-device")) {
+      addFourToDeck(article.dataset.id);
+      return;
+    }
+    if (!action) return;
     const card = getCard(article.dataset.id);
     if (!card) return;
     if (action === "preview" || action === "inspect") previewCard(card);

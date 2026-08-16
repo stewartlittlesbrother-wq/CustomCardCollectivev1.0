@@ -1970,3 +1970,125 @@ if (document.readyState === "loading") {
     // DOM already loaded
     setTimeout(initManualPlay, 100);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Touch drag-and-drop
+//
+// HTML5 drag events (dragstart/dragover/drop) NEVER fire from a touchscreen, so
+// on a phone the board is completely dead - you can't move a single card. This
+// shim watches touches on any [draggable="true"] card and replays the exact
+// DragEvents the existing handlers already listen for, sharing ONE DataTransfer
+// between the synthetic dragstart (which the source handler fills in) and the
+// synthetic drop (which the document handler reads back). A finger-following
+// ghost shows what you're carrying. Taps (no real movement) are left alone so
+// click / double-tap / DON-attach still work.
+// ─────────────────────────────────────────────────────────────────────────────
+(function installTouchDragSupport() {
+    const isTouch = ("ontouchstart" in window)
+        || navigator.maxTouchPoints > 0
+        || (window.matchMedia && matchMedia("(pointer: coarse)").matches);
+    if (!isTouch) return;
+
+    // Bail out cleanly on ancient browsers that can't build these objects.
+    try { new DataTransfer(); new DragEvent("drag"); }
+    catch (_) { return; }
+
+    const MOVE_THRESHOLD = 8;   // px of finger travel before it counts as a drag
+    let pending = null;         // { el, startX, startY } - touch is down, not yet a drag
+    let drag = null;            // { el, dt, ghost, w, h } - a drag is in progress
+
+    const draggableFrom = (target) =>
+        (target && target.closest) ? target.closest('[draggable="true"]') : null;
+
+    function makeDragEvent(type, x, y, dt) {
+        return new DragEvent(type, {
+            bubbles: true, cancelable: true, dataTransfer: dt,
+            clientX: x, clientY: y
+        });
+    }
+
+    function startDrag(sourceEl, x, y) {
+        const dt = new DataTransfer();
+        // Let the element's own dragstart handler populate the DataTransfer.
+        sourceEl.dispatchEvent(makeDragEvent("dragstart", x, y, dt));
+
+        const rect = sourceEl.getBoundingClientRect();
+        const ghost = sourceEl.cloneNode(true);
+        ghost.classList.add("touch-drag-ghost");
+        ghost.setAttribute("aria-hidden", "true");
+        ghost.style.cssText =
+            "position:fixed;left:0;top:0;margin:0;pointer-events:none;" +
+            "opacity:.85;z-index:2147483000;box-shadow:0 8px 24px rgba(0,0,0,.5);" +
+            "width:" + rect.width + "px;height:" + rect.height + "px;";
+        document.body.appendChild(ghost);
+
+        drag = { el: sourceEl, dt, ghost, w: rect.width, h: rect.height };
+        moveGhost(x, y);
+    }
+
+    function moveGhost(x, y) {
+        drag.ghost.style.transform =
+            "translate(" + (x - drag.w / 2) + "px," + (y - drag.h / 2) + "px)";
+    }
+
+    function elementUnder(x, y) {
+        drag.ghost.style.display = "none";
+        const under = document.elementFromPoint(x, y);
+        drag.ghost.style.display = "";
+        return under;
+    }
+
+    document.addEventListener("touchstart", (e) => {
+        if (drag || e.touches.length !== 1) return;
+        const el = draggableFrom(e.target);
+        if (!el) return;
+        // On-card buttons / inputs should still tap normally.
+        if (e.target.closest("button, input, select, textarea, a")) return;
+        const t = e.touches[0];
+        pending = { el, startX: t.clientX, startY: t.clientY };
+    }, { passive: true });
+
+    document.addEventListener("touchmove", (e) => {
+        if (!pending && !drag) return;
+        const t = e.touches[0];
+        if (!t) return;
+
+        if (pending && !drag) {
+            const dx = t.clientX - pending.startX;
+            const dy = t.clientY - pending.startY;
+            if (Math.hypot(dx, dy) < MOVE_THRESHOLD) return;   // still just a tap
+            startDrag(pending.el, t.clientX, t.clientY);
+            pending = null;
+        }
+
+        if (drag) {
+            e.preventDefault();   // stop the page scrolling while dragging a card
+            moveGhost(t.clientX, t.clientY);
+            const under = elementUnder(t.clientX, t.clientY);
+            if (under) {
+                try { under.dispatchEvent(makeDragEvent("dragover", t.clientX, t.clientY, drag.dt)); }
+                catch (_) {}
+            }
+        }
+    }, { passive: false });
+
+    function endDrag(e) {
+        pending = null;
+        if (!drag) return;
+        const t = (e.changedTouches && e.changedTouches[0]) || null;
+        if (t) {
+            const under = elementUnder(t.clientX, t.clientY);
+            if (under) {
+                try { under.dispatchEvent(makeDragEvent("drop", t.clientX, t.clientY, drag.dt)); }
+                catch (_) {}
+            }
+        }
+        try { drag.el.dispatchEvent(makeDragEvent("dragend", t ? t.clientX : 0, t ? t.clientY : 0, drag.dt)); }
+        catch (_) {}
+        drag.ghost.remove();
+        drag = null;
+    }
+
+    document.addEventListener("touchend", endDrag, { passive: true });
+    document.addEventListener("touchcancel", endDrag, { passive: true });
+})();

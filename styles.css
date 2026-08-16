@@ -6244,3 +6244,8 @@ html.touch-device dialog {
     max-height: 94vh;
     overflow: auto;
 }
+/* The floating hover-preview is a mouse feature - on touch it just flickers and
+   shoves the layout around when you tap a card, so hide it. */
+html.touch-device .builder-hover-preview {
+    display: none !important;
+}
