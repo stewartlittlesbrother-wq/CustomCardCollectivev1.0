@@ -1462,6 +1462,9 @@ function applyTurnStartToPlayer(player, { isFirstTurn, skipDraw, donGain }) {
         player.don = Math.min((player.don || 0) + donGain, 10);
         addGameLog(`${label}'s turn starts: +${donGain} DON!!.`);
     }
+
+    // Card click for the start-of-turn draw / DON!! gain.
+    if ((settings.autoDraw && !skipDraw) || settings.autoAddDon) playCardSound();
 }
 
 // The board markup is authored from Player 1's seat: the bottom (near) section
@@ -2421,6 +2424,7 @@ async function initializeGamePage() {
     applyBoardDisplaySettings();
     setupExtraSlotsToggle();
     setupDiceRoller();
+    setupSfxToggle();
     setupDeckViewerInspect();
     try {
         await loadCardDatabase();
@@ -2704,10 +2708,48 @@ function skipCurrentBlockStep(defenderPlayerKey, onResolve) {
 }
 
 // =========================
-// Win / lose sound effects
+// Sound effects
 // =========================
-// Synthesized with the Web Audio API so there are no audio files to ship, host,
-// or worry about the size of. Fails silently if audio isn't allowed yet.
+// A master mute toggle (persisted per device) covers ALL game sounds - the card
+// click on every action AND the win/lose jingles.
+const SFX_MUTED_KEY = "custom-cards-sim-sfx-muted-v1";
+function sfxMuted() {
+    try { return localStorage.getItem(SFX_MUTED_KEY) === "1"; } catch { return false; }
+}
+function setSfxMuted(muted) {
+    try { localStorage.setItem(SFX_MUTED_KEY, muted ? "1" : "0"); } catch {}
+    updateSfxToggleLabel();
+}
+function updateSfxToggleLabel() {
+    const btn = document.getElementById("toggleSoundTool");
+    if (btn) btn.textContent = sfxMuted() ? "🔇 Sound: Off" : "🔊 Sound: On";
+}
+function setupSfxToggle() {
+    const btn = document.getElementById("toggleSoundTool");
+    if (!btn) return;
+    updateSfxToggleLabel();
+    btn.addEventListener("click", () => setSfxMuted(!sfxMuted()));
+}
+
+// Short "handling a card" click, played on card actions (move / draw / DON!! /
+// life / etc). Two recordings, chosen at random so it's not repetitive.
+const CARD_SFX_URLS = ["../sounds/card-1.mp3", "../sounds/card-2.mp3"];
+// Warm the browser cache so the first play isn't delayed.
+CARD_SFX_URLS.forEach(url => { try { const a = new Audio(url); a.preload = "auto"; } catch {} });
+
+function playCardSound() {
+    if (sfxMuted()) return;
+    try {
+        const url = CARD_SFX_URLS[Math.floor(Math.random() * CARD_SFX_URLS.length)];
+        const audio = new Audio(url);   // fresh element so rapid actions can overlap
+        audio.volume = 0.45;
+        audio.play().catch(() => {});   // ignore "not allowed yet" - never throws
+    } catch {}
+}
+// So manual-play.js's drop handlers can trigger the same click.
+window.playCardSound = playCardSound;
+
+// ── Win / lose jingles (synthesized with the Web Audio API, no files) ──
 let _sfxCtx = null;
 function getSfxContext() {
     try {
@@ -2721,6 +2763,7 @@ function getSfxContext() {
 
 // Play a little sequence of tones: [{ freq, start, dur, type, gain }].
 function playTones(notes) {
+    if (sfxMuted()) return;
     const ctx = getSfxContext();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -5651,6 +5694,7 @@ function renderPlayerLife(player, lifeAreaId) {
                 btn.onmouseleave = () => btn.style.backgroundColor = "transparent";
                 btn.onclick = () => {
                     opt.action();
+                    playCardSound();   // life card action (take/flip/move a life card)
                     document.body.removeChild(menu);
                 };
                 menu.appendChild(btn);

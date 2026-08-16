@@ -709,6 +709,9 @@ const manualPlay = {
                 handleBoardCardDrop(e, cardInstanceId, playerKey);
             }
 
+            // A card was handled - play the "moving a card" click.
+            window.playCardSound?.();
+
             // Propagate the resulting state to the opponent (no-op in local play).
             window.scheduleOnlineBoardSync?.();
         }, false);
