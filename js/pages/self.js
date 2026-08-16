@@ -2704,6 +2704,69 @@ function skipCurrentBlockStep(defenderPlayerKey, onResolve) {
 }
 
 // =========================
+// Win / lose sound effects
+// =========================
+// Synthesized with the Web Audio API so there are no audio files to ship, host,
+// or worry about the size of. Fails silently if audio isn't allowed yet.
+let _sfxCtx = null;
+function getSfxContext() {
+    try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return null;
+        if (!_sfxCtx) _sfxCtx = new Ctx();
+        if (_sfxCtx.state === "suspended") _sfxCtx.resume();
+        return _sfxCtx;
+    } catch { return null; }
+}
+
+// Play a little sequence of tones: [{ freq, start, dur, type, gain }].
+function playTones(notes) {
+    const ctx = getSfxContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    notes.forEach(n => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = n.type || "triangle";
+        osc.frequency.value = n.freq;
+        const t0 = now + (n.start || 0);
+        const dur = n.dur || 0.18;
+        const peak = n.gain != null ? n.gain : 0.18;
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(t0);
+        osc.stop(t0 + dur + 0.03);
+    });
+}
+
+// Happy rising arpeggio (C-E-G-C).
+function playWinSound() {
+    playTones([
+        { freq: 523.25, start: 0.00, dur: 0.16 },
+        { freq: 659.25, start: 0.12, dur: 0.16 },
+        { freq: 783.99, start: 0.24, dur: 0.16 },
+        { freq: 1046.50, start: 0.36, dur: 0.40, gain: 0.22 }
+    ]);
+}
+
+// Sad falling "wah-wah" (G-E-C on a softer sawtooth).
+function playLoseSound() {
+    playTones([
+        { freq: 392.00, start: 0.00, dur: 0.24, type: "sawtooth", gain: 0.13 },
+        { freq: 329.63, start: 0.20, dur: 0.24, type: "sawtooth", gain: 0.13 },
+        { freq: 261.63, start: 0.40, dur: 0.55, type: "sawtooth", gain: 0.13 }
+    ]);
+}
+
+function playOutcomeSound(outcomeText) {
+    if (isSpectator) return;                    // spectators just watch
+    if (outcomeText === "You Lost") playLoseSound();
+    else playWinSound();                        // "You Won", or a solo game ending
+}
+
+// =========================
 // Game Over UI
 // =========================
 
@@ -2711,6 +2774,9 @@ function skipCurrentBlockStep(defenderPlayerKey, onResolve) {
 // their own seat ("You Won" / "You Lost") instead of a player name.
 function showGameOverPopup(winnerPlayer, reasonTitle = "Victory", reasonText = "", outcomeText = "") {
     removeGameOverPopup();
+
+    // Little celebratory / consolation jingle to match the result.
+    playOutcomeSound(outcomeText);
 
     const overlay = document.createElement("div");
     overlay.className = "game-over-overlay";
