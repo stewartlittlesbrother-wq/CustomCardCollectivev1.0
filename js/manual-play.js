@@ -1721,57 +1721,63 @@ function resolveBoardCard(el) {
     return null;
 }
 
-// A stable, render-independent key identifying a card's current position on the
-// board, so notes/arrows can be reapplied after self.js rebuilds a zone's DOM.
+// Identify the CARD a note/arrow is attached to by its instanceId - "card:<id>".
+// Binding to the card (not the board slot/zone) means the note/arrow FOLLOWS the
+// card when it moves slots, gets replaced, or changes zones, instead of sticking
+// to the empty slot behind it.
 function getAnnotationTargetKey(el) {
-    const charSlot = el.closest(".character-slot");
-    if (charSlot) {
-        if (!charSlot.querySelector("img")) return null; // empty slot - nothing to attach to
-        const playerKey = charSlot.getAttribute("data-player");
-        const slotIndex = charSlot.getAttribute("data-slot");
-        if (playerKey && slotIndex !== null) return `${playerKey}:character:${slotIndex}`;
-    }
-
-    const leaderCard = el.closest(".board-leader-card");
-    if (leaderCard) {
-        const playerKey = leaderCard.getAttribute("data-player");
-        if (playerKey) return `${playerKey}:leader`;
-    }
-
-    const stageCard = el.closest(".board-stage-card");
-    if (stageCard) {
-        const playerKey = stageCard.getAttribute("data-player");
-        if (playerKey) return `${playerKey}:stage`;
-    }
-
+    // Hand cards carry their instance id directly on the element.
     const handCard = el.closest(".hand-card[data-card-instance-id]");
     if (handCard) {
-        const instanceId = handCard.getAttribute("data-card-instance-id");
-        if (instanceId) return `hand:${instanceId}`;
+        const id = handCard.getAttribute("data-card-instance-id");
+        return id ? `card:${id}` : null;
     }
-
+    // Board cards (character / leader / stage): look up the real card object.
+    const info = resolveBoardCard(el);
+    if (info?.card?.instanceId) return `card:${info.card.instanceId}`;
     return null;
 }
 
+// Find the DOM element for an annotation key, wherever that card currently is.
 function resolveAnnotationTargetElement(key) {
     if (!key) return null;
-    const parts = key.split(":");
 
+    // Card-bound keys: locate the card by instance id across hand and board.
+    if (key.startsWith("card:")) {
+        const instanceId = key.slice(5);
+        const handEl = document.querySelector(`.hand-card[data-card-instance-id="${instanceId}"]`);
+        if (handEl) return handEl;
+        if (typeof gameState !== "undefined" && gameState) {
+            for (const pk of ["player1", "player2"]) {
+                const player = gameState[pk];
+                if (!player) continue;
+                if (player.leader?.instanceId === instanceId)
+                    return document.querySelector(`.board-leader-card[data-player="${pk}"]`);
+                if (player.stage?.instanceId === instanceId)
+                    return document.querySelector(`.board-stage-card[data-player="${pk}"]`);
+                const idx = (player.characters || []).findIndex(c => c?.instanceId === instanceId);
+                if (idx !== -1) {
+                    const slot = document.querySelector(`.character-slot[data-player="${pk}"][data-slot="${idx}"]`);
+                    return slot ? slot.querySelector("img") : null;
+                }
+            }
+        }
+        return null;
+    }
+
+    // Legacy position-based keys, kept so a mid-rollout version mismatch (one
+    // client still sending old keys) degrades gracefully instead of erroring.
+    const parts = key.split(":");
     if (parts[0] === "hand") {
         return document.querySelector(`.hand-card[data-card-instance-id="${parts[1]}"]`);
     }
-
     const [playerKey, kind, slotIndex] = parts;
-    if (kind === "leader") {
-        return document.querySelector(`.board-leader-card[data-player="${playerKey}"]`);
-    }
+    if (kind === "leader") return document.querySelector(`.board-leader-card[data-player="${playerKey}"]`);
     if (kind === "character") {
         const slot = document.querySelector(`.character-slot[data-player="${playerKey}"][data-slot="${slotIndex}"]`);
         return slot ? slot.querySelector("img") : null;
     }
-    if (kind === "stage") {
-        return document.querySelector(`.board-stage-card[data-player="${playerKey}"]`);
-    }
+    if (kind === "stage") return document.querySelector(`.board-stage-card[data-player="${playerKey}"]`);
     return null;
 }
 
