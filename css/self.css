@@ -4790,3 +4790,22 @@ body.extra-slots-off .extra-slots-wrap { display: none !important; }
 .don-choice-btn small {
     opacity: .65;
 }
+
+/* ── Touch: bigger card zoom ────────────────────────────────────────────────
+   Phones render the whole board scaled down; it ends up height-bound, leaving
+   horizontal slack on the right rail. So on touch we widen the preview rail into
+   that slack AND give the card most of the panel's height, so the zoomed-in
+   art/text is actually readable on a small screen. Desktop keeps the compact
+   400px rail. --preview-rail-w is read by fitBoardToViewport() (which reruns on
+   load/resize, after the touch-device class is set in <head>), so the play field
+   still sizes correctly and does not shrink - it just fills less of the slack. */
+html.touch-device {
+    --preview-rail-w: 560px;
+}
+html.touch-device .card-preview {
+    flex: 1 1 80%;
+}
+html.touch-device .game-log {
+    flex: 1 1 20%;
+    min-height: 120px;
+}

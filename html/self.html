@@ -12,9 +12,23 @@
     <meta name="viewport" content="width=1980, user-scalable=yes">
     <title>VS Self - Custom Cards</title>
 
+    <!-- Tag touch devices so phone-only tweaks (e.g. a larger card-preview rail)
+         can target them without touching the desktop layout. Class changes are
+         honored by iOS Safari; runs before render so there's no flash. -->
+    <script>
+    (function () {
+      try {
+        if ((window.matchMedia && (matchMedia("(pointer: coarse)").matches || matchMedia("(any-pointer: coarse)").matches))
+            || navigator.maxTouchPoints > 0 || "ontouchstart" in window) {
+          document.documentElement.classList.add("touch-device");
+        }
+      } catch (e) {}
+    })();
+    </script>
+
     <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
     <link rel="stylesheet" href="../css/style.css">
-    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-21">
+    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-22">
     <link rel="stylesheet" href="../css/manual-play.css?v=manual-4">
 </head>
 <body>
