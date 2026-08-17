@@ -141,9 +141,25 @@ function bundledCardKeys() {
     return bundledKeysPromise;
 }
 
+// Which collection a storage key belongs to. Keys are "number__collection"
+// (see cardLibraryKey); a legacy number-only key has no collection.
+function keyInCollection(key, sanitizedCollection) {
+    return sanitizedCollection && key.endsWith(`__${sanitizedCollection}`);
+}
+
 // Fetch the shared library, downloading only what changed since the last visit.
 // Returns { cards, fetched, cached } so callers can report what happened.
-export async function loadSharedCards() {
+//
+// options:
+//   getPriority()  - optional, returns the collection slug the user is looking
+//                    at RIGHT NOW (re-read before every batch). Its cards are
+//                    downloaded first so an opened collection fills in fast even
+//                    while the rest of the library is still syncing.
+//   onProgress({cards, deleted}) - optional, called after each batch with every
+//                    card resolved so far, so the pool can paint progressively
+//                    instead of waiting for the whole download to finish.
+export async function loadSharedCards(options = {}) {
+    const { getPriority, onProgress } = options;
     await waitForUser();
 
     const indexSnapshot = await get(ref(database, INDEX_PATH));
@@ -184,10 +200,35 @@ export async function loadSharedCards() {
     // (e.g. right after a cache-format bump) meant waiting on hundreds of
     // requests back-to-back. Batching keeps it fast without opening an unbounded
     // number of sockets at once.
+    // Build a partial "cards so far" snapshot from whatever's resolved in
+    // cachedByKey, for streaming to the caller between batches.
+    const snapshotCardsSoFar = () => liveKeys.map(key => {
+        const card = cachedByKey.get(key);
+        if (card) card.__storageKey = key;
+        return card;
+    }).filter(Boolean);
+
     const downloaded = [];
     const CONCURRENCY = 16;
-    for (let i = 0; i < stale.length; i += CONCURRENCY) {
-        const batch = stale.slice(i, i + CONCURRENCY);
+    // A live queue (not a fixed-order loop) so we can re-sort by the collection
+    // the user is currently viewing BEFORE each batch - open a collection while
+    // this is running and its cards jump the queue.
+    const remaining = stale.slice();
+
+    // Cached cards are already in hand, so paint those immediately - the open
+    // collection may be fully cached and can show before any download runs.
+    if (onProgress && cached.length) {
+        try { onProgress({ cards: snapshotCardsSoFar(), deleted }); } catch (_) {}
+    }
+
+    while (remaining.length) {
+        const pri = getPriority ? sanitizeKeyPart(getPriority() || "") : "";
+        if (pri) {
+            // Matching-collection keys first; order among equals is preserved.
+            remaining.sort((a, b) =>
+                (keyInCollection(a, pri) ? 0 : 1) - (keyInCollection(b, pri) ? 0 : 1));
+        }
+        const batch = remaining.splice(0, CONCURRENCY);
         const results = await Promise.all(batch.map(key =>
             get(ref(database, `${CARDS_PATH}/${key}`))
                 .then(snapshot => [key, snapshot.val()])
@@ -200,6 +241,10 @@ export async function loadSharedCards() {
             card[CACHE_KEY_PATH] = key;
             downloaded.push(card);
             cachedByKey.set(key, card);
+        }
+        // Stream what we have so far so the grid fills in as cards land.
+        if (onProgress) {
+            try { onProgress({ cards: snapshotCardsSoFar(), deleted }); } catch (_) {}
         }
     }
 

@@ -31,7 +31,7 @@ async function loadJson(path) {
 // dynamically. Any failure here is non-fatal: the bundled files still load.
 async function loadSharedCardsForGame() {
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-3");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-4");
         const { cards, deleted } = await library.loadSharedCards();
         return { cards: cards || [], deleted: deleted || new Set() };
     } catch (error) {

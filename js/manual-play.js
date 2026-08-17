@@ -1993,12 +1993,38 @@ if (document.readyState === "loading") {
     try { new DataTransfer(); new DragEvent("drag"); }
     catch (_) { return; }
 
-    const MOVE_THRESHOLD = 8;   // px of finger travel before it counts as a drag
-    let pending = null;         // { el, startX, startY } - touch is down, not yet a drag
-    let drag = null;            // { el, dt, ghost, w, h } - a drag is in progress
+    const MOVE_THRESHOLD = 8;      // px of finger travel before it counts as a drag
+    const LONG_PRESS_MS = 500;     // hold this long (no move) to open the card menu
+    let pending = null;            // { el, startX, startY } - touch down, not yet a drag
+    let drag = null;               // { el, dt, ghost, w, h } - a drag is in progress
+    let longPressTimer = null;
+    let suppressNextClick = false; // eat the release-click after a long press
 
+    // The real drag sources on the board. Card <img>s are draggable-BY-DEFAULT
+    // (no explicit draggable="true" attribute), so the old attribute selector
+    // missed every board card - they were "glued" to the board on touch. Match
+    // them by their actual classes instead: hand cards, board characters / stage
+    // / trash (.board-card-img), and life / deck / extra piles ([data-card-source]).
+    const DRAG_SOURCE_SELECTOR =
+        ".hand-card.selectable-card, .board-card-img, [data-card-source]";
     const draggableFrom = (target) =>
-        (target && target.closest) ? target.closest('[draggable="true"]') : null;
+        (target && target.closest) ? target.closest(DRAG_SOURCE_SELECTOR) : null;
+
+    const clearLongPress = () => {
+        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+    };
+
+    // Touch has no right-click, so a long press stands in for it. Every card menu
+    // (hand card -> trash/deck/life, the board move menu, deck/pile menus) listens
+    // for `contextmenu`, positioned at clientX/clientY - so fire one at the finger.
+    const fireContextMenu = (el, x, y) => {
+        try {
+            el.dispatchEvent(new MouseEvent("contextmenu", {
+                bubbles: true, cancelable: true, view: window,
+                clientX: x, clientY: y, button: 2
+            }));
+        } catch (_) {}
+    };
 
     function makeDragEvent(type, x, y, dt) {
         return new DragEvent(type, {
@@ -2039,6 +2065,9 @@ if (document.readyState === "loading") {
     }
 
     document.addEventListener("touchstart", (e) => {
+        // A new gesture clears any stale suppression left by a long press whose
+        // release never produced a click.
+        suppressNextClick = false;
         if (drag || e.touches.length !== 1) return;
         const el = draggableFrom(e.target);
         if (!el) return;
@@ -2046,6 +2075,16 @@ if (document.readyState === "loading") {
         if (e.target.closest("button, input, select, textarea, a")) return;
         const t = e.touches[0];
         pending = { el, startX: t.clientX, startY: t.clientY };
+
+        // Hold still (no drag) for LONG_PRESS_MS -> open the card's menu.
+        clearLongPress();
+        longPressTimer = setTimeout(() => {
+            longPressTimer = null;
+            if (!pending || drag) return;      // moved into a drag, or lifted early
+            fireContextMenu(pending.el, pending.startX, pending.startY);
+            suppressNextClick = true;          // don't also "tap" the card on release
+            pending = null;
+        }, LONG_PRESS_MS);
     }, { passive: true });
 
     document.addEventListener("touchmove", (e) => {
@@ -2056,7 +2095,8 @@ if (document.readyState === "loading") {
         if (pending && !drag) {
             const dx = t.clientX - pending.startX;
             const dy = t.clientY - pending.startY;
-            if (Math.hypot(dx, dy) < MOVE_THRESHOLD) return;   // still just a tap
+            if (Math.hypot(dx, dy) < MOVE_THRESHOLD) return;   // still a tap / hold
+            clearLongPress();                                  // it's a drag, not a press
             startDrag(pending.el, t.clientX, t.clientY);
             pending = null;
         }
@@ -2073,6 +2113,7 @@ if (document.readyState === "loading") {
     }, { passive: false });
 
     function endDrag(e) {
+        clearLongPress();
         pending = null;
         if (!drag) return;
         const t = (e.changedTouches && e.changedTouches[0]) || null;
@@ -2091,4 +2132,14 @@ if (document.readyState === "loading") {
 
     document.addEventListener("touchend", endDrag, { passive: true });
     document.addEventListener("touchcancel", endDrag, { passive: true });
+
+    // After a long press opens a menu, the browser still fires a click on release
+    // (landing on whatever is under the finger - often the menu itself). Swallow
+    // that one click so the press only opens the menu; real taps are untouched.
+    document.addEventListener("click", (e) => {
+        if (!suppressNextClick) return;
+        suppressNextClick = false;
+        e.stopImmediatePropagation();   // also stop the same-node rest-detector
+        e.preventDefault();
+    }, true);
 })();

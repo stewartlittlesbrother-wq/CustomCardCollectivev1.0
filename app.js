@@ -657,15 +657,27 @@ function dedupeCards(cards) {
 
 // Pull the shared Firebase library into the shape the card pool expects.
 // Failures are non-fatal: the site still runs on the bundled files.
-async function loadSharedCardsForPool() {
+async function loadSharedCardsForPool(options = {}) {
   const library = await getCardLibrary();
   // `ok` distinguishes a real read from a failure/absence, so callers can tell
   // "the library is genuinely empty" from "the read failed" and avoid wiping the
   // cards they already have on a transient error.
   if (!library) return { cards: [], deleted: new Set(), ok: false };
 
+  // getPriority tells the library which collection to download first; onProgress
+  // streams partial batches in so the grid fills as cards arrive. Both optional.
+  const { getPriority, onProgress } = options;
+
   try {
-    const { cards, deleted } = await library.loadSharedCards();
+    const { cards, deleted } = await library.loadSharedCards({
+      getPriority,
+      onProgress: onProgress
+        ? partial => onProgress({
+            cards: (partial.cards || []).map(card => normalizeCard(card, card.category || card.cardType)),
+            deleted: partial.deleted || new Set()
+          })
+        : undefined
+    });
     return {
       cards: cards.map(card => normalizeCard(card, card.category || card.cardType)),
       deleted: deleted || new Set(),
@@ -883,7 +895,40 @@ async function loadCardPool() {
     // Cards uploaded by players live ONLY in the shared library - they are not
     // written back into the bundled JSON files. Fetch them (downloads now run in
     // parallel) and merge them in without blocking that first paint.
-    const fresh = await loadSharedCardsForPool();
+    //
+    // Two things make an opened collection usable while the rest still syncs:
+    //   - getPriority() (re-read before each batch) downloads the collection the
+    //     user is currently viewing FIRST. The all-access / official views want
+    //     everything (or load separately), so they don't set a priority.
+    //   - onProgress streams each batch straight into the pool and repaints the
+    //     grid, so the collection fills in card-by-card instead of all-at-once.
+    const streamPriority = () => {
+      const active = state.activeCollection;
+      if (!active || active === ALL_ACCESS_COLLECTION || active === OFFICIAL_COLLECTION) return null;
+      return active;
+    };
+    // How many cards are visible in the view the user is looking at right now, so
+    // we only repaint when THAT number grows. Without this the grid would rebuild
+    // (and jump back to the top) on every batch - including the background ones
+    // that add nothing to the open collection - while the user is scrolling it.
+    const visibleCardCount = () => {
+      const active = state.activeCollection;
+      if (!active || active === ALL_ACCESS_COLLECTION) return state.cards.length;
+      return state.cards.filter(c => (c.collection || COLLECTION_DEFAULT) === active).length;
+    };
+    let lastStreamCount = -1;
+    const fresh = await loadSharedCardsForPool({
+      getPriority: streamPriority,
+      onProgress: partial => {
+        // A newer reload has superseded this one - don't paint stale batches.
+        if (token !== poolLoadToken) return;
+        state.cards = assembleCardPool(loadedCards, partial.cards, partial.deleted);
+        const count = visibleCardCount();
+        if (count === lastStreamCount) return;   // nothing new on this screen
+        lastStreamCount = count;
+        renderCardGrid();
+      }
+    });
 
     // If the read FAILED (offline, rules hiccup, dropped index read), keep the
     // last good snapshot instead of wiping every shared/DON!! card. A successful
@@ -997,7 +1042,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-3")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-4")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;

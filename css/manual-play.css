@@ -399,3 +399,16 @@
 .game-layout [draggable="true"] {
     touch-action: none;
 }
+
+/* ─── Touch: no native long-press callout ───────────────────────────────────
+   iOS pops its own "save image / copy" callout (and a text magnifier) when you
+   press-and-hold an image or card. That fights our long-press-to-open-the-menu
+   gesture, so suppress it on the board's cards. */
+.game-layout img,
+.game-layout .hand-card,
+.game-layout .board-card-img,
+.game-layout [data-card-source] {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}

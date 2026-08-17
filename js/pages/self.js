@@ -5028,9 +5028,14 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
             img.style.cssText = "width:100%;display:block;aspect-ratio:5/7;object-fit:cover;";
             img.draggable = false;
 
-            // Hover action overlay
+            // Hover action overlay. `pointer-events:none` while hidden is CRUCIAL:
+            // an opacity:0 panel still captures clicks, so its invisible buttons
+            // (the "-> Hand" one sits dead centre) were swallowing taps on the card
+            // - on touch, tapping a card to look at it silently sent it to hand.
             const hoverPanel = document.createElement("div");
-            hoverPanel.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.72);display:flex;flex-direction:column;gap:3px;align-items:stretch;justify-content:center;opacity:0;transition:opacity .13s;z-index:3;padding:5px;box-sizing:border-box;";
+            hoverPanel.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.72);display:flex;flex-direction:column;gap:3px;align-items:stretch;justify-content:center;opacity:0;pointer-events:none;transition:opacity .13s;z-index:3;padding:5px;box-sizing:border-box;";
+            const showPanel = () => { hoverPanel.style.opacity = "1"; hoverPanel.style.pointerEvents = "auto"; };
+            const hidePanel = () => { hoverPanel.style.opacity = "0"; hoverPanel.style.pointerEvents = "none"; };
 
             function mkSmBtn(text, bg) {
                 const b = document.createElement("button");
@@ -5069,8 +5074,20 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
             hoverPanel.appendChild(botBtn);
             hoverPanel.appendChild(tBtn);
 
-            frame.addEventListener("mouseenter", () => { if (dragSrcIndex === null) hoverPanel.style.opacity = "1"; });
-            frame.addEventListener("mouseleave", () => { hoverPanel.style.opacity = "0"; });
+            frame.addEventListener("mouseenter", () => { if (dragSrcIndex === null) showPanel(); });
+            frame.addEventListener("mouseleave", hidePanel);
+
+            // Touch has no hover, so a TAP toggles the action panel (reveal / hand /
+            // bottom / trash). Buttons stopPropagation, so tapping one acts without
+            // re-toggling; tapping a different card closes any other open panel.
+            frame._hidePanel = hidePanel;
+            if (document.documentElement.classList.contains("touch-device")) {
+                frame.addEventListener("click", () => {
+                    const opening = hoverPanel.style.opacity !== "1";
+                    frameRefs.forEach(f => { if (f !== frame && f._hidePanel) f._hidePanel(); });
+                    if (opening) showPanel(); else hidePanel();
+                });
+            }
 
             // ── Drag source ──
             frame.addEventListener("dragstart", (e) => {
