@@ -6,7 +6,7 @@
 // build - hard-refresh (Ctrl+Shift+R) or check the upload actually went through.
 //
 // ⬇ BUMP THIS ON EVERY CHANGE ⬇
-const APP_VERSION = 103;
+const APP_VERSION = 104;
 
 (function showAppVersion() {
     const paint = () => {
@@ -62,4 +62,125 @@ window.APP_VERSION = APP_VERSION;
     ["gesturestart", "gesturechange", "gestureend"].forEach(evt =>
         document.addEventListener(evt, e => e.preventDefault(), { passive: false })
     );
+})();
+
+// ── Auto-update notice ──────────────────────────────────────────────────────
+// When you push new code (and bump APP_VERSION above), every tab that's already
+// open on the site polls THIS file in the background, sees the higher number,
+// and shows a little "new version - Refresh" banner. Refresh reloads the page
+// so the browser pulls the new build. No action needed on your part beyond the
+// version bump you already do.
+//
+// Bootstrap note: a tab only gets this behaviour once it's running a copy of
+// version.js that CONTAINS it - i.e. everyone gets the auto-notice starting the
+// update AFTER this one (they'll hard-refresh once for it, then it's automatic).
+(function autoUpdateNotice() {
+    // The absolute URL of this very script, so the poll works from any page
+    // depth (index.html at root, html/*.html one level down) without guessing.
+    const selfSrc = (document.currentScript && document.currentScript.src) || "";
+    if (!selfSrc || typeof APP_VERSION !== "number") return;
+
+    const versionUrl = selfSrc.split("?")[0];
+    const REFRESH_KEY = "cc_update_refreshed_to";   // loop guard (session-scoped)
+    let shown = false;
+    let timer = null;
+
+    async function fetchLatest() {
+        // Unique query + no-store defeats both the browser and the GitHub Pages
+        // CDN cache, so we always read the freshly-deployed number.
+        const res = await fetch(`${versionUrl}?t=${Date.now()}`, { cache: "no-store" });
+        if (!res.ok) return null;
+        const text = await res.text();
+        const m = text.match(/APP_VERSION\s*=\s*(\d+)/);
+        return m ? parseInt(m[1], 10) : null;
+    }
+
+    async function check() {
+        if (shown) return;
+        try {
+            const latest = await fetchLatest();
+            if (!latest || latest <= APP_VERSION) return;
+            // If we already tried to refresh up to this version this session and
+            // we're somehow still on the old one, don't nag in a loop.
+            const triedUpTo = parseInt(sessionStorage.getItem(REFRESH_KEY) || "0", 10);
+            if (latest <= triedUpTo) return;
+            showBanner(latest);
+        } catch (_) { /* offline / blocked - just try again next tick */ }
+    }
+
+    async function doRefresh(latest) {
+        try { sessionStorage.setItem(REFRESH_KEY, String(latest)); } catch (_) {}
+        // Clear any Cache Storage (in case a service worker ever caches assets).
+        try {
+            if (window.caches && caches.keys) {
+                const keys = await caches.keys();
+                await Promise.all(keys.map(k => caches.delete(k)));
+            }
+        } catch (_) {}
+        // An explicit reload revalidates subresources against the server (unlike
+        // a plain navigation, which can serve them from cache), so GitHub Pages'
+        // ETags hand back the new files.
+        window.location.reload();
+    }
+
+    function showBanner(latest) {
+        if (shown) return;
+        shown = true;
+        if (timer) { clearInterval(timer); timer = null; }
+
+        const bar = document.createElement("div");
+        bar.setAttribute("role", "status");
+        bar.style.cssText = [
+            "position:fixed", "left:50%", "bottom:16px", "transform:translateX(-50%)",
+            "z-index:2147483647", "display:flex", "align-items:center", "gap:10px",
+            "max-width:calc(100vw - 24px)", "box-sizing:border-box",
+            "padding:9px 9px 9px 15px", "border-radius:12px",
+            "background:rgba(20,22,28,.97)", "color:#fff",
+            "border:1px solid rgba(255,255,255,.16)",
+            "box-shadow:0 10px 30px rgba(0,0,0,.5)",
+            "font:600 14px/1.3 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif"
+        ].join(";");
+
+        const label = document.createElement("span");
+        label.textContent = `New version (v${latest}) available.`;
+        label.style.cssText = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+
+        const refresh = document.createElement("button");
+        refresh.type = "button";
+        refresh.textContent = "Refresh";
+        refresh.style.cssText = [
+            "flex:none", "cursor:pointer", "border:none", "border-radius:8px",
+            "padding:8px 14px", "font:700 14px/1 system-ui,sans-serif",
+            "background:#3b82f6", "color:#fff"
+        ].join(";");
+        refresh.addEventListener("click", () => doRefresh(latest));
+
+        const dismiss = document.createElement("button");
+        dismiss.type = "button";
+        dismiss.setAttribute("aria-label", "Dismiss");
+        dismiss.textContent = "✕";
+        dismiss.style.cssText = [
+            "flex:none", "cursor:pointer", "border:none", "border-radius:8px",
+            "padding:8px 11px", "font:700 15px/1 system-ui,sans-serif",
+            "background:transparent", "color:rgba(255,255,255,.55)"
+        ].join(";");
+        // Dismiss just hides it for now; a still-newer push re-triggers the check.
+        dismiss.addEventListener("click", () => {
+            bar.remove();
+            shown = false;
+            try { sessionStorage.setItem(REFRESH_KEY, String(latest)); } catch (_) {}
+        });
+
+        bar.appendChild(label);
+        bar.appendChild(refresh);
+        bar.appendChild(dismiss);
+        (document.body || document.documentElement).appendChild(bar);
+    }
+
+    // First look ~20s in (don't compete with initial load), then every 2 min,
+    // plus whenever the tab is brought back to the foreground.
+    setTimeout(() => { check(); timer = setInterval(check, 120000); }, 20000);
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") check();
+    });
 })();
