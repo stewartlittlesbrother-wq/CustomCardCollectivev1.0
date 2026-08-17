@@ -6,7 +6,7 @@
 // build - hard-refresh (Ctrl+Shift+R) or check the upload actually went through.
 //
 // ⬇ BUMP THIS ON EVERY CHANGE ⬇
-const APP_VERSION = 106;
+const APP_VERSION = 107;
 
 (function showAppVersion() {
     const paint = () => {
@@ -80,6 +80,16 @@ window.APP_VERSION = APP_VERSION;
     const selfSrc = (document.currentScript && document.currentScript.src) || "";
     if (!selfSrc || typeof APP_VERSION !== "number") return;
 
+    // The cache-bust param a refresh added is only needed to force this fresh
+    // load; drop it from the address bar now so URLs stay clean and shareable.
+    try {
+        const here = new URL(window.location.href);
+        if (here.searchParams.has("ccv")) {
+            here.searchParams.delete("ccv");
+            window.history.replaceState(null, "", here.toString());
+        }
+    } catch (_) {}
+
     const versionUrl = selfSrc.split("?")[0];
     const REFRESH_KEY = "cc_update_refreshed_to";   // loop guard (session-scoped)
     let shown = false;
@@ -117,10 +127,18 @@ window.APP_VERSION = APP_VERSION;
                 await Promise.all(keys.map(k => caches.delete(k)));
             }
         } catch (_) {}
-        // An explicit reload revalidates subresources against the server (unlike
-        // a plain navigation, which can serve them from cache), so GitHub Pages'
-        // ETags hand back the new files.
-        window.location.reload();
+        // A plain reload can still serve the CACHED html (and its cached scripts),
+        // which is why the badge didn't move. Navigating to a brand-new URL (a
+        // one-off ?ccv= param) is a guaranteed cache miss, so the freshly-deployed
+        // html loads - and that html points at the bumped ?v= asset URLs, so the
+        // whole build actually updates. `ccv` is stripped again on the next load.
+        try {
+            const url = new URL(window.location.href);
+            url.searchParams.set("ccv", Date.now().toString(36));
+            window.location.replace(url.toString());
+        } catch (_) {
+            window.location.reload();
+        }
     }
 
     function showBanner(latest) {
