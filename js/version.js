@@ -6,7 +6,7 @@
 // build - hard-refresh (Ctrl+Shift+R) or check the upload actually went through.
 //
 // ⬇ BUMP THIS ON EVERY CHANGE ⬇
-const APP_VERSION = 102;
+const APP_VERSION = 103;
 
 (function showAppVersion() {
     const paint = () => {
@@ -51,3 +51,15 @@ const APP_VERSION = 102;
 })();
 
 window.APP_VERSION = APP_VERSION;
+
+// Lock mobile zoom. Every page uses a fixed-width viewport that already scales
+// the whole layout to fit the screen, so pinch / double-tap zoom just let you
+// drag a half-off-screen page around - which is the "annoying to use" part.
+// Android Chrome honours `user-scalable=no` in the viewport meta; iOS Safari
+// ignores it, so also block its pinch gesture events here. Normal one-finger
+// scrolling and taps are untouched. Loaded on every page.
+(function lockZoom() {
+    ["gesturestart", "gesturechange", "gestureend"].forEach(evt =>
+        document.addEventListener(evt, e => e.preventDefault(), { passive: false })
+    );
+})();
