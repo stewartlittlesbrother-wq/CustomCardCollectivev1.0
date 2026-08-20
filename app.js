@@ -275,6 +275,10 @@ const state = {
   // limit, and are entirely optional. Only the TYPES are chosen here - how many
   // copies exist during a match is decided at the table, not in the builder.
   tokens: [],
+  // Cards set to START already in play instead of shuffled into the deck. One
+  // entry per copy: { id, zone }, zone being characters/stage/trash/life/hand.
+  // At match start the game pulls these out of the built deck into their zones.
+  startingCards: [],
   deckName: "",
   activeView: initialView(),
   game: null,
@@ -4257,6 +4261,7 @@ function loadSavedDeck() {
     state.leaderId = saved.leaderId || "";
     state.deck = saved.deck || {};
     state.tokens = Array.isArray(saved.tokens) ? saved.tokens : [];
+    state.startingCards = Array.isArray(saved.startingCards) ? saved.startingCards : [];
     state.deckName = saved.deckName || "";
     el.deckName.value = state.deckName;
   } catch {
@@ -4270,10 +4275,12 @@ function loadSavedDeck() {
 // a saved deck was rewritten continuously while you were still building it.
 function saveDeck() {
   state.deckName = el.deckName.value.trim();
+  reconcileStartingCards();
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     leaderId: state.leaderId,
     deck: state.deck,
     tokens: state.tokens,
+    startingCards: state.startingCards,
     deckName: state.deckName
   }));
   renderAll();
@@ -4314,6 +4321,7 @@ function currentDeckSnapshot() {
     leaderId: state.leaderId,
     deck: { ...state.deck },
     tokens: [...state.tokens],
+    startingCards: state.startingCards.map(e => ({ ...e })),
     savedAt: ""
   };
 }
@@ -4401,6 +4409,7 @@ function saveNamedDeck() {
     leaderId: state.leaderId,
     deck: state.deck,
     tokens: state.tokens,
+    startingCards: state.startingCards,
     savedAt: new Date().toISOString()
   });
   localStorage.setItem(SAVED_DECKS_KEY, JSON.stringify(decks.slice(0, 24)));
@@ -4546,6 +4555,9 @@ function importDeckFromText(text) {
   state.leaderId = parsed.leaderId || "";
   state.deck = parsed.deck;
   state.tokens = parsed.tokens;
+  // An imported list is a fresh deck; the text format doesn't carry starting
+  // placements, so drop any left over from the previous deck.
+  state.startingCards = [];
   state.deckName = parsed.name || state.deckName;
   if (el.deckName) el.deckName.value = state.deckName;
 
@@ -4611,6 +4623,7 @@ function loadNamedDeck(index) {
   state.leaderId = deck.leaderId || "";
   state.deck = deck.deck || {};
   state.tokens = Array.isArray(deck.tokens) ? deck.tokens : [];
+  state.startingCards = Array.isArray(deck.startingCards) ? deck.startingCards : [];
   el.deckName.value = state.deckName;
   saveDeck(false);
   el.savedDecksPanel.hidden = true;
@@ -4791,8 +4804,84 @@ function clearDeck() {
   state.deck = {};
   state.tokens = [];
   state.leaderId = "";
+  state.startingCards = [];
   state.game = null;
   saveDeck(false);
+}
+
+// ── Starting cards (start already in play) ───────────────────────────────────
+// The zones a card can be placed in at match start, with how many cards TOTAL
+// may start in each (stage holds one, the character field five; the piles are
+// unbounded). "Deck" isn't listed - it's the default (no entry).
+const START_ZONES = [
+  { key: "characters", label: "Character Field", cap: 5 },
+  { key: "stage",      label: "Stage",           cap: 1 },
+  { key: "hand",       label: "Hand",            cap: Infinity },
+  { key: "life",       label: "Life",            cap: Infinity },
+  { key: "trash",      label: "Trash",           cap: Infinity }
+];
+const START_ZONE_LABEL = Object.fromEntries(START_ZONES.map(z => [z.key, z.label]));
+
+function startingEntriesFor(id) {
+  return state.startingCards.filter(e => e.id === id);
+}
+function startingCountFor(id) {
+  return startingEntriesFor(id).length;
+}
+function startingZoneUsed(zone) {
+  return state.startingCards.filter(e => e.zone === zone).length;
+}
+// A short "1 Stage · 2 Trash" summary of where this card's copies start.
+function startingSummaryFor(id) {
+  const byZone = {};
+  startingEntriesFor(id).forEach(e => { byZone[e.zone] = (byZone[e.zone] || 0) + 1; });
+  return START_ZONES
+    .filter(z => byZone[z.key])
+    .map(z => `${byZone[z.key]} ${z.label}`)
+    .join(" · ");
+}
+
+function addStartingCard(id, zone) {
+  const zoneDef = START_ZONES.find(z => z.key === zone);
+  if (!zoneDef) return;
+  // Can't start more copies than the deck holds.
+  if (startingCountFor(id) >= (state.deck[id] || 0)) {
+    toast(`Only ${state.deck[id] || 0} in the deck`);
+    return;
+  }
+  // Respect the per-zone board limit (stage 1, character field 5).
+  if (startingZoneUsed(zone) >= zoneDef.cap) {
+    toast(`${zoneDef.label} is full`);
+    return;
+  }
+  state.startingCards.push({ id, zone });
+  saveDeck(false);
+}
+function removeStartingCard(id, zone) {
+  const i = state.startingCards.findIndex(e => e.id === id && e.zone === zone);
+  if (i !== -1) { state.startingCards.splice(i, 1); saveDeck(false); }
+}
+function clearStartingFor(id) {
+  const before = state.startingCards.length;
+  state.startingCards = state.startingCards.filter(e => e.id !== id);
+  if (state.startingCards.length !== before) saveDeck(false);
+}
+// Drop any starting-card entries whose card is no longer in the deck, or that
+// now exceed the deck's copy count (e.g. after removing copies). Called from
+// saveDeck so it can never persist an impossible placement.
+function reconcileStartingCards() {
+  let changed = false;
+  // Prune entries for cards no longer present.
+  const kept = state.startingCards.filter(e => (state.deck[e.id] || 0) > 0);
+  if (kept.length !== state.startingCards.length) { state.startingCards = kept; changed = true; }
+  // Trim per-card counts down to the available copies.
+  const seen = {};
+  state.startingCards = state.startingCards.filter(e => {
+    seen[e.id] = (seen[e.id] || 0) + 1;
+    if (seen[e.id] > (state.deck[e.id] || 0)) { changed = true; return false; }
+    return true;
+  });
+  return changed;
 }
 
 function autoFillDeck() {
@@ -5137,18 +5226,105 @@ function renderDeckRow(card, qty, isLeader = false) {
     : `<button class="deck-icon-btn add-card-btn" type="button" data-add="${escapeAttr(card.id)}" aria-label="Add one ${escapeAttr(card.name)}" title="Add one"><span aria-hidden="true">+</span></button>
        <button class="deck-icon-btn remove-card-btn" type="button" data-remove="${escapeAttr(card.id)}" aria-label="Remove one ${escapeAttr(card.name)}" title="Remove one"><span aria-hidden="true">-</span></button>`;
 
+  // Non-leader cards get a "start in play" (⚡) button + a badge when copies are
+  // set to start on the board / in a pile instead of the deck.
+  const startCount = isLeader ? 0 : startingCountFor(card.id);
+  const startBadge = startCount
+    ? `<span class="start-badge" title="${escapeAttr(startingSummaryFor(card.id))}">⚡${startCount}</span>`
+    : "";
+  const startBtn = isLeader
+    ? ""
+    : `<button class="deck-icon-btn start-zone-btn${startCount ? " has-start" : ""}" type="button" data-start="${escapeAttr(card.id)}" aria-label="Set starting zone for ${escapeAttr(card.name)}" title="Start in play"><span aria-hidden="true">⚡</span></button>`;
+
   return `
     <div class="deck-row" data-card-id="${escapeAttr(card.id)}">
-      <div class="mini-card-art">${cardVisual(card)}</div>
+      <div class="mini-card-art">${cardVisual(card)}${startBadge}</div>
       <span class="qty">${qty}</span>
       <div class="deck-row-actions">
         ${controls}
+        ${startBtn}
         <button class="deck-icon-btn inspect-card-btn" type="button" data-inspect="${escapeAttr(card.id)}" aria-label="Inspect ${escapeAttr(card.name)}" title="Inspect">
           <span class="magnifier-icon" aria-hidden="true"></span>
         </button>
       </div>
     </div>
   `;
+}
+
+// The little popover for choosing which zone a card's copies start in.
+let startMenuEl = null;
+function closeStartMenu() {
+  if (startMenuEl) { startMenuEl.remove(); startMenuEl = null; }
+  document.removeEventListener("click", onStartMenuOutside, true);
+  document.removeEventListener("keydown", onStartMenuKey, true);
+}
+function onStartMenuOutside(event) {
+  if (startMenuEl && !startMenuEl.contains(event.target)) closeStartMenu();
+}
+function onStartMenuKey(event) { if (event.key === "Escape") closeStartMenu(); }
+
+function openStartMenu(cardId, anchorEl) {
+  const card = getCard(cardId);
+  if (!card) return;
+  closeStartMenu();
+
+  const menu = document.createElement("div");
+  menu.className = "start-menu";
+  startMenuEl = menu;
+
+  const render = () => {
+    const total = state.deck[cardId] || 0;
+    const placed = startingCountFor(cardId);
+    const zoneButtons = START_ZONES.map(zone => {
+      const disabled = placed >= total || startingZoneUsed(zone.key) >= zone.cap;
+      return `<button type="button" class="start-zone-add" data-add-zone="${zone.key}"${disabled ? " disabled" : ""}>+ ${escapeHtml(zone.label)}</button>`;
+    }).join("");
+    const current = placed
+      ? `<div class="start-menu-current">${
+          startingEntriesFor(cardId).map(entry =>
+            `<span class="start-chip">${escapeHtml(START_ZONE_LABEL[entry.zone] || entry.zone)}<button type="button" data-remove-zone="${escapeAttr(entry.zone)}" aria-label="Remove">✕</button></span>`
+          ).join("")
+        }<button type="button" class="start-clear" data-clear-start>Reset to deck</button></div>`
+      : `<div class="start-menu-hint">Choose a zone to start a copy there instead of shuffling it into your deck.</div>`;
+
+    menu.innerHTML = `
+      <div class="start-menu-head">
+        <strong>${escapeHtml(card.name)}</strong>
+        <span>${placed} of ${total} start in play</span>
+      </div>
+      <div class="start-menu-zones">${zoneButtons}</div>
+      ${current}
+    `;
+  };
+  render();
+
+  menu.addEventListener("click", event => {
+    event.stopPropagation();
+    const addZone = event.target.closest("[data-add-zone]")?.dataset.addZone;
+    if (addZone) { addStartingCard(cardId, addZone); render(); return; }
+    const removeZone = event.target.closest("[data-remove-zone]")?.dataset.removeZone;
+    if (removeZone) { removeStartingCard(cardId, removeZone); render(); return; }
+    if (event.target.closest("[data-clear-start]")) { clearStartingFor(cardId); render(); }
+  });
+
+  document.body.appendChild(menu);
+
+  // Anchor it under the ⚡ button, flipping up / clamping in if it would spill.
+  const rect = anchorEl.getBoundingClientRect();
+  menu.style.position = "fixed";
+  menu.style.zIndex = "10001";
+  const mw = menu.offsetWidth;
+  const mh = menu.offsetHeight;
+  let left = Math.min(rect.left, window.innerWidth - mw - 8);
+  let top = rect.bottom + 6;
+  if (top + mh > window.innerHeight - 8) top = Math.max(8, rect.top - mh - 6);
+  menu.style.left = `${Math.max(8, left)}px`;
+  menu.style.top = `${top}px`;
+
+  setTimeout(() => {
+    document.addEventListener("click", onStartMenuOutside, true);
+    document.addEventListener("keydown", onStartMenuKey, true);
+  }, 0);
 }
 
 function renderSavedDecks() {
@@ -6239,6 +6415,8 @@ function bindEvents() {
   el.deckList?.addEventListener("mouseover", hideHoverPreview);
 
   el.deckList.addEventListener("click", event => {
+    const startEl = event.target.closest("[data-start]");
+    if (startEl) { openStartMenu(startEl.dataset.start, startEl); return; }
     const addId = event.target.closest("[data-add]")?.dataset.add;
     if (addId) { addToDeck(addId); return; }
     const removeId = event.target.closest("[data-remove]")?.dataset.remove;

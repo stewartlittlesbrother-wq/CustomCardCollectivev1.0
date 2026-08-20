@@ -2070,11 +2070,15 @@ if (document.readyState === "loading") {
         suppressNextClick = false;
         if (drag || e.touches.length !== 1) return;
         const el = draggableFrom(e.target);
-        if (!el) return;
+        // The leader isn't draggable but still has a long-press menu (Change Art,
+        // Detach DON), so arm it for long-press only - it's never dragged.
+        const ctxOnlyEl = el ? null
+            : (e.target.closest ? e.target.closest(".board-leader-card") : null);
+        if (!el && !ctxOnlyEl) return;
         // On-card buttons / inputs should still tap normally.
         if (e.target.closest("button, input, select, textarea, a")) return;
         const t = e.touches[0];
-        pending = { el, startX: t.clientX, startY: t.clientY };
+        pending = { el: el || ctxOnlyEl, startX: t.clientX, startY: t.clientY, longPressOnly: !el };
 
         // Hold still (no drag) for LONG_PRESS_MS -> open the card's menu.
         clearLongPress();
@@ -2096,7 +2100,9 @@ if (document.readyState === "loading") {
             const dx = t.clientX - pending.startX;
             const dy = t.clientY - pending.startY;
             if (Math.hypot(dx, dy) < MOVE_THRESHOLD) return;   // still a tap / hold
-            clearLongPress();                                  // it's a drag, not a press
+            clearLongPress();                                  // moved: it's not a press
+            // Context-only targets (the leader) don't drag - just let the move be.
+            if (pending.longPressOnly) { pending = null; return; }
             startDrag(pending.el, t.clientX, t.clientY);
             pending = null;
         }

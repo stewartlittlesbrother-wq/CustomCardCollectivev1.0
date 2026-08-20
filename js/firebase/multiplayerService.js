@@ -196,7 +196,6 @@ function createInitialPrivateState(selectedDeck) {
 
     const deck = globalThis.shuffleDeck(globalThis.parseDeckText(selectedDeck.deckText))
         .map(card => createMultiplayerCard(card));
-    const hand = deck.splice(0, 5);
     const leader = createMultiplayerCard(leaderDefinition);
 
     // Token TYPES the deck makes available. Resolved here so the board can show
@@ -210,16 +209,29 @@ function createInitialPrivateState(selectedDeck) {
 
     const privateState = {
         selectedDeck,
-        hand,
+        hand: [],
         deck,
         // Life starts EMPTY, matching the manual board: players deal their own
         // life from the top of the deck by dragging (the board is fully manual,
         // so auto-dealing here surprised players with pre-filled life).
         life: [],
+        // Board zones the deck's "start in play" cards land in; empty otherwise.
+        // createInitialPublicPlayerState mirrors these onto the visible board.
+        characters: [],
+        trash: [],
         leader,
         stage: null,
         tokenTypes
     };
+
+    // Place any "start in play" cards FIRST, pulling them out of the shuffled
+    // deck, THEN deal the opening five from what remains (so a card set to start
+    // on the board is never also sitting in the opening hand). Any hand-zone
+    // starters ride on top of the dealt five.
+    if (typeof globalThis.applyStartingCards === "function") {
+        globalThis.applyStartingCards(privateState, selectedDeck.startingCards);
+    }
+    privateState.hand = privateState.deck.splice(0, 5).concat(privateState.hand);
 
     applyStartingZangetsuStage(privateState);
 
@@ -228,6 +240,10 @@ function createInitialPrivateState(selectedDeck) {
 
 function applyStartingZangetsuStage(privateState) {
     if (privateState?.leader?.cardNumber !== "BL01-001") {
+        return;
+    }
+    // A deck that already placed its own starting stage wins - don't overwrite it.
+    if (privateState.stage) {
         return;
     }
 
@@ -301,9 +317,9 @@ function createInitialPublicPlayerState(privateState) {
     // createPublicPlayerStateFromLocal in self.js - Firebase mangles arrays.
     const board = {
         leader: stripCardForSync(privateState.leader || null),
-        characters: [],
+        characters: (privateState.characters || []).map(stripCardForSync),
         stage: stripCardForSync(privateState.stage || null),
-        trash: [],
+        trash: (privateState.trash || []).map(stripCardForSync),
         extraFaceUp: [],
         extraFaceDown: [],
         tokens: [],

@@ -1597,7 +1597,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-9");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-10");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1660,7 +1660,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-9");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-10");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2042,7 +2042,9 @@ function snapshotToDeckDefinition(snapshot, id) {
         deckText,
         // Token types ride along with the deck - they're not part of deckText
         // because they are not deck contents.
-        tokens: Array.isArray(snapshot.tokens) ? snapshot.tokens : []
+        tokens: Array.isArray(snapshot.tokens) ? snapshot.tokens : [],
+        // Cards set to start already in play (see applyStartingCards).
+        startingCards: Array.isArray(snapshot.startingCards) ? snapshot.startingCards : []
     };
 }
 
@@ -2077,7 +2079,7 @@ function createInitialPlayerState(playerName, deckDefinition) {
         );
     }
 
-    return {
+    const player = {
         name: playerName,
         don: 0,
         restedDon: 0,
@@ -2111,6 +2113,16 @@ function createInitialPlayerState(playerName, deckDefinition) {
         // the menu, not the supply.
         tokenTypes: resolveTokenTypes(selectedDeck.tokens)
     };
+
+    // Move any "start in play" cards out of the freshly-built deck into their
+    // chosen zones (character field, stage, trash, life, hand). If a second row
+    // of character slots is needed for them, turn it on so they're all visible.
+    if (typeof applyStartingCards === "function") {
+        applyStartingCards(player, selectedDeck.startingCards);
+        if ((player.characters?.length || 0) > 5) player.extraRow = true;
+    }
+
+    return player;
 }
 
 // Turn saved token ids into full card objects once, at match start, so the token
@@ -7089,6 +7101,96 @@ function refreshSelectedBoardCardElement() {
     return true;
 }
 
+// ── In-game art switcher ─────────────────────────────────────────────────────
+// Swap which art a card shows DURING a match. The choice is saved per card
+// number in the SAME place the deck builder stores alt-art picks, and the board
+// is re-synced - so the opponent (and spectators) see the art you pick, exactly
+// like sleeving a leader in a specific art in real life. Mainly for the leader,
+// but works for any board card that has more than one art.
+const ART_PREFS_KEY = "custom-cards-alt-art-prefs-v1";
+
+function setCardArtIndex(card, idx) {
+    const key = card?.cardNumber || card?.id;
+    if (!key) return;
+    try {
+        const prefs = JSON.parse(localStorage.getItem(ART_PREFS_KEY) || "{}") || {};
+        prefs[key] = idx;
+        localStorage.setItem(ART_PREFS_KEY, JSON.stringify(prefs));
+    } catch (_) {}
+    // Reflect on the live instance too so this seat repaints instantly; the sync
+    // reads the saved pref (see stripCardForSync) to tell the opponent.
+    card.artIndex = idx;
+}
+
+let artPickerEl = null;
+function closeArtPicker() {
+    if (artPickerEl) { artPickerEl.remove(); artPickerEl = null; }
+    document.removeEventListener("click", onArtPickerOutside, true);
+    document.removeEventListener("keydown", onArtPickerKey, true);
+}
+function onArtPickerOutside(event) {
+    if (artPickerEl && !artPickerEl.contains(event.target)) closeArtPicker();
+}
+function onArtPickerKey(event) { if (event.key === "Escape") closeArtPicker(); }
+
+function openArtPicker(card, cardType, x, y) {
+    const arts = cardArtListForGame(card);
+    if (arts.length < 2) return;
+    closeArtPicker();
+
+    const current = Number.isInteger(card.artIndex) ? card.artIndex : altArtIndexForGame(card);
+
+    const box = document.createElement("div");
+    box.className = "art-picker";
+    artPickerEl = box;
+
+    const title = document.createElement("div");
+    title.className = "art-picker-title";
+    title.textContent = `${card.name || "Card"} — choose art`;
+    box.appendChild(title);
+
+    const grid = document.createElement("div");
+    grid.className = "art-picker-grid";
+    arts.forEach((src, i) => {
+        const thumb = document.createElement("button");
+        thumb.type = "button";
+        thumb.className = "art-picker-thumb" + (i === current ? " active" : "");
+        const img = document.createElement("img");
+        img.src = src;
+        img.alt = `Art ${i + 1}`;
+        thumb.appendChild(img);
+        thumb.addEventListener("click", (e) => {
+            e.stopPropagation();
+            setCardArtIndex(card, i);
+            if (cardType === "leader") renderLeaders(); else renderCharacters();
+            // renderLeaders() rebuilds the leader img but doesn't re-bind its
+            // menu, so re-attach or a second long-press would do nothing.
+            setupBoardContextMenus();
+            window.scheduleOnlineBoardSync?.();
+            addGameLog(`${card.name} art changed`);
+            closeArtPicker();
+        });
+        grid.appendChild(thumb);
+    });
+    box.appendChild(grid);
+
+    document.body.appendChild(box);
+
+    // Position near the tap/click, clamped on screen.
+    box.style.position = "fixed";
+    box.style.zIndex = "10002";
+    const bw = box.offsetWidth, bh = box.offsetHeight;
+    let left = Math.min(x, window.innerWidth - bw - 8);
+    let top = Math.min(y, window.innerHeight - bh - 8);
+    box.style.left = `${Math.max(8, left)}px`;
+    box.style.top = `${Math.max(8, top)}px`;
+
+    setTimeout(() => {
+        document.addEventListener("click", onArtPickerOutside, true);
+        document.addEventListener("keydown", onArtPickerKey, true);
+    }, 0);
+}
+
 function setupBoardContextMenus() {
     document.querySelectorAll(".board-leader-card, .board-character-card").forEach(cardElement => {
         cardElement.oncontextmenu = (event) => {
@@ -7105,6 +7207,13 @@ function setupBoardContextMenus() {
 
             if (!player || !card) return;
 
+            // Spectators only watch, and you can only restyle YOUR OWN cards.
+            const canChangeArt = !isSpectator
+                && (!isOnlineMatch || playerKey === getOwnOnlinePlayerKey())
+                && cardArtListForGame(card).length > 1;
+            const menuX = event.clientX;
+            const menuY = event.clientY;
+
             // Create context menu
             const menu = document.createElement("div");
             menu.className = "context-menu";
@@ -7118,7 +7227,16 @@ function setupBoardContextMenus() {
             menu.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.5)";
             
             const options = [];
-            
+
+            // Swap the card's shown art (leader face / character alt). Opponent
+            // sees your pick once the board re-syncs.
+            if (canChangeArt) {
+                options.push({
+                    label: "Change Art",
+                    action: () => openArtPicker(card, cardType, menuX, menuY)
+                });
+            }
+
             // For characters: add movement and trash options
             if (cardType === "character") {
                 options.push({

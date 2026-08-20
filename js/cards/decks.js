@@ -32,7 +32,9 @@ function getSavedMultiplayerDecks() {
                 leaderKey: deck.leaderId || "",
                 deckText: deckMapToText(deck.deck),
                 // Token types this deck makes available in game (may be empty).
-                tokens: Array.isArray(deck.tokens) ? deck.tokens : []
+                tokens: Array.isArray(deck.tokens) ? deck.tokens : [],
+                // Cards set to start already in play (see applyStartingCards).
+                startingCards: Array.isArray(deck.startingCards) ? deck.startingCards : []
             }))
             .filter(deck => deck.leaderKey);
     } catch {

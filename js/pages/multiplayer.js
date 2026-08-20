@@ -9,7 +9,7 @@ import {
     setPlayerReady,
     getMatch,
     clearMatchStartError
-} from "../firebase/multiplayerService.js";
+} from "../firebase/multiplayerService.js?v=reveal-10";
 
 // ── State ────────────────────────────────────────────
 let currentUser = null;
