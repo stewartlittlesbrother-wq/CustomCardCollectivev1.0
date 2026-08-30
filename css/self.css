@@ -4854,3 +4854,23 @@ html.touch-device .game-log {
     border-color: #f6c445;
     box-shadow: 0 0 0 2px rgba(246, 196, 69, .35);
 }
+
+/* ── DON active/rested tally badge ───────────────────────────────────────────
+   Pinned on each DON!! area so both players' active vs rested DON read at a
+   glance (the opponent's cards are otherwise tiny to count on a phone). */
+.don-area{position:relative}
+.don-count-badge{
+    position:absolute;top:calc(-1 * 0.9em);left:-2px;z-index:6;pointer-events:none;
+    display:inline-flex;align-items:center;gap:4px;
+    padding:2px 8px;border-radius:999px;white-space:nowrap;
+    background:rgba(8,8,12,.88);border:1px solid rgba(246,196,69,.55);
+    box-shadow:0 2px 6px rgba(0,0,0,.55);
+    font:800 13px/1.2 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    font-variant-numeric:tabular-nums;
+}
+.don-count-badge .dc-active{color:#f6c445}
+.don-count-badge .dc-rested{color:rgba(255,255,255,.62)}
+.don-count-badge .dc-lbl{
+    color:rgba(255,255,255,.4);font-weight:700;font-size:9px;
+    text-transform:uppercase;letter-spacing:.06em;margin-right:2px;
+}

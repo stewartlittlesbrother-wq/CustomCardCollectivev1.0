@@ -3839,6 +3839,20 @@ function renderDonArea(player, areaId) {
 
         donArea.appendChild(img);
     });
+
+    // Live "active / rested" DON tally. On the small phone board the DON cards
+    // are hard to count - especially the opponent's - so pin a compact badge on
+    // each DON area. Both counts are synced (player.don / player.restedDon), so
+    // this updates for the opponent the moment their board arrives.
+    const activeCount = slots.filter(slot => slot !== "rested").length;
+    const restedCount = slots.filter(slot => slot === "rested").length;
+    const badge = document.createElement("div");
+    badge.className = "don-count-badge";
+    badge.title = `DON!!  ·  ${activeCount} active, ${restedCount} rested`;
+    badge.innerHTML =
+        `<span class="dc-active">${activeCount}</span><span class="dc-lbl">act</span>` +
+        `<span class="dc-rested">${restedCount}</span><span class="dc-lbl">rest</span>`;
+    donArea.appendChild(badge);
 }
 
 function renderFloatingDon() {

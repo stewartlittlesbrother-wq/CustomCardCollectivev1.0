@@ -5069,7 +5069,13 @@ function evaluateSearchQuery(query, card, mode = "AND") {
     while (index < tokens.length && tokens[index] !== ")" && tokens[index] !== "||") {
       if (tokens[index] === "&&") index += 1;
       else if (mode === "OR") return value || parseTerm();
-      value = value && parseFactor();
+      // Evaluate the factor FIRST so the token index always advances. Writing
+      // `value = value && parseFactor()` short-circuits once value is false -
+      // parseFactor() never runs, index never moves, and the loop spins forever.
+      // That was the "a space in the search freezes the page" crash (any query
+      // whose first word doesn't match, e.g. "straw hat").
+      const next = parseFactor();
+      value = value && next;
     }
     return value;
   }
@@ -5077,6 +5083,7 @@ function evaluateSearchQuery(query, card, mode = "AND") {
   function parseFactor() {
     const token = tokens[index];
     index += 1;
+    if (token === undefined) return true;   // ran past the end (e.g. trailing operator)
     if (token === "(") {
       const value = parseExpression();
       if (tokens[index] === ")") index += 1;
