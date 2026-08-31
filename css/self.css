@@ -4896,3 +4896,95 @@ html.touch-device .opponent-area {
 html.touch-device .game-board {
     background: linear-gradient(#151122, #0d0a15) !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE BOARD REDESIGN — single-row play areas (touch only, desktop untouched)
+   Each play area becomes ONE short, wide row instead of the tall 2-row desktop
+   grid, so the whole board is short + wide (matches a landscape phone) and the
+   measuring fit-scaler blows it up much bigger. Zone order left→right:
+   leader · life · stage · deck · trash · [characters] · DON pool · DON deck.
+   ═══════════════════════════════════════════════════════════════════════════ */
+html.touch-device {
+    --tools-w: 158px;
+    --pile-rail-w: 140px;
+}
+html.touch-device .play-area {
+    display: flex !important;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    width: 1560px;
+    grid-template-columns: none !important;
+    grid-template-rows: none !important;
+    padding: 8px;
+}
+/* card-sized side zones */
+html.touch-device .play-area .area {
+    width: 116px;
+    height: 164px;
+    min-height: 0;
+    flex: 0 0 auto;
+    font-size: 12px;
+    padding: 4px;
+}
+html.touch-device .play-area .leader-area { order: 1; }
+html.touch-device .play-area .life-area   { order: 2; }
+html.touch-device .play-area .stage-area  { order: 3; }
+html.touch-device .play-area .deck-area   { order: 4; }
+html.touch-device .play-area .trash-area  { order: 5; }
+html.touch-device .play-area .character-area { order: 6; }
+html.touch-device .play-area .don-area     { order: 7; }
+html.touch-device .play-area .don-deck-area { order: 8; }
+
+/* characters fill the middle, in a horizontal row */
+html.touch-device .play-area .character-area {
+    display: flex !important;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-content: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 164px;
+    grid-template-columns: none !important;
+    grid-template-rows: none !important;
+    background: rgba(255,255,255,.03);
+    border-radius: 8px;
+}
+html.touch-device .play-area .character-label { display: none; }
+html.touch-device .play-area .character-slot {
+    width: 104px;
+    height: 150px;
+    min-height: 0;
+    flex: 0 0 auto;
+}
+
+/* DON!! pool: a wider zone that wraps its (bigger, tappable) DON cards */
+html.touch-device .play-area .don-area {
+    width: 214px;
+    height: 164px;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-content: center;
+    justify-content: flex-start;
+    overflow: hidden;
+}
+html.touch-device .play-area .don-card-img {
+    width: 40px !important;
+    height: 56px !important;
+}
+
+/* Life: compact overlapping stack instead of the 640px vertical fan */
+html.touch-device .play-area .life-area,
+html.touch-device .play-area .life-area.open,
+html.touch-device .play-area .life-area:hover {
+    width: 116px !important;
+    height: 164px !important;
+    overflow: hidden;
+}
+
+/* Hands: a touch shorter so they don't dominate the board's height */
+html.touch-device .hand { min-height: 0; }

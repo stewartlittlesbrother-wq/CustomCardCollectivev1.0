@@ -2556,10 +2556,25 @@ document.addEventListener("DOMContentLoaded", initializeGamePage);
 // scales. Also fits the piles rail to the viewport height so the full-size piles
 // are always fully visible with no scrolling.
 function fitBoardToViewport() {
-    const DESIGN_WIDTH = 1210;
     // Grows by one character-row (230px) per seat that has its extra row on.
     const extraRows = Number(getComputedStyle(document.documentElement).getPropertyValue("--board-extra-rows")) || 0;
-    const DESIGN_HEIGHT = 1120 + extraRows * 230;
+    let DESIGN_WIDTH = 1210;
+    let DESIGN_HEIGHT = 1120 + extraRows * 230;
+
+    // On touch the board is re-laid-out (short & wide) by the mobile CSS, so its
+    // real size no longer matches the desktop constants. MEASURE it instead - the
+    // play-area's own width and the board's content height (it's a flex column,
+    // so offsetHeight IS the content height) - and scale to whatever that is.
+    // offset* is the pre-transform layout size, so this never feeds back on the
+    // scale we set. Sanity floors guard against a mid-build measurement of 0.
+    if (document.documentElement.classList.contains("touch-device")) {
+        const boardEl = document.querySelector(".game-board");
+        const paEl = boardEl && boardEl.querySelector(".play-area");
+        const measuredW = paEl ? paEl.offsetWidth : 0;
+        const measuredH = boardEl ? boardEl.offsetHeight : 0;
+        if (measuredW > 400) DESIGN_WIDTH = measuredW;
+        if (measuredH > 300) DESIGN_HEIGHT = measuredH;
+    }
     const MARGIN = 16;
 
     // Rail widths, read from the CSS variables so the two stay in sync.
