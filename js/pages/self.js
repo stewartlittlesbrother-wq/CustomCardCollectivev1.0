@@ -3216,7 +3216,16 @@ function setupLifeArea(areaId, textId) {
 
     if (!lifeArea || !lifeToggleText) return;
 
-    lifeToggleText.textContent = "View Life Cards";
+    // Touch has no hover, so the life fan (which only opened on mouseenter) read
+    // as "no life cards" on a phone. Default it OPEN there so life is always
+    // visible; the tap toggle below still lets you collapse it.
+    const isTouch = document.documentElement.classList.contains("touch-device");
+    if (isTouch) {
+        lifeArea.classList.add("open");
+        lifeToggleText.textContent = "Life Cards";
+    } else {
+        lifeToggleText.textContent = "View Life Cards";
+    }
 
     lifeArea.addEventListener("mouseenter", () => {
         if (!lifeArea.classList.contains("open")) {
