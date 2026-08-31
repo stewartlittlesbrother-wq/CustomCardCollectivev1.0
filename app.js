@@ -1046,7 +1046,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-4")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-5")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;

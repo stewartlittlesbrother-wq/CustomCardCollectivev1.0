@@ -2432,6 +2432,28 @@ function setupDiceRoller() {
     bind("rollD12Btn", "d12");
 }
 
+// The exact card numbers/ids the game needs, so the board pulls only THOSE from
+// the shared library instead of the whole thing (fast on mobile). Only practice
+// knows both decks up front; online/spectator get the opponent's cards live over
+// the sync, so they return null and load everything.
+function collectNeededCardNumbers() {
+    if (isOnlineMatch || isSpectator) return null;
+    const practice = getPracticeSnapshotDecks();
+    if (!practice) return null;
+
+    const nums = new Set();
+    [practice.player1Deck, practice.player2Deck].forEach(deck => {
+        if (!deck) return;
+        if (deck.leaderKey) nums.add(deck.leaderKey);
+        (deck.tokens || []).forEach(token => token && nums.add(token));
+        String(deck.deckText || "").split(/\n+/).forEach(line => {
+            const match = line.trim().match(/^\d+x(.+)$/i);
+            if (match) nums.add(match[1].trim());
+        });
+    });
+    return nums.size ? nums : null;
+}
+
 async function initializeGamePage() {
     applyBoardDisplaySettings();
     setupExtraSlotsToggle();
@@ -2439,7 +2461,7 @@ async function initializeGamePage() {
     setupSfxToggle();
     setupDeckViewerInspect();
     try {
-        await loadCardDatabase();
+        await loadCardDatabase(collectNeededCardNumbers());
 
         gameState = createInitialGameState();
 

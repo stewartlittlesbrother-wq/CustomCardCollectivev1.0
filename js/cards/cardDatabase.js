@@ -29,10 +29,14 @@ async function loadJson(path) {
 //
 // cardDatabase.js is a classic script, so the ES-module service is imported
 // dynamically. Any failure here is non-fatal: the bundled files still load.
-async function loadSharedCardsForGame() {
+async function loadSharedCardsForGame(onlyNumbers) {
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-4");
-        const { cards, deleted } = await library.loadSharedCards();
+        const library = await import("../firebase/cardLibraryService.js?v=collections-5");
+        // onlyNumbers restricts the download to just the decks' cards - huge speed
+        // win on mobile where the full custom library is many MB of base64 art.
+        const { cards, deleted } = await library.loadSharedCards(
+            onlyNumbers ? { onlyNumbers } : {}
+        );
         return { cards: cards || [], deleted: deleted || new Set() };
     } catch (error) {
         console.warn("Shared card library unavailable to the game board:", error);
@@ -40,10 +44,33 @@ async function loadSharedCardsForGame() {
     }
 }
 
-async function loadCardDatabase() {
+// `neededNumbers` (optional): when the caller knows exactly which cards the game
+// needs (practice = both decks are known up front), only those are pulled from
+// the shared library instead of the whole thing. Omit it (online/spectator,
+// where the opponent's cards arrive live) to load everything.
+async function loadCardDatabase(neededNumbers) {
     const loadedCards = await loadPermanentCardFiles();
-    const { cards: sharedCards, deleted } = await loadSharedCardsForGame();
     const importedCards = loadImportedCardsForGame();
+
+    // Fast path: pull only the decks' cards from the shared library.
+    let { cards: sharedCards, deleted } = await loadSharedCardsForGame(neededNumbers);
+    assembleGameDatabase(loadedCards, sharedCards, importedCards, deleted);
+
+    // Safety net: a deck can reference a custom card by an imported uuid `id` that
+    // doesn't match the number its library key uses, so the targeted load could
+    // miss it. If any needed card didn't resolve, load the FULL library once and
+    // rebuild - correctness always wins over the speed-up.
+    if (neededNumbers) {
+        const missing = [...neededNumbers].some(num => num && !cardDatabase[num] && !leaders[num]);
+        if (missing) {
+            console.log("Targeted card load missed a deck card; loading full library.");
+            ({ cards: sharedCards, deleted } = await loadSharedCardsForGame());
+            assembleGameDatabase(loadedCards, sharedCards, importedCards, deleted);
+        }
+    }
+}
+
+function assembleGameDatabase(loadedCards, sharedCards, importedCards, deleted) {
     const mainCards = {};
     const leaderCards = {};
 

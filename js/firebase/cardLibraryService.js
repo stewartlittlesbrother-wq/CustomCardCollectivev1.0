@@ -159,8 +159,19 @@ function keyInCollection(key, sanitizedCollection) {
 //                    card resolved so far, so the pool can paint progressively
 //                    instead of waiting for the whole download to finish.
 export async function loadSharedCards(options = {}) {
-    const { getPriority, onProgress } = options;
+    const { getPriority, onProgress, onlyNumbers } = options;
     await waitForUser();
+
+    // onlyNumbers (a Set/array of card NUMBERS): restrict the whole operation to
+    // just those cards. The game board only needs the cards in the two decks, so
+    // passing them here avoids downloading the ENTIRE custom library (hundreds of
+    // base64-image cards) on a phone - which is what made the board take forever.
+    const wantNums = (onlyNumbers && (onlyNumbers.size || onlyNumbers.length))
+        ? new Set([...onlyNumbers].map(n => sanitizeKeyPart(n)))
+        : null;
+    // The number part of a storage key ("JJK1-001__collection" -> "JJK1-001").
+    const keyNumber = key => String(key).split("__")[0];
+    const keyWanted = key => !wantNums || wantNums.has(keyNumber(key));
 
     const indexSnapshot = await get(ref(database, INDEX_PATH));
     const index = indexSnapshot.val() || {};
@@ -181,6 +192,7 @@ export async function loadSharedCards(options = {}) {
     // A card needs downloading if we've never seen it, or the server copy is
     // newer than ours. Tombstoned keys have no body to fetch.
     const stale = liveKeys.filter(key => {
+        if (!keyWanted(key)) return false;   // not one of the decks' cards - skip it
         const mine = cachedByKey.get(key);
         if (!mine) return true;
         return Number(mine.updatedAt || 0) !== Number(index[key]?.updatedAt || 0);
@@ -256,7 +268,7 @@ export async function loadSharedCards(options = {}) {
         // under a legacy number-only key ("JJK1") won't recompute to the same key
         // once it has a collection ("JJK1__collection"), so edit/delete rely on
         // this to remove the real entry instead of orphaning it.
-        cards: liveKeys.map(key => {
+        cards: liveKeys.filter(keyWanted).map(key => {
             const card = cachedByKey.get(key);
             if (card) card.__storageKey = key;
             return card;
@@ -265,7 +277,7 @@ export async function loadSharedCards(options = {}) {
         // tombstones so a deleted bundled card doesn't come back from the file.
         deleted,
         fetched: downloaded.length,
-        cached: liveKeys.length - downloaded.length
+        cached: liveKeys.filter(keyWanted).length - downloaded.length
     };
 }
 
