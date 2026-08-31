@@ -4874,3 +4874,20 @@ html.touch-device .game-log {
     color:rgba(255,255,255,.4);font-weight:700;font-size:9px;
     text-transform:uppercase;letter-spacing:.06em;margin-right:2px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE BOARD REDESIGN (touch only) — increment: dark playmat theme.
+   Gated to html.touch-device so desktop is untouched. !important so it also
+   shows over any custom playmat image while we're prototyping the new look.
+   ═══════════════════════════════════════════════════════════════════════════ */
+html.touch-device .play-area,
+html.touch-device .opponent-area {
+    background:
+        radial-gradient(120% 95% at 50% 0%, rgba(52, 209, 196, .10), rgba(52, 209, 196, 0) 55%),
+        radial-gradient(130% 100% at 50% 100%, #2a2340 0%, rgba(42, 35, 64, 0) 60%),
+        linear-gradient(#1b1730, #120f1e) !important;
+    border-color: rgba(255, 255, 255, .10) !important;
+}
+html.touch-device .game-board {
+    background: linear-gradient(#151122, #0d0a15) !important;
+}
