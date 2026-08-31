@@ -4914,32 +4914,48 @@ html.touch-device {
 html.touch-device .play-area {
     display: flex !important;
     flex-direction: row;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;                 /* lets the DON band drop to its own row */
     align-items: center;
+    align-content: center;
     justify-content: center;
-    gap: 6px;
-    width: max-content;
+    gap: 6px 8px;
+    width: 1600px;
     grid-template-columns: none !important;
     grid-template-rows: none !important;
-    padding: 6px 8px;
+    padding: 6px 10px;
 }
 /* card-sized side zones */
 html.touch-device .play-area .area {
-    width: 128px;
-    height: 180px;
+    width: 126px;
+    height: 178px;
     min-height: 0;
     flex: 0 0 auto;
     font-size: 12px;
     padding: 4px;
 }
-html.touch-device .play-area .leader-area { order: 1; }
-html.touch-device .play-area .life-area   { order: 2; }
-html.touch-device .play-area .stage-area  { order: 3; }
-html.touch-device .play-area .deck-area   { order: 4; }
-html.touch-device .play-area .trash-area  { order: 5; }
-html.touch-device .play-area .character-area { order: 6; }
-html.touch-device .play-area .don-area     { order: 7; }
-html.touch-device .play-area .don-deck-area { order: 8; }
+/* MAIN ROW (both halves), left → right:
+   characters (fills the middle) · stage · deck · trash · life · LEADER (right) */
+html.touch-device .play-area .character-area { order: 1; }
+html.touch-device .play-area .stage-area  { order: 2; }
+html.touch-device .play-area .deck-area   { order: 3; }
+html.touch-device .play-area .trash-area  { order: 4; }
+html.touch-device .play-area .life-area   { order: 5; }
+html.touch-device .play-area .leader-area { order: 6; }
+
+/* DON!! BAND — its own row.
+   YOUR side: at the BOTTOM (characters flex-fill the main row, so DON wraps
+   under it). OPPONENT: at the TOP (a full-width break before the main row pushes
+   their characters down onto the next line). */
+html.touch-device .player-area .don-area      { order: 8; }
+html.touch-device .player-area .don-deck-area { order: 9; }
+html.touch-device .opponent-area .don-area      { order: -2; }
+html.touch-device .opponent-area .don-deck-area { order: -1; }
+html.touch-device .opponent-area::before {
+    content: "";
+    order: 0;
+    flex: 0 0 100%;
+    height: 0;
+}
 
 /* characters in a horizontal row */
 html.touch-device .play-area .character-area {
@@ -4949,9 +4965,9 @@ html.touch-device .play-area .character-area {
     align-content: center;
     justify-content: center;
     gap: 6px;
-    flex: 0 1 auto;
+    flex: 1 1 0;
     min-width: 0;
-    height: 180px;
+    height: 178px;
     padding: 0 6px;
     grid-template-columns: none !important;
     grid-template-rows: none !important;
@@ -4966,12 +4982,12 @@ html.touch-device .play-area .character-slot {
     flex: 0 0 auto;
 }
 
-/* DON!! pool: a wider zone that wraps its (bigger, tappable) DON cards */
+/* DON!! band strip: wide but short, its own row, wraps the (bigger) DON cards */
 html.touch-device .play-area .don-area {
-    width: 176px;
-    height: 180px;
+    width: min(560px, 78%);
+    height: 92px;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 5px;
     align-content: center;
     justify-content: center;
     overflow: hidden;
@@ -4979,6 +4995,11 @@ html.touch-device .play-area .don-area {
 html.touch-device .play-area .don-card-img {
     width: 48px !important;
     height: 67px !important;
+}
+/* DON deck sits on the DON band too, so keep it band-height */
+html.touch-device .play-area .don-deck-area {
+    width: 66px;
+    height: 92px;
 }
 
 /* Life: compact overlapping stack instead of the 640px vertical fan */
@@ -4996,3 +5017,46 @@ html.touch-device .play-area .life-area:hover {
 html.touch-device .game-board { gap: 10px; }
 html.touch-device .hand { min-height: 220px; }
 html.touch-device .hand .hand-card-img { height: 190px; }
+
+/* ═══ MOBILE REDESIGN — clean mockup styling (touch only) ═══════════════════
+   Strip the heavy desktop chrome (3px black borders, grey slot fills, blur) and
+   restyle every zone as the mockup's soft dark rounded slots. */
+html.touch-device .play-area {
+    border: none !important;
+    background: transparent !important;
+}
+html.touch-device .play-area .area,
+html.touch-device .play-area .character-slot,
+html.touch-device .play-area .life-area {
+    border: 1px solid rgba(255, 255, 255, .12) !important;
+    border-radius: 11px !important;
+    background: rgba(255, 255, 255, .045) !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    color: rgba(255, 255, 255, .34);
+    font-size: 10px;
+    letter-spacing: .04em;
+}
+/* the character strip itself is just a subtle tray */
+html.touch-device .play-area .character-area {
+    background: rgba(255, 255, 255, .02) !important;
+    border: 1px solid rgba(255, 255, 255, .06) !important;
+    border-radius: 12px;
+}
+/* leaders get the accent frame from the mockup (gold; your side teal) */
+html.touch-device .player-area .leader-area {
+    border: 2px solid rgba(52, 209, 196, .7) !important;
+    box-shadow: 0 0 14px rgba(52, 209, 196, .3) !important;
+}
+html.touch-device .opponent-area .leader-area {
+    border: 2px solid rgba(246, 196, 69, .7) !important;
+}
+/* DON pool tray: gold-tinted like the mockup */
+html.touch-device .play-area .don-area {
+    border: 1px solid rgba(246, 196, 69, .3) !important;
+    background: linear-gradient(180deg, rgba(246, 196, 69, .10), transparent) !important;
+    border-radius: 11px !important;
+}
+/* the uppercase zone-name labels the desktop shows inside empty slots read as
+   clutter here - fade them right down */
+html.touch-device .play-area .area:not(.don-area) { text-transform: none; }
