@@ -4905,25 +4905,28 @@ html.touch-device .game-board {
    leader · life · stage · deck · trash · [characters] · DON pool · DON deck.
    ═══════════════════════════════════════════════════════════════════════════ */
 html.touch-device {
-    --tools-w: 158px;
-    --pile-rail-w: 140px;
+    /* Reclaim rail width for the board. The card-preview was dead on touch (no
+       hover), so the right rail is now just a thin game log. */
+    --tools-w: 148px;
+    --pile-rail-w: 86px;
+    --preview-rail-w: 150px;
 }
 html.touch-device .play-area {
     display: flex !important;
     flex-direction: row;
     flex-wrap: nowrap;
     align-items: center;
-    justify-content: flex-start;
-    gap: 8px;
-    width: 1560px;
+    justify-content: center;
+    gap: 6px;
+    width: max-content;
     grid-template-columns: none !important;
     grid-template-rows: none !important;
-    padding: 8px;
+    padding: 6px 8px;
 }
 /* card-sized side zones */
 html.touch-device .play-area .area {
-    width: 116px;
-    height: 164px;
+    width: 128px;
+    height: 180px;
     min-height: 0;
     flex: 0 0 auto;
     font-size: 12px;
@@ -4938,7 +4941,7 @@ html.touch-device .play-area .character-area { order: 6; }
 html.touch-device .play-area .don-area     { order: 7; }
 html.touch-device .play-area .don-deck-area { order: 8; }
 
-/* characters fill the middle, in a horizontal row */
+/* characters in a horizontal row */
 html.touch-device .play-area .character-area {
     display: flex !important;
     flex-direction: row;
@@ -4946,9 +4949,10 @@ html.touch-device .play-area .character-area {
     align-content: center;
     justify-content: center;
     gap: 6px;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-width: 0;
-    height: 164px;
+    height: 180px;
+    padding: 0 6px;
     grid-template-columns: none !important;
     grid-template-rows: none !important;
     background: rgba(255,255,255,.03);
@@ -4956,35 +4960,39 @@ html.touch-device .play-area .character-area {
 }
 html.touch-device .play-area .character-label { display: none; }
 html.touch-device .play-area .character-slot {
-    width: 104px;
-    height: 150px;
+    width: 126px;
+    height: 176px;
     min-height: 0;
     flex: 0 0 auto;
 }
 
 /* DON!! pool: a wider zone that wraps its (bigger, tappable) DON cards */
 html.touch-device .play-area .don-area {
-    width: 214px;
-    height: 164px;
+    width: 176px;
+    height: 180px;
     flex-wrap: wrap;
     gap: 4px;
     align-content: center;
-    justify-content: flex-start;
+    justify-content: center;
     overflow: hidden;
 }
 html.touch-device .play-area .don-card-img {
-    width: 40px !important;
-    height: 56px !important;
+    width: 48px !important;
+    height: 67px !important;
 }
 
 /* Life: compact overlapping stack instead of the 640px vertical fan */
 html.touch-device .play-area .life-area,
 html.touch-device .play-area .life-area.open,
 html.touch-device .play-area .life-area:hover {
-    width: 116px !important;
-    height: 164px !important;
+    width: 128px !important;
+    height: 180px !important;
     overflow: hidden;
 }
 
-/* Hands: a touch shorter so they don't dominate the board's height */
-html.touch-device .hand { min-height: 0; }
+/* Fill the screen top-to-bottom instead of sitting short with black bands:
+   bigger board gap + noticeably taller hands so the whole thing uses the height,
+   which also makes hand cards easier to see and tap. */
+html.touch-device .game-board { gap: 10px; }
+html.touch-device .hand { min-height: 220px; }
+html.touch-device .hand .hand-card-img { height: 190px; }
