@@ -4800,13 +4800,18 @@ body.extra-slots-off .extra-slots-wrap { display: none !important; }
    load/resize, after the touch-device class is set in <head>), so the play field
    still sizes correctly and does not shrink - it just fills less of the slack. */
 html.touch-device {
-    --preview-rail-w: 560px;
+    /* Slimmer preview/log rail on phones. The big card-zoom was mostly dead space
+       (it only filled on hover, which touch doesn't have), and the fat rail was
+       eating room the board layout wants. The log stays; the card zoom is compact
+       and still fills when you tap-inspect a card. */
+    --preview-rail-w: 300px;
 }
 html.touch-device .card-preview {
-    flex: 1 1 80%;
+    flex: 0 0 34%;
+    min-height: 0;
 }
 html.touch-device .game-log {
-    flex: 1 1 20%;
+    flex: 1 1 auto;
     min-height: 120px;
 }
 
