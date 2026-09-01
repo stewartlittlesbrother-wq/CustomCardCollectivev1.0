@@ -4928,8 +4928,8 @@ html.touch-device .extra-zones-column { display: none !important; }
 html.touch-device .play-area {
     display: grid !important;
     grid-template-columns: 1fr 122px 122px 122px 122px !important;
-    grid-template-rows: 95px 95px 110px !important;
-    gap: 6px 8px !important;
+    grid-template-rows: 80px 80px 92px !important;
+    gap: 5px 8px !important;
     width: 1180px !important;
     max-width: none !important;
     padding: 8px !important;
@@ -5050,9 +5050,23 @@ html.touch-device .play-area .life-area:hover {
 /* Fill the screen top-to-bottom instead of sitting short with black bands:
    bigger board gap + noticeably taller hands so the whole thing uses the height,
    which also makes hand cards easier to see and tap. */
-html.touch-device .game-board { gap: 8px; }
-html.touch-device .hand { min-height: 150px !important; }
-html.touch-device .hand .hand-card-img { height: 128px !important; }
+html.touch-device .game-board { gap: 6px; }
+html.touch-device .hand { min-height: 132px !important; }
+html.touch-device .hand .hand-card-img { height: 116px !important; }
+
+/* Move "Back to Lobby" into the tools column (top-left) so it stops taking a
+   dead strip across the top of the board; push the tools down to make room. */
+html.touch-device .btn-back {
+    left: 6px !important;
+    top: 6px !important;
+    width: calc(var(--tools-w) - 12px) !important;
+    padding: 7px 6px !important;
+    font-size: 12px !important;
+    text-align: center !important;
+    border-radius: 8px !important;
+    z-index: 10001 !important;
+}
+html.touch-device .manual-sidebar { padding-top: 44px !important; }
 
 /* ═══ MOBILE REDESIGN — clean mockup styling (touch only) ═══════════════════
    Strip the heavy desktop chrome (3px black borders, grey slot fills, blur) and
