@@ -5051,8 +5051,10 @@ html.touch-device .play-area .life-area:hover {
    bigger board gap + noticeably taller hands so the whole thing uses the height,
    which also makes hand cards easier to see and tap. */
 html.touch-device .game-board { gap: 6px; }
-html.touch-device .hand { min-height: 132px !important; }
-html.touch-device .hand .hand-card-img { height: 116px !important; }
+/* Hand is the most-touched zone, so keep it big even though it costs the board a
+   little height. */
+html.touch-device .hand { min-height: 178px !important; }
+html.touch-device .hand .hand-card-img { height: 165px !important; }
 
 /* Move "Back to Lobby" into the tools column (top-left) so it stops taking a
    dead strip across the top of the board; push the tools down to make room. */
@@ -5110,3 +5112,22 @@ html.touch-device .play-area .don-area {
 /* the uppercase zone-name labels the desktop shows inside empty slots read as
    clutter here - fade them right down */
 html.touch-device .play-area .area:not(.don-area) { text-transform: none; }
+
+/* ═══ Touch: readable card viewer ═══════════════════════════════════════════
+   The Inspect popup was height-limited on a short landscape screen. Let the card
+   fill the viewport so it's actually readable on a phone. */
+html.touch-device .search-card-image-popup {
+    width: auto !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100vh - 12px) !important;
+    padding: 8px 10px !important;
+    gap: 5px !important;
+}
+html.touch-device .search-card-image-large {
+    width: auto !important;
+    height: calc(100vh - 66px) !important;
+    max-height: calc(100vh - 66px) !important;
+    max-width: calc(100vw - 30px) !important;
+}
+html.touch-device .search-card-image-popup h3 { font-size: 13px !important; margin: 0 !important; }
+html.touch-device .search-card-image-buttons { gap: 6px !important; }

@@ -6606,7 +6606,38 @@ function showCardPreview(imageSrc) {
     previewImage.src = imageSrc;
     previewImage.style.display = "block";
     previewPlaceholder.style.display = "none";
+
+    // The side preview is small (tiny on a phone), so let a tap on it blow the
+    // card up to a full-screen readable overlay.
+    previewImage.style.cursor = "zoom-in";
+    previewImage.onclick = () => showBigCardImage(previewImage.src);
 }
+
+// Full-screen readable card viewer - tap anywhere to close. Used on touch where
+// the little side panel can't be read.
+function showBigCardImage(src) {
+    if (!src) return;
+    let ov = document.getElementById("bigCardOverlay");
+    if (!ov) {
+        ov = document.createElement("div");
+        ov.id = "bigCardOverlay";
+        ov.style.cssText =
+            "position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;" +
+            "justify-content:center;background:rgba(0,0,0,.88);padding:10px;";
+        const img = document.createElement("img");
+        img.alt = "Card";
+        img.style.cssText =
+            "height:calc(100vh - 28px);max-height:calc(100vh - 28px);width:auto;" +
+            "max-width:calc(100vw - 20px);object-fit:contain;border-radius:14px;" +
+            "box-shadow:0 20px 60px rgba(0,0,0,.7);";
+        ov.appendChild(img);
+        ov.addEventListener("click", () => { ov.style.display = "none"; });
+        document.body.appendChild(ov);
+    }
+    ov.querySelector("img").src = src;
+    ov.style.display = "flex";
+}
+window.showBigCardImage = showBigCardImage;
 
 function clearCardPreview() {
     const previewImage = document.getElementById("previewImage");
