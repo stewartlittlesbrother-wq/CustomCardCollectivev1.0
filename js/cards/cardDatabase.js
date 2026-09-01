@@ -48,25 +48,59 @@ async function loadSharedCardsForGame(onlyNumbers) {
 // needs (practice = both decks are known up front), only those are pulled from
 // the shared library instead of the whole thing. Omit it (online/spectator,
 // where the opponent's cards arrive live) to load everything.
+// Every card number referenced by ANY of this device's saved decks (leaders,
+// deck lists, tokens, starting cards). Used to prioritise the download so the
+// cards you actually play load first.
+function savedDeckCardNumbers() {
+    const nums = new Set();
+    try {
+        const decks = JSON.parse(localStorage.getItem("custom-cards-sim-luffy-only-saved-decks-v1") || "[]");
+        if (Array.isArray(decks)) decks.forEach(d => {
+            if (!d) return;
+            if (d.leaderId) nums.add(d.leaderId);
+            if (d.deck) Object.keys(d.deck).forEach(id => nums.add(id));
+            if (Array.isArray(d.tokens)) d.tokens.forEach(t => t && nums.add(t));
+            if (Array.isArray(d.startingCards)) d.startingCards.forEach(e => e && e.id && nums.add(e.id));
+        });
+    } catch (e) {}
+    return nums;
+}
+
 async function loadCardDatabase(neededNumbers) {
     const loadedCards = await loadPermanentCardFiles();
     const importedCards = loadImportedCardsForGame();
 
-    // Fast path: pull only the decks' cards from the shared library.
-    let { cards: sharedCards, deleted } = await loadSharedCardsForGame(neededNumbers);
-    assembleGameDatabase(loadedCards, sharedCards, importedCards, deleted);
-
-    // Safety net: a deck can reference a custom card by an imported uuid `id` that
-    // doesn't match the number its library key uses, so the targeted load could
-    // miss it. If any needed card didn't resolve, load the FULL library once and
-    // rebuild - correctness always wins over the speed-up.
     if (neededNumbers) {
+        // Practice: pull ONLY the two decks' cards, with a full-load safety net if
+        // a card is keyed by an odd imported uuid that the targeted load missed.
+        let { cards, deleted } = await loadSharedCardsForGame(neededNumbers);
+        assembleGameDatabase(loadedCards, cards, importedCards, deleted);
         const missing = [...neededNumbers].some(num => num && !cardDatabase[num] && !leaders[num]);
         if (missing) {
             console.log("Targeted card load missed a deck card; loading full library.");
-            ({ cards: sharedCards, deleted } = await loadSharedCardsForGame());
-            assembleGameDatabase(loadedCards, sharedCards, importedCards, deleted);
+            ({ cards, deleted } = await loadSharedCardsForGame());
+            assembleGameDatabase(loadedCards, cards, importedCards, deleted);
         }
+        return;
+    }
+
+    // Online / spectator / lobby: the opponent's cards aren't known up front, so
+    // the whole library is needed eventually - but don't make you WAIT for all of
+    // it. Load YOUR saved decks' cards FIRST (fast, everything you'll touch), let
+    // the page open, then pull the rest of the library in the BACKGROUND and
+    // rebuild so an opponent's custom cards resolve once they show up.
+    const priority = savedDeckCardNumbers();
+    if (priority.size) {
+        const { cards, deleted } = await loadSharedCardsForGame(priority);
+        assembleGameDatabase(loadedCards, cards, importedCards, deleted);
+
+        loadSharedCardsForGame().then(({ cards, deleted }) => {
+            assembleGameDatabase(loadedCards, cards, importedCards, deleted);
+            try { if (typeof window.onCardDatabaseUpdated === "function") window.onCardDatabaseUpdated(); } catch (e) {}
+        }).catch(() => {});
+    } else {
+        const { cards, deleted } = await loadSharedCardsForGame();
+        assembleGameDatabase(loadedCards, cards, importedCards, deleted);
     }
 }
 

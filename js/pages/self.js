@@ -2454,6 +2454,17 @@ function collectNeededCardNumbers() {
     return nums.size ? nums : null;
 }
 
+// The online card load pulls YOUR saved decks first, then the rest of the shared
+// library in the background. When that finishes, re-render so any opponent cards
+// that were waiting on their artwork now show it.
+window.onCardDatabaseUpdated = function reRenderAfterCardLoad() {
+    if (typeof gameState === "undefined" || !gameState) return;
+    try {
+        renderLeaders(); renderCharacters(); renderStages();
+        renderTrash(); renderHands(); renderDecks();
+    } catch (e) { /* board not ready yet */ }
+};
+
 async function initializeGamePage() {
     applyBoardDisplaySettings();
     setupExtraSlotsToggle();

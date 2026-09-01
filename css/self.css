@@ -4807,12 +4807,12 @@ html.touch-device {
     --preview-rail-w: 300px;
 }
 html.touch-device .card-preview {
-    flex: 0 0 34%;
+    flex: 0 0 52%;
     min-height: 0;
 }
 html.touch-device .game-log {
     flex: 1 1 auto;
-    min-height: 120px;
+    min-height: 90px;
 }
 
 /* ── In-game art switcher popup ──────────────────────────────────────────────
@@ -4911,9 +4911,9 @@ html.touch-device {
     /* self.html uses a 1100px viewport on phones (down from 1980), so the WHOLE
        page renders ~1.8x bigger - the fix for "everything tiny". Rails slimmed to
        leave the board room; piles rail hidden on touch (see below). */
-    --tools-w: 150px;
+    --tools-w: 146px;
     --pile-rail-w: 0px;
-    --preview-rail-w: 176px;
+    --preview-rail-w: 210px;
 }
 /* The token/face-up/face-down piles rail is hidden on phones to give the board
    room; those are optional custom zones. */
@@ -4928,7 +4928,7 @@ html.touch-device .extra-zones-column { display: none !important; }
 html.touch-device .play-area {
     display: grid !important;
     grid-template-columns: 1fr 122px 122px 122px 122px !important;
-    grid-template-rows: 88px 88px auto !important;
+    grid-template-rows: 95px 95px 110px !important;
     gap: 6px 8px !important;
     width: 1180px !important;
     max-width: none !important;
@@ -4955,12 +4955,15 @@ html.touch-device .play-area .leader-area    { grid-area: leader !important; }
 html.touch-device .play-area .don-area       { grid-area: dband !important; }
 html.touch-device .play-area .don-deck-area  { grid-area: dondeck !important; }
 
-/* card-sized side zones (main row cells) */
+/* card-sized side zones (main row cells). min-height:0 so grid items never
+   exceed their track height (default min-height:auto overflows). */
 html.touch-device .play-area .area {
-    height: 178px;
-    min-height: 0;
+    height: auto !important;
+    min-height: 0 !important;
+    min-width: 0 !important;
     font-size: 12px;
     padding: 4px;
+    overflow: hidden !important;
 }
 
 /* characters in a horizontal row */
@@ -5001,24 +5004,35 @@ html.touch-device .play-area .don-area {
     overflow: hidden !important;
 }
 html.touch-device .play-area .don-card-img {
-    width: 48px !important;
-    height: 67px !important;
+    width: 66px !important;
+    height: 92px !important;
+    margin-left: 0 !important;
 }
 /* DON deck sits on the DON band too, so keep it band-height */
 html.touch-device .play-area .don-deck-area {
     width: 66px;
     height: 92px;
 }
-/* Stacked deck + trash: each compact (half-card) so the pair isn't taller than a
-   single card - otherwise it balloons the whole board height. */
+/* Stacked deck + trash: clip each to its cell so a too-tall card image can never
+   spill into the neighbour (that was the overlap), and fit the image to the cell. */
+html.touch-device .play-area .deck-area,
+html.touch-device .play-area .trash-area {
+    overflow: hidden !important;
+    padding: 3px !important;
+    min-height: 0 !important;   /* grid items default to min-height:auto (= content
+                                   height), which let the 165px card image spill
+                                   into the next cell - THAT was the overlap. */
+    height: 100% !important;
+}
 html.touch-device .play-area .deck-area .deck-card-img,
 html.touch-device .play-area .trash-area .deck-card-img,
 html.touch-device .play-area .trash-area .board-card-img,
 html.touch-device .play-area .trash-area .life-card-img {
     width: auto !important;
-    height: 86px !important;
+    height: 100% !important;
     max-width: 100% !important;
-    max-height: 86px !important;
+    max-height: 100% !important;
+    object-fit: contain !important;
 }
 
 /* Life: compact overlapping stack instead of the 640px vertical fan */
