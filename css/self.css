@@ -4908,12 +4908,16 @@ html.touch-device .game-board {
    leader · life · stage · deck · trash · [characters] · DON pool · DON deck.
    ═══════════════════════════════════════════════════════════════════════════ */
 html.touch-device {
-    /* Reclaim rail width for the board. The card-preview was dead on touch (no
-       hover), so the right rail is now just a thin game log. */
-    --tools-w: 148px;
-    --pile-rail-w: 86px;
-    --preview-rail-w: 150px;
+    /* self.html uses a 1100px viewport on phones (down from 1980), so the WHOLE
+       page renders ~1.8x bigger - the fix for "everything tiny". Rails slimmed to
+       leave the board room; piles rail hidden on touch (see below). */
+    --tools-w: 150px;
+    --pile-rail-w: 0px;
+    --preview-rail-w: 176px;
 }
+/* The token/face-up/face-down piles rail is hidden on phones to give the board
+   room; those are optional custom zones. */
+html.touch-device .extra-zones-column { display: none !important; }
 /* DETERMINISTIC CSS GRID — each zone placed in a named cell, mirroring the model.
    Main row: characters (wide) · stage · deck · trash · life · LEADER (right).
    DON band: its own row spanning the width + the DON deck at the end.
@@ -4923,10 +4927,10 @@ html.touch-device {
    already more specific) to win on touch. */
 html.touch-device .play-area {
     display: grid !important;
-    grid-template-columns: 1fr 126px 126px 126px 126px 126px !important;
-    grid-template-rows: auto auto !important;
-    gap: 8px !important;
-    width: 1600px !important;
+    grid-template-columns: 1fr 122px 122px 122px 122px !important;
+    grid-template-rows: 88px 88px auto !important;
+    gap: 6px 8px !important;
+    width: 1180px !important;
     max-width: none !important;
     padding: 8px !important;
     align-items: stretch !important;
@@ -4938,8 +4942,9 @@ html.touch-device .play-area {
    opposite yours). */
 html.touch-device .play-area {
     grid-template-areas:
-        "chars stage deck trash life leader"
-        "dband dband dband dband dband dondeck" !important;
+        "chars stage deck  life leader"
+        "chars stage trash life leader"
+        "dband dband dband dband dondeck" !important;
 }
 html.touch-device .play-area .character-area { grid-area: chars !important; }
 html.touch-device .play-area .stage-area     { grid-area: stage !important; }
@@ -4962,12 +4967,14 @@ html.touch-device .play-area .area {
 html.touch-device .play-area .character-area {
     display: flex !important;
     flex-direction: row !important;
-    flex-wrap: wrap !important;
+    flex-wrap: nowrap !important;
     align-content: center !important;
+    align-items: center !important;
     justify-content: center !important;
     gap: 6px !important;
     min-width: 0;
     height: auto !important;
+    overflow: hidden !important;
     padding: 0 6px !important;
     grid-template-columns: none !important;
     grid-template-rows: none !important;
@@ -4976,8 +4983,8 @@ html.touch-device .play-area .character-area {
 }
 html.touch-device .play-area .character-label { display: none !important; }
 html.touch-device .play-area .character-slot {
-    width: 118px !important;
-    height: 166px !important;
+    width: 108px !important;
+    height: 152px !important;
     min-height: 0;
     flex: 0 0 auto !important;
 }
@@ -5002,6 +5009,17 @@ html.touch-device .play-area .don-deck-area {
     width: 66px;
     height: 92px;
 }
+/* Stacked deck + trash: each compact (half-card) so the pair isn't taller than a
+   single card - otherwise it balloons the whole board height. */
+html.touch-device .play-area .deck-area .deck-card-img,
+html.touch-device .play-area .trash-area .deck-card-img,
+html.touch-device .play-area .trash-area .board-card-img,
+html.touch-device .play-area .trash-area .life-card-img {
+    width: auto !important;
+    height: 86px !important;
+    max-width: 100% !important;
+    max-height: 86px !important;
+}
 
 /* Life: compact overlapping stack instead of the 640px vertical fan */
 html.touch-device .play-area .life-area,
@@ -5018,9 +5036,9 @@ html.touch-device .play-area .life-area:hover {
 /* Fill the screen top-to-bottom instead of sitting short with black bands:
    bigger board gap + noticeably taller hands so the whole thing uses the height,
    which also makes hand cards easier to see and tap. */
-html.touch-device .game-board { gap: 10px; }
-html.touch-device .hand { min-height: 220px; }
-html.touch-device .hand .hand-card-img { height: 190px; }
+html.touch-device .game-board { gap: 8px; }
+html.touch-device .hand { min-height: 150px !important; }
+html.touch-device .hand .hand-card-img { height: 128px !important; }
 
 /* ═══ MOBILE REDESIGN — clean mockup styling (touch only) ═══════════════════
    Strip the heavy desktop chrome (3px black borders, grey slot fills, blur) and
