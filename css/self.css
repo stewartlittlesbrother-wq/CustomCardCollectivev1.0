@@ -4895,6 +4895,9 @@ html.touch-device .opponent-area {
 }
 html.touch-device .game-board {
     background: linear-gradient(#151122, #0d0a15) !important;
+    /* Desktop pins this to 1200px, but the mobile play-areas are 1600px wide -
+       let the board grow to its content so they don't overflow / get clipped. */
+    width: max-content !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -4915,33 +4918,37 @@ html.touch-device {
    Main row: characters (wide) · stage · deck · trash · life · LEADER (right).
    DON band: its own row spanning the width + the DON deck at the end.
    Player: DON band at BOTTOM. Opponent: DON band at TOP (rows swapped). */
+/* NOTE: the desktop "Final match-table pass" hard-codes the board grid with
+   !important on every property, so ALL of these must be !important (and they're
+   already more specific) to win on touch. */
 html.touch-device .play-area {
     display: grid !important;
-    grid-template-columns: 1fr 126px 126px 126px 126px 126px;
-    gap: 8px;
-    width: 1600px;
-    padding: 8px;
-    align-items: stretch;
-    justify-items: stretch;
+    grid-template-columns: 1fr 126px 126px 126px 126px 126px !important;
+    grid-template-rows: auto auto !important;
+    gap: 8px !important;
+    width: 1600px !important;
+    max-width: none !important;
+    padding: 8px !important;
+    align-items: stretch !important;
+    justify-items: stretch !important;
 }
-html.touch-device .player-area {
+/* Same template for both. The opponent area is rotated 180deg (matrix(-1,...)),
+   so this single layout renders mirror-flipped for them automatically - a real
+   facing-table layout (their DON ends up at THEIR edge, leader diagonally
+   opposite yours). */
+html.touch-device .play-area {
     grid-template-areas:
         "chars stage deck trash life leader"
-        "dband dband dband dband dband dondeck";
+        "dband dband dband dband dband dondeck" !important;
 }
-html.touch-device .opponent-area {
-    grid-template-areas:
-        "dband dband dband dband dband dondeck"
-        "chars stage deck trash life leader";
-}
-html.touch-device .play-area .character-area { grid-area: chars; }
-html.touch-device .play-area .stage-area     { grid-area: stage; }
-html.touch-device .play-area .deck-area      { grid-area: deck; }
-html.touch-device .play-area .trash-area     { grid-area: trash; }
-html.touch-device .play-area .life-area      { grid-area: life; }
-html.touch-device .play-area .leader-area    { grid-area: leader; }
-html.touch-device .play-area .don-area       { grid-area: dband; }
-html.touch-device .play-area .don-deck-area  { grid-area: dondeck; }
+html.touch-device .play-area .character-area { grid-area: chars !important; }
+html.touch-device .play-area .stage-area     { grid-area: stage !important; }
+html.touch-device .play-area .deck-area      { grid-area: deck !important; }
+html.touch-device .play-area .trash-area     { grid-area: trash !important; }
+html.touch-device .play-area .life-area      { grid-area: life !important; }
+html.touch-device .play-area .leader-area    { grid-area: leader !important; }
+html.touch-device .play-area .don-area       { grid-area: dband !important; }
+html.touch-device .play-area .don-deck-area  { grid-area: dondeck !important; }
 
 /* card-sized side zones (main row cells) */
 html.touch-device .play-area .area {
@@ -4954,37 +4961,37 @@ html.touch-device .play-area .area {
 /* characters in a horizontal row */
 html.touch-device .play-area .character-area {
     display: flex !important;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-content: center;
-    justify-content: center;
-    gap: 6px;
-    flex: 1 1 0;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-content: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
     min-width: 0;
-    height: 178px;
-    padding: 0 6px;
+    height: auto !important;
+    padding: 0 6px !important;
     grid-template-columns: none !important;
     grid-template-rows: none !important;
     background: rgba(255,255,255,.03);
     border-radius: 8px;
 }
-html.touch-device .play-area .character-label { display: none; }
+html.touch-device .play-area .character-label { display: none !important; }
 html.touch-device .play-area .character-slot {
-    width: 126px;
-    height: 176px;
+    width: 118px !important;
+    height: 166px !important;
     min-height: 0;
-    flex: 0 0 auto;
+    flex: 0 0 auto !important;
 }
 
 /* DON!! band strip: fills its own grid row, short, wraps the (bigger) DON cards */
 html.touch-device .play-area .don-area {
-    width: auto;
-    height: 92px;
-    flex-wrap: wrap;
-    gap: 5px;
-    align-content: center;
-    justify-content: center;
-    overflow: hidden;
+    width: auto !important;
+    height: 92px !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 5px !important;
+    align-content: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
 }
 html.touch-device .play-area .don-card-img {
     width: 48px !important;
@@ -5000,9 +5007,12 @@ html.touch-device .play-area .don-deck-area {
 html.touch-device .play-area .life-area,
 html.touch-device .play-area .life-area.open,
 html.touch-device .play-area .life-area:hover {
-    width: 128px !important;
-    height: 180px !important;
-    overflow: hidden;
+    width: auto !important;
+    height: auto !important;
+    display: block !important;
+    position: relative !important;
+    overflow: hidden !important;
+    padding: 0 !important;
 }
 
 /* Fill the screen top-to-bottom instead of sitting short with black bands:
