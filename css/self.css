@@ -4911,50 +4911,44 @@ html.touch-device {
     --pile-rail-w: 86px;
     --preview-rail-w: 150px;
 }
+/* DETERMINISTIC CSS GRID — each zone placed in a named cell, mirroring the model.
+   Main row: characters (wide) · stage · deck · trash · life · LEADER (right).
+   DON band: its own row spanning the width + the DON deck at the end.
+   Player: DON band at BOTTOM. Opponent: DON band at TOP (rows swapped). */
 html.touch-device .play-area {
-    display: flex !important;
-    flex-direction: row;
-    flex-wrap: wrap;                 /* lets the DON band drop to its own row */
-    align-items: center;
-    align-content: center;
-    justify-content: center;
-    gap: 6px 8px;
+    display: grid !important;
+    grid-template-columns: 1fr 126px 126px 126px 126px 126px;
+    gap: 8px;
     width: 1600px;
-    grid-template-columns: none !important;
-    grid-template-rows: none !important;
-    padding: 6px 10px;
+    padding: 8px;
+    align-items: stretch;
+    justify-items: stretch;
 }
-/* card-sized side zones */
+html.touch-device .player-area {
+    grid-template-areas:
+        "chars stage deck trash life leader"
+        "dband dband dband dband dband dondeck";
+}
+html.touch-device .opponent-area {
+    grid-template-areas:
+        "dband dband dband dband dband dondeck"
+        "chars stage deck trash life leader";
+}
+html.touch-device .play-area .character-area { grid-area: chars; }
+html.touch-device .play-area .stage-area     { grid-area: stage; }
+html.touch-device .play-area .deck-area      { grid-area: deck; }
+html.touch-device .play-area .trash-area     { grid-area: trash; }
+html.touch-device .play-area .life-area      { grid-area: life; }
+html.touch-device .play-area .leader-area    { grid-area: leader; }
+html.touch-device .play-area .don-area       { grid-area: dband; }
+html.touch-device .play-area .don-deck-area  { grid-area: dondeck; }
+
+/* card-sized side zones (main row cells) */
 html.touch-device .play-area .area {
-    width: 126px;
     height: 178px;
     min-height: 0;
-    flex: 0 0 auto;
     font-size: 12px;
     padding: 4px;
-}
-/* MAIN ROW (both halves), left → right:
-   characters (fills the middle) · stage · deck · trash · life · LEADER (right) */
-html.touch-device .play-area .character-area { order: 1; }
-html.touch-device .play-area .stage-area  { order: 2; }
-html.touch-device .play-area .deck-area   { order: 3; }
-html.touch-device .play-area .trash-area  { order: 4; }
-html.touch-device .play-area .life-area   { order: 5; }
-html.touch-device .play-area .leader-area { order: 6; }
-
-/* DON!! BAND — its own row.
-   YOUR side: at the BOTTOM (characters flex-fill the main row, so DON wraps
-   under it). OPPONENT: at the TOP (a full-width break before the main row pushes
-   their characters down onto the next line). */
-html.touch-device .player-area .don-area      { order: 8; }
-html.touch-device .player-area .don-deck-area { order: 9; }
-html.touch-device .opponent-area .don-area      { order: -2; }
-html.touch-device .opponent-area .don-deck-area { order: -1; }
-html.touch-device .opponent-area::before {
-    content: "";
-    order: 0;
-    flex: 0 0 100%;
-    height: 0;
 }
 
 /* characters in a horizontal row */
@@ -4982,9 +4976,9 @@ html.touch-device .play-area .character-slot {
     flex: 0 0 auto;
 }
 
-/* DON!! band strip: wide but short, its own row, wraps the (bigger) DON cards */
+/* DON!! band strip: fills its own grid row, short, wraps the (bigger) DON cards */
 html.touch-device .play-area .don-area {
-    width: min(560px, 78%);
+    width: auto;
     height: 92px;
     flex-wrap: wrap;
     gap: 5px;
