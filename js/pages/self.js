@@ -4495,6 +4495,15 @@ function renderDeck(player, deckAreaId) {
             event.stopPropagation();
             showDeckContextMenu(event, player, "deck", "Deck");
         };
+        // On mobile a plain TAP opens the same multi-choice menu (draw / look /
+        // move), instead of doing nothing or accidentally starting a drag.
+        if (document.documentElement.classList.contains("touch-device")) {
+            img.onclick = (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                showDeckContextMenu(event, player, "deck", "Deck");
+            };
+        }
 
         deckArea.appendChild(img);
     } else {
@@ -4841,12 +4850,24 @@ function showDeckContextMenu(event, player, pileKey = "deck", pileLabel = "Deck"
         window.scheduleOnlineBoardSync?.();
     };
 
+    if (pileKey === "deck" && total > 0) {
+        addItem("Draw 1 card", () => {
+            player.hand.push(player.deck.pop());
+            window.renderDecks?.();
+            window.renderHands?.();
+            addGameLog(`${player.name} drew a card.`);
+            window.scheduleOnlineBoardSync?.();
+        });
+    }
+
     if (total > 0) {
         addItem("Look at top X", () =>
             promptTopCount("Look at", count => showDeckViewer(player, pileKey, pileLabel, count)));
 
-        addItem("Send top X → trash", () =>
-            promptTopCount("Send to trash", count => sendTop(count, "trash", "trash")));
+        if (pileKey !== "trash") {
+            addItem("Send top X → trash", () =>
+                promptTopCount("Send to trash", count => sendTop(count, "trash", "trash")));
+        }
 
         addItem("Add top X → hand", () =>
             promptTopCount("Add to hand", count => sendTop(count, "hand", "hand")));
@@ -6019,7 +6040,11 @@ function confirmDeckMove(position, cardName, onConfirm) {
     const overlay = document.createElement("div");
     overlay.id = "deckMoveConfirm";
     overlay.className = "confirm-overlay";
-    overlay.addEventListener("click", () => overlay.remove());
+    // Bind the tap-outside-to-close on the NEXT tick, otherwise the very tap that
+    // opened this dialog (from the menu button) lands on the freshly-inserted
+    // full-screen overlay and closes it instantly - which looked like "no
+    // confirmation ever appears".
+    setTimeout(() => overlay.addEventListener("click", () => overlay.remove()), 0);
 
     const panel = document.createElement("div");
     panel.className = "confirm-panel";
@@ -6155,10 +6180,11 @@ function openMyLifePopup(player, playerKey) {
                     b.textContent = opt.label;
                     b.addEventListener("click", (ev) => {
                         ev.stopPropagation();
+                        // Close this popup BEFORE running the action. A deck move
+                        // opens a confirm sheet, and re-opening this popup on top
+                        // of it hid the confirm (looked like "no confirmation").
+                        overlay.remove();
                         opt.action();
-                        // Life changed — refresh the popup (or close if now empty).
-                        if (player.life.length) openMyLifePopup(player, playerKey);
-                        else overlay.remove();
                     });
                     menu.appendChild(b);
                 });
@@ -6610,10 +6636,18 @@ function renderPlayerTrash(player, trashAreaId) {
 
     trashArea.innerHTML = "";
     trashArea.classList.toggle("clickable-trash", player.trash.length > 0);
-    trashArea.onclick = () => {
+    trashArea.onclick = (event) => {
         if (player.trash.length === 0) return;
-        // Use the full deck-style viewer so it stays open across actions and has
-        // the same controls (send to hand / bottom of deck / reorder).
+        // On mobile a tap opens the same multi-choice menu (its "Open trash"
+        // item leads to the full viewer); desktop keeps opening the viewer
+        // directly. The viewer has the per-card controls (send to hand / deck).
+        if (document.documentElement.classList.contains("touch-device")) {
+            showDeckContextMenu(
+                { clientX: window.innerWidth / 2, clientY: window.innerHeight / 2 },
+                player, "trash", "Trash"
+            );
+            return;
+        }
         showDeckViewer(player, "trash", "Trash");
     };
 

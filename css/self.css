@@ -5368,12 +5368,13 @@ html.touch-device .player-hand {
     background: transparent !important;
     z-index: 40 !important;
 }
-/* flat cards, anchored to the RIGHT; each shifts left by a fixed step so they
-   overlap only slightly. Rightmost card (index 0) sits on top. */
+/* flat cards, anchored to the RIGHT, laid side by side with NO overlap (a tiny
+   gap between them). Each card is ~0.716 × its height wide, so a step a little
+   above that clears the neighbour. Rightmost card (index 0) sits on top. */
 html.touch-device .player-hand .hand-card {
     position: absolute !important;
     left: auto !important;
-    right: calc(var(--hand-index, 0) * 54px) !important;
+    right: calc(var(--hand-index, 0) * (var(--mch) * 0.72 + 5px)) !important;
     bottom: 2px !important;
     top: auto !important;
     width: auto !important;
