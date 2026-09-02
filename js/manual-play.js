@@ -693,27 +693,57 @@ const manualPlay = {
             const extraTarget = getExtraDropTarget(e);
             const flags = { fromDeck, fromLife, fromHand, fromExtra, extraPile };
 
-            if (extraTarget) {
-                // Any card -> an extra pile.
-                handleDropIntoExtra(e, cardInstanceId, playerKey, extraTarget, flags);
-            } else if (fromExtra === "true") {
-                // Extra pile -> any other zone.
-                handleExtraCardDrop(e, cardInstanceId, playerKey, extraPile);
-            } else if (fromDeck === "true") {
-                handleDeckCardDrop(e, cardInstanceId, playerKey);
-            } else if (fromLife === "true") {
-                handleLifeCardDrop(e, cardInstanceId, playerKey, lifeIndex);
-            } else if (fromHand === "true") {
-                handleHandCardDrop(e, cardInstanceId, playerKey);
-            } else if (fromHand === "false") {
-                handleBoardCardDrop(e, cardInstanceId, playerKey);
+            // Run the actual move. Deferred behind a confirm for deck drops (below).
+            const finishDrop = () => {
+                if (extraTarget) {
+                    // Any card -> an extra pile.
+                    handleDropIntoExtra(e, cardInstanceId, playerKey, extraTarget, flags);
+                } else if (fromExtra === "true") {
+                    // Extra pile -> any other zone.
+                    handleExtraCardDrop(e, cardInstanceId, playerKey, extraPile);
+                } else if (fromDeck === "true") {
+                    handleDeckCardDrop(e, cardInstanceId, playerKey);
+                } else if (fromLife === "true") {
+                    handleLifeCardDrop(e, cardInstanceId, playerKey, lifeIndex);
+                } else if (fromHand === "true") {
+                    handleHandCardDrop(e, cardInstanceId, playerKey);
+                } else if (fromHand === "false") {
+                    handleBoardCardDrop(e, cardInstanceId, playerKey);
+                }
+
+                // A card was handled - play the "moving a card" click.
+                window.playCardSound?.();
+
+                // Propagate the resulting state to the opponent (no-op in local play).
+                window.scheduleOnlineBoardSync?.();
+            };
+
+            // Dropping a card onto the DECK is a big deal (burying it top/bottom),
+            // and easy to do by accident on a phone — confirm first. The card
+            // hasn't left its source yet (that happens inside the handlers), so a
+            // "Cancel" simply does nothing and the card stays where it was.
+            const deckDropTarget = (e.target && typeof e.target.closest === "function")
+                ? e.target.closest(".deck-area") : null;
+            const isTouch = document.documentElement.classList.contains("touch-device");
+            if (deckDropTarget && !extraTarget && fromDonArea !== "true" &&
+                isTouch && typeof window.confirmDeckMove === "function") {
+                const rect = deckDropTarget.getBoundingClientRect();
+                const isTop = e.clientY < rect.top + rect.height / 2;
+                const player = gameState[playerKey];
+                let cardName = "this card";
+                const pools = player
+                    ? [player.hand, player.life, player.deck, player.trash, player.characters]
+                    : [];
+                for (const pool of pools) {
+                    if (!Array.isArray(pool)) continue;
+                    const c = pool.find(x => x && x.instanceId === cardInstanceId);
+                    if (c) { cardName = c.name || cardName; break; }
+                }
+                window.confirmDeckMove(isTop ? "top" : "bottom", cardName, finishDrop);
+                return;   // wait for the player's answer
             }
 
-            // A card was handled - play the "moving a card" click.
-            window.playCardSound?.();
-
-            // Propagate the resulting state to the opponent (no-op in local play).
-            window.scheduleOnlineBoardSync?.();
+            finishDrop();
         }, false);
 
         // Remove a card by identity from whichever zone the drag started in.

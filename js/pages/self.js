@@ -6073,6 +6073,8 @@ function confirmDeckMove(position, cardName, onConfirm) {
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
 }
+// Exposed so the drag/drop system (manual-play.js) can confirm deck drops too.
+window.confirmDeckMove = confirmDeckMove;
 
 // The per-card action list for a life card — mirrors the desktop right-click
 // life-card menu so mobile has the same top/bottom-deck / hand / trash options.
