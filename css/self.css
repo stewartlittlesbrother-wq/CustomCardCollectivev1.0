@@ -5131,3 +5131,86 @@ html.touch-device .search-card-image-large {
 }
 html.touch-device .search-card-image-popup h3 { font-size: 13px !important; margin: 0 !important; }
 html.touch-device .search-card-image-buttons { gap: 6px !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE FILL MODE (touch) — the board FILLS its whole region instead of being a
+   fixed-size board scaled down and centered (which left the dead space). No
+   transform scale, so only the viewport scale applies = everything bigger too.
+   This block is last so it overrides the earlier fixed-size touch rules.
+   ═══════════════════════════════════════════════════════════════════════════ */
+html.touch-device .game-layout {
+    align-items: stretch !important;
+    justify-content: stretch !important;
+}
+html.touch-device .game-board {
+    transform: none !important;      /* kill the scale-to-fit; we fill instead */
+    width: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+    padding: 2px 0 !important;
+}
+/* hands take a fixed slice; the two play areas split the rest */
+html.touch-device .hand {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    height: 17% !important;
+}
+html.touch-device .play-area {
+    flex: 1 1 0 !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    grid-template-columns: 1fr 13% 13% 13% 13% !important;
+    grid-template-rows: 1fr 1fr 0.9fr !important;
+    gap: 4px !important;
+    padding: 4px 6px !important;
+}
+/* zones fill their cells; card images fit inside */
+html.touch-device .play-area .area,
+html.touch-device .play-area .life-area {
+    width: auto !important;
+    height: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+}
+html.touch-device .play-area .area img,
+html.touch-device .play-area .board-card-img,
+html.touch-device .play-area .leader-card-img,
+html.touch-device .play-area .deck-card-img,
+html.touch-device .play-area .life-card-img {
+    width: auto !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: contain !important;
+}
+/* characters share the wide first column, each filling equally */
+html.touch-device .play-area .character-area {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    gap: 4px !important;
+    height: auto !important;
+    padding: 0 !important;
+}
+html.touch-device .play-area .character-slot {
+    flex: 1 1 0 !important;
+    width: auto !important;
+    height: 100% !important;
+    min-width: 0 !important;
+}
+/* DON band fills its row; cards scale to it */
+html.touch-device .play-area .don-area {
+    height: auto !important;
+}
+html.touch-device .play-area .don-card-img {
+    width: auto !important;
+    height: 84% !important;
+    margin-left: 0 !important;
+}
+/* hand cards fill the hand strip height */
+html.touch-device .hand .hand-card-img {
+    height: 100% !important;
+    width: auto !important;
+}
