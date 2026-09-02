@@ -5278,12 +5278,27 @@ html.touch-device .play-area .life-area:hover {
     display: block !important;
     overflow: visible !important;
     padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
 }
-html.touch-device .play-area .life-card {
+/* Kill the desktop "expanded sideways" fan: on touch, :hover/.open fire on tap
+   and translateX the life cards up to +970px into the neighbouring zones (they
+   ended up sitting in the stage slot). Force them to stay in a compact vertical
+   stack in their own column instead. transform:none also beats those non-!important
+   translateX rules regardless of specificity. */
+html.touch-device .play-area .life-card,
+html.touch-device .play-area .life-area:hover .life-card,
+html.touch-device .play-area .life-area.open .life-card {
     position: absolute !important;
     left: 0 !important;
+    right: auto !important;
+    transform: none !important;
     width: var(--mcw) !important;
     height: var(--mch) !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 html.touch-device .play-area .life-card img {
     width: 100% !important;
@@ -5307,10 +5322,16 @@ html.touch-device .hand {
 }
 html.touch-device .hand .hand-card {
     height: 100% !important;
+    width: auto !important;              /* was a fixed 120px box → gray strips */
     display: flex !important;
     align-items: center !important;
+    justify-content: center !important;
     flex: 0 1 auto !important;
     min-width: 0 !important;
+    background: transparent !important;  /* drop the grey card-slot fill + border */
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
 }
 html.touch-device .hand .hand-card-img {
     height: 100% !important;
@@ -5320,6 +5341,19 @@ html.touch-device .hand .hand-card-img {
     min-width: 0 !important;
     min-height: 0 !important;
     object-fit: contain !important;
+}
+/* Hands OVERLAP the board edge (held in front of the play area) instead of
+   sitting as a detached strip beyond it. Negative margin pulls each hand onto
+   the nearest play area; a higher z-index keeps the cards in front. */
+html.touch-device .player-hand {
+    margin-top: calc(var(--mch) * -0.28) !important;
+    position: relative !important;
+    z-index: 60 !important;
+}
+html.touch-device .opponent-hand {
+    margin-bottom: calc(var(--mch) * -0.28) !important;
+    position: relative !important;
+    z-index: 60 !important;
 }
 /* bigger card preview: give it most of the right rail, shrink the log */
 html.touch-device .card-preview { flex: 1 1 70% !important; }

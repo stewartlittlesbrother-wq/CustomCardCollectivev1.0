@@ -342,6 +342,14 @@ function isOwnOnlinePlayer(player) {
     return isOnlineMatch && player && getOwnOnlinePlayerKey() && player === gameState?.[getOwnOnlinePlayerKey()];
 }
 
+// In an online match (and not spectating), this is the OTHER seat — the opponent.
+// Their life pile and DON!! are shown as compact indicators (a life heart + an
+// active/rested DON tally) instead of full cards, to save board space. Yours and
+// a spectator's view always render the real cards.
+function isOnlineOpponent(player) {
+    return isOnlineMatch && !isSpectator && Boolean(player) && !isOwnOnlinePlayer(player);
+}
+
 function getOnlinePublicPlayerKey(playerKey) {
     return playerKey === "player1" ? "player1" : "player2";
 }
@@ -3866,6 +3874,22 @@ function renderDonArea(player, areaId) {
     const playerKey = getPlayerKey(player);
     const slots = getDonSlots(player);
 
+    // Online opponent: don't lay out their DON!! cards on the board. Show a
+    // compact active / rested tally instead, which frees the DON band's space.
+    // Your own DON!! still render as cards you can pick up and attach.
+    if (isOnlineOpponent(player)) {
+        const activeCount = slots.filter(slot => slot !== "rested").length;
+        const restedCount = slots.filter(slot => slot === "rested").length;
+        const indicator = document.createElement("div");
+        indicator.className = "don-opp-indicator";
+        indicator.title = `Opponent DON!!  ·  ${activeCount} active, ${restedCount} rested`;
+        indicator.innerHTML =
+            `<span class="doi-chip doi-active"><span class="doi-num">${activeCount}</span><span class="doi-lbl">active</span></span>` +
+            `<span class="doi-chip doi-rested"><span class="doi-num">${restedCount}</span><span class="doi-lbl">rested</span></span>`;
+        donArea.appendChild(indicator);
+        return;
+    }
+
     slots.forEach((slot, index) => {
         const rested = slot === "rested";
         const img = document.createElement("img");
@@ -5650,8 +5674,19 @@ function renderPlayerLife(player, lifeAreaId) {
     lifeArea.querySelectorAll(".life-count").forEach(counter => counter.remove());
     lifeArea.querySelectorAll(".life-menu-btn").forEach(btn => btn.remove());
     lifeArea.querySelectorAll(".life-drop-zone").forEach(zone => zone.remove());
+    lifeArea.querySelectorAll(".opp-life-heart").forEach(el => el.remove());
 
     const playerKey = player === gameState.player1 ? "player1" : "player2";
+
+    // Online opponent: don't show their life cards on the board. Show a compact
+    // heart with the life count instead (tap it to reveal the pile in a popup).
+    // Frees the space their life column would take. Your own life still fans.
+    if (isOnlineOpponent(player)) {
+        lifeArea.classList.remove("open");
+        lifeArea.style.removeProperty("min-height");
+        renderOpponentLifeHeart(player, lifeArea, playerKey);
+        return;
+    }
 
     const LIFE_CARD_TOP_BASE = 7;
     // On the mobile (touch) board the life column is only ~1.5 cards tall, so the
@@ -5866,6 +5901,78 @@ function renderPlayerLife(player, lifeAreaId) {
     lifeArea.style.setProperty("min-height", `${zoneHeight}px`, "important");
 
     setupCardPreview();
+}
+
+// A compact "life heart" that stands in for the online opponent's life pile: a
+// heart with their current life count. Tapping it opens a popup that reveals the
+// pile (face-down backs, plus any card they've flipped/revealed).
+function renderOpponentLifeHeart(player, lifeArea, playerKey) {
+    const count = player.life.length;
+
+    const heart = document.createElement("button");
+    heart.type = "button";
+    heart.className = "opp-life-heart";
+    heart.title = `Opponent life: ${count} — tap to view`;
+    heart.setAttribute("aria-label", `Opponent life ${count}, tap to view`);
+    heart.innerHTML =
+        `<svg class="olh-icon" viewBox="0 0 24 24" aria-hidden="true">` +
+        `<path d="M12 21s-7.5-4.9-10-9.4C.3 8.3 1.8 4.9 5 4.4c2-.3 3.7.8 4.6 2.3C10.3 5.2 12 4.1 14 4.4c3.2.5 4.7 3.9 3 7.2C19.5 16.1 12 21 12 21z"/></svg>` +
+        `<span class="olh-count">${count}</span>`;
+    heart.addEventListener("click", (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        openOpponentLifePopup(player, playerKey);
+    });
+
+    lifeArea.appendChild(heart);
+}
+
+// Popup that shows the online opponent's life pile without giving them a
+// board-sized column: a row of their life cards (backs, or the face when a card
+// has been flipped/revealed to everyone) plus the total.
+function openOpponentLifePopup(player, playerKey) {
+    document.getElementById("oppLifePopup")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "oppLifePopup";
+    overlay.className = "opp-life-popup-overlay";
+    overlay.addEventListener("click", () => overlay.remove());
+
+    const panel = document.createElement("div");
+    panel.className = "opp-life-popup";
+    panel.addEventListener("click", (e) => e.stopPropagation());
+
+    const heading = document.createElement("h3");
+    heading.textContent = `Opponent Life — ${player.life.length}`;
+    panel.appendChild(heading);
+
+    const row = document.createElement("div");
+    row.className = "opp-life-popup-cards";
+    if (!player.life.length) {
+        const empty = document.createElement("p");
+        empty.className = "opp-life-popup-empty";
+        empty.textContent = "No life cards remaining.";
+        row.appendChild(empty);
+    } else {
+        player.life.forEach((lifeCard, index) => {
+            const img = document.createElement("img");
+            const showFace = lifeCard?.faceUp || lifeCard?.peeked;
+            img.src = showFace ? cardArtSrc(lifeCard) : cardBackImage;
+            img.alt = showFace && lifeCard?.name ? lifeCard.name : `Life card ${index + 1}`;
+            row.appendChild(img);
+        });
+    }
+    panel.appendChild(row);
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "opp-life-popup-close";
+    close.textContent = "Close";
+    close.addEventListener("click", () => overlay.remove());
+    panel.appendChild(close);
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
 }
 
 // =========================
