@@ -268,6 +268,9 @@ const playerSlot = urlParams.get("player");
 
 const isOnlineMatch = gameMode === "online";
 window.isSpectatorMode = isSpectator;
+// Tag the mode so the mobile CSS can treat Practice (you control both hands) and
+// Online (the opponent's hand is hidden) differently.
+document.documentElement.classList.add(isOnlineMatch ? "mode-online" : "mode-practice");
 // Player display names. Default to "Player 1/2" until the real nicknames arrive
 // from the match's players node (subscribeToPlayerNames), then get replaced.
 const onlinePlayerLabels = {

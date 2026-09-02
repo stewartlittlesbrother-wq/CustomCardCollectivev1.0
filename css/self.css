@@ -5243,6 +5243,40 @@ html.touch-device .play-area .character-slot {
 /* Only 5 base character slots unless the Extra Slots toggle is on. */
 html.touch-device .play-area:not(.extra-row-on) .extra-char-slot { display: none !important; }
 
+/* ── Extra character row (touch) ─────────────────────────────────────────────
+   When Extra Slots is ON, show the 5 extra slots as a SECOND character row under
+   the first (a 5×2 grid spanning the top two rows) and drop the DON band to a
+   third row. The board grows one card-row taller, so the scaler zooms it out to
+   fit — exactly like desktop. Previously the extra slots piled on top of the
+   normal ones because the single-row grid had nowhere to put them. */
+html.touch-device .play-area.extra-row-on {
+    grid-template-rows: var(--mch) var(--mch) calc(var(--mch) * 0.64) !important;
+    grid-template-areas:
+        "chars stage deck  trash life leader"
+        "chars .     .     .     life ."
+        "dband dband dband dband life dondeck" !important;
+}
+html.touch-device .play-area.extra-row-on .character-area {
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    grid-template-rows: 1fr 1fr !important;
+    gap: var(--mgap) !important;
+    align-items: center !important;
+    justify-items: center !important;
+    height: 100% !important;
+    overflow: visible !important;
+}
+html.touch-device .play-area.extra-row-on .character-slot {
+    flex: none !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: var(--mcw) !important;
+    justify-self: center !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
 /* DON band: a wrapping row of card-sized DON so all of them stay visible */
 html.touch-device .play-area .don-area {
     height: auto !important;
@@ -5342,19 +5376,16 @@ html.touch-device .hand .hand-card-img {
     min-height: 0 !important;
     object-fit: contain !important;
 }
-/* ── Mobile hand: stays at the BOTTOM of the board, flat (NO fan), laid out
-   right→left with a slight overlap. It's its own band below the play area, so it
-   no longer covers the DON!! row — only a card you pick up lifts over the board.
-   The right rail keeps a big card preview + the View-Log button. */
-html.touch-device .opponent-hand {
-    margin: 0 !important;
-    height: calc(var(--mch) * 0.5) !important;   /* just a hint of their hand */
-    opacity: .85 !important;
-}
+/* ── Mobile hands: BOTH your hand (bottom of board) and — in Practice, where you
+   control both seats — the opponent's hand (top of board) are laid out flat (NO
+   fan), side by side right→left with a tiny gap, so every card is easy to tap.
+   Each hand is its own band, so it doesn't cover the play area's DON!! row. In an
+   online match you can't use the opponent's hand, so it stays a thin backs strip
+   (see mode-online below). The right rail keeps a big preview + View-Log button. */
 html.touch-device .card-preview-panel { padding: 8px 6px !important; gap: 6px !important; }
 html.touch-device .card-preview { flex: 1 1 auto !important; min-height: 0 !important; }
 
-html.touch-device .player-hand {
+html.touch-device .hand {
     position: relative !important;
     flex: 0 0 auto !important;
     width: 100% !important;
@@ -5366,42 +5397,56 @@ html.touch-device .player-hand {
     display: block !important;
     overflow: visible !important;
     background: transparent !important;
+    opacity: 1 !important;
     z-index: 40 !important;
 }
-/* flat cards, anchored to the RIGHT, laid side by side with NO overlap (a tiny
-   gap between them). Each card is ~0.716 × its height wide, so a step a little
-   above that clears the neighbour. Rightmost card (index 0) sits on top. */
-html.touch-device .player-hand .hand-card {
+/* flat cards, anchored to the RIGHT, side by side with a small gap (no overlap).
+   Rightmost card (index 0) sits on top. */
+html.touch-device .hand .hand-card {
     position: absolute !important;
     left: auto !important;
     right: calc(var(--hand-index, 0) * (var(--mch) * 0.72 + 5px)) !important;
-    bottom: 2px !important;
-    top: auto !important;
     width: auto !important;
     height: var(--mch) !important;
     margin: 0 !important;
     transform: none !important;                 /* kill the fanned rotation/offset */
-    transform-origin: 50% 100% !important;
     z-index: calc(100 - var(--hand-index, 0)) !important;
     background: transparent !important;
     border: none !important;
     box-shadow: 0 2px 8px rgba(0, 0, 0, .5) !important;
     border-radius: 8px !important;
 }
-html.touch-device .player-hand .hand-card-img {
+html.touch-device .player-hand .hand-card { bottom: 2px !important; top: auto !important; transform-origin: 50% 100% !important; }
+html.touch-device .opponent-hand .hand-card { top: 2px !important; bottom: auto !important; transform-origin: 50% 0% !important; }
+html.touch-device .hand .hand-card-img {
     width: auto !important;
     height: 100% !important;
     max-width: none !important;
     max-height: 100% !important;
     object-fit: contain !important;
 }
-/* picking a card up: lift it straight up, above everything (never under DON!!) */
+/* picking a card up: lift it clear of the board (your hand up, opponent's down),
+   above everything so it's never hidden under a zone. */
 html.touch-device .player-hand .hand-card:hover,
 html.touch-device .player-hand .hand-card.selected-card,
 html.touch-device .player-hand .hand-card.hand-card-glide {
     transform: translateY(-30px) scale(1.06) !important;
     z-index: 1000 !important;
 }
+html.touch-device .opponent-hand .hand-card:hover,
+html.touch-device .opponent-hand .hand-card.selected-card,
+html.touch-device .opponent-hand .hand-card.hand-card-glide {
+    transform: translateY(30px) scale(1.06) !important;
+    z-index: 1000 !important;
+}
+/* Online: you can't use the opponent's hand, so keep it a thin row of backs. */
+html.touch-device.mode-online .opponent-hand { height: calc(var(--mch) * 0.55) !important; opacity: .85 !important; }
+html.touch-device.mode-online .opponent-hand .hand-card { height: calc(var(--mch) * 0.5) !important; }
+
+/* The life HEART sits inside the opponent play area, which is rotated 180° for
+   the facing-table view — that flipped the heart upside-down so it read as a
+   blood-drop. Counter-rotate it (and its count) so it's always a proper heart. */
+.opponent-area .opp-life-heart { transform: rotate(180deg) !important; }
 
 /* View Game Log button + the log as a slide-in overlay (mobile only) */
 .view-log-btn { display: none; }
