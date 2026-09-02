@@ -5228,6 +5228,13 @@ html.touch-device .play-area .character-slot {
     align-items: center !important;
     justify-content: center !important;
 }
+/* Only the 5 base character slots on touch unless the Extra Slots toggle is on.
+   My .character-slot rule above (specificity 0,3,0) was beating the desktop hide
+   rule (.play-area .extra-char-slot, 0,2,0) and forcing all 10 slots visible —
+   that made 10 thin empty slots sprawl across the row and swamp the board. */
+html.touch-device .play-area:not(.extra-row-on) .extra-char-slot {
+    display: none !important;
+}
 /* DON band: a single centered row across the bottom; cards as tall as the band */
 html.touch-device .play-area .don-area {
     height: auto !important;
