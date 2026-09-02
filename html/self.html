@@ -28,7 +28,7 @@
 
     <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
     <link rel="stylesheet" href="../css/style.css">
-    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-42">
+    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-44">
     <link rel="stylesheet" href="../css/manual-play.css?v=manual-5">
 </head>
 <body>
@@ -274,8 +274,17 @@
                 <img id="previewImage" class="preview-image" src="" alt="Card Preview">
             </div>
 
-            <div class="game-log">
-                <h3>Game Log</h3>
+            <!-- On the mobile board the hand moves into this rail (below the
+                 preview) and the log collapses behind this button to make room. -->
+            <button type="button" class="view-log-btn" id="viewLogBtn" aria-expanded="false">
+                <span class="vlb-icon" aria-hidden="true">📜</span> View Game Log
+            </button>
+
+            <div class="game-log" id="gameLogPanel">
+                <div class="game-log-head">
+                    <h3>Game Log</h3>
+                    <button type="button" class="game-log-close" id="gameLogClose" aria-label="Close game log">✕</button>
+                </div>
                 <div id="gameLogMessages" class="game-log-messages"></div>
                 <!-- Shown only in online matches (see setupOnlineChat) -->
                 <form id="chatForm" class="chat-form hidden">
@@ -293,9 +302,9 @@
     <script src="../js/cards/decks.js?v=creation-14&t=20260714172304"></script>
     <script src="../js/core/deckParser.js?v=starting-1&t=20260714172304"></script>
 
-    <script src="../js/pages/self.js?v=spectate-49&t=20260816000002"></script>
+    <script src="../js/pages/self.js?v=spectate-51&t=20260816000002"></script>
   <script src="../js/rotate-prompt.js"></script>
 
-  <script src="../js/version.js?v=132"></script>
+  <script src="../js/version.js?v=134"></script>
 </body>
 </html>

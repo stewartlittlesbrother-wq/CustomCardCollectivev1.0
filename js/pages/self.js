@@ -5688,6 +5688,18 @@ function renderPlayerLife(player, lifeAreaId) {
         return;
     }
 
+    // Your OWN life on the mobile (touch) board: the fanned pile is hard to read
+    // and to pick individual cards from on a phone, so show a heart with the
+    // count and open a full-size popup on tap where you can view every card and
+    // send a specific one to the top/bottom of your deck, your hand, or trash.
+    const canControlLifePile = !isSpectator && (!isOnlineMatch || isOwnOnlinePlayer(player));
+    if (document.documentElement.classList.contains("touch-device") && canControlLifePile) {
+        lifeArea.classList.remove("open");
+        lifeArea.style.removeProperty("min-height");
+        renderMyLifeHeart(player, lifeArea, playerKey);
+        return;
+    }
+
     const LIFE_CARD_TOP_BASE = 7;
     // On the mobile (touch) board the life column is only ~1.5 cards tall, so the
     // desktop 36px fan runs a 5-card life pile ~316px off the screen. Use a tight
@@ -5960,6 +5972,163 @@ function openOpponentLifePopup(player, playerKey) {
             img.src = showFace ? cardArtSrc(lifeCard) : cardBackImage;
             img.alt = showFace && lifeCard?.name ? lifeCard.name : `Life card ${index + 1}`;
             row.appendChild(img);
+        });
+    }
+    panel.appendChild(row);
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "opp-life-popup-close";
+    close.textContent = "Close";
+    close.addEventListener("click", () => overlay.remove());
+    panel.appendChild(close);
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+}
+
+// YOUR life pile as a heart on the mobile board. Same heart as the opponent's,
+// but tapping it opens a MANAGEMENT popup (view every card, send a specific one
+// to top/bottom of deck, hand, or trash) since it's a pile you control.
+function renderMyLifeHeart(player, lifeArea, playerKey) {
+    const count = player.life.length;
+    const heart = document.createElement("button");
+    heart.type = "button";
+    heart.className = "opp-life-heart my-life-heart";
+    heart.title = `Your life: ${count} — tap to manage`;
+    heart.setAttribute("aria-label", `Your life ${count}, tap to manage`);
+    heart.innerHTML =
+        `<svg class="olh-icon" viewBox="0 0 24 24" aria-hidden="true">` +
+        `<path d="M12 21s-7.5-4.9-10-9.4C.3 8.3 1.8 4.9 5 4.4c2-.3 3.7.8 4.6 2.3C10.3 5.2 12 4.1 14 4.4c3.2.5 4.7 3.9 3 7.2C19.5 16.1 12 21 12 21z"/></svg>` +
+        `<span class="olh-count">${count}</span>`;
+    heart.addEventListener("click", (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        openMyLifePopup(player, playerKey);
+    });
+    lifeArea.appendChild(heart);
+}
+
+// The per-card action list for a life card — mirrors the desktop right-click
+// life-card menu so mobile has the same top/bottom-deck / hand / trash options.
+function lifeCardActionList(player, lifeCard) {
+    const takeLifeCard = () => {
+        const index = player.life.findIndex(c => c && c.instanceId === lifeCard.instanceId);
+        if (index === -1) return null;
+        return player.life.splice(index, 1)[0];
+    };
+    return [
+        { label: lifeCard?.faceUp ? "🙈 Hide (from both)" : "👁 Flip face-up (both see)", action: () => {
+            lifeCard.faceUp = !lifeCard.faceUp;
+            renderLifeCards();
+            window.addGameLog?.(`Life card ${lifeCard.faceUp ? "revealed" : "hidden"}`);
+            window.scheduleOnlineBoardSync?.();
+        } },
+        { label: lifeCard?.peeked ? "🔒 Stop peeking" : "🔎 Peek (only you)", action: () => {
+            lifeCard.peeked = !lifeCard.peeked;
+            renderLifeCards();
+        } },
+        { label: "⬆ Send to Top of Deck", action: () => {
+            const taken = takeLifeCard(); if (!taken) return;
+            player.deck.push(taken);
+            renderLifeCards(); window.renderDecks?.();
+            window.addGameLog?.(`Card sent to top of deck`); window.scheduleOnlineBoardSync?.();
+        } },
+        { label: "⬇ Send to Bottom of Deck", action: () => {
+            const taken = takeLifeCard(); if (!taken) return;
+            player.deck.unshift(taken);
+            renderLifeCards(); window.renderDecks?.();
+            window.addGameLog?.(`Card sent to bottom of deck`); window.scheduleOnlineBoardSync?.();
+        } },
+        { label: "✋ Send to Hand", action: () => {
+            const taken = takeLifeCard(); if (!taken) return;
+            clearFromLifeHighlights(player);
+            taken.fromLife = true;
+            player.hand.push(taken);
+            renderLifeCards(); window.renderHands?.();
+            window.addGameLog?.(`Life card added to hand`); window.scheduleOnlineBoardSync?.();
+        } },
+        { label: "🗑 Send to Trash", action: () => {
+            const taken = takeLifeCard(); if (!taken) return;
+            if (!player.trash) player.trash = [];
+            player.trash.push(taken);
+            renderLifeCards(); window.renderTrash?.();
+            window.addGameLog?.(`Life card sent to trash`); window.scheduleOnlineBoardSync?.();
+        } }
+    ];
+}
+
+// Management popup for YOUR life pile (mobile). Shows every card top→bottom; tap
+// a card to choose where it goes (top/bottom of deck, hand, trash) or flip/peek.
+function openMyLifePopup(player, playerKey) {
+    document.getElementById("myLifePopup")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "myLifePopup";
+    overlay.className = "opp-life-popup-overlay";
+    overlay.addEventListener("click", () => overlay.remove());
+
+    const panel = document.createElement("div");
+    panel.className = "opp-life-popup my-life-popup";
+    panel.addEventListener("click", (e) => e.stopPropagation());
+
+    const heading = document.createElement("h3");
+    heading.textContent = `Your Life — ${player.life.length}`;
+    panel.appendChild(heading);
+
+    const hint = document.createElement("p");
+    hint.className = "my-life-hint";
+    hint.textContent = "Tap a card to move it (top is drawn first).";
+    panel.appendChild(hint);
+
+    const row = document.createElement("div");
+    row.className = "opp-life-popup-cards";
+
+    if (!player.life.length) {
+        const empty = document.createElement("p");
+        empty.className = "opp-life-popup-empty";
+        empty.textContent = "No life cards remaining.";
+        row.appendChild(empty);
+    } else {
+        // Top of the pile = end of the array in this codebase, so show reversed
+        // with the top card first and labelled.
+        player.life.forEach((lifeCard, i) => {
+            const cell = document.createElement("div");
+            cell.className = "mlp-card";
+
+            const img = document.createElement("img");
+            const showFace = lifeCard?.faceUp || lifeCard?.peeked;
+            img.src = showFace ? cardArtSrc(lifeCard) : cardBackImage;
+            img.alt = showFace && lifeCard?.name ? lifeCard.name : `Life card ${i + 1}`;
+            cell.appendChild(img);
+
+            const pos = document.createElement("span");
+            pos.className = "mlp-pos";
+            pos.textContent = i === player.life.length - 1 ? "TOP" : (i === 0 ? "BOTTOM" : `#${player.life.length - i}`);
+            cell.appendChild(pos);
+
+            cell.addEventListener("click", (e) => {
+                e.stopPropagation();
+                panel.querySelectorAll(".mlp-actions").forEach(m => m.remove());
+                const menu = document.createElement("div");
+                menu.className = "mlp-actions";
+                lifeCardActionList(player, lifeCard).forEach(opt => {
+                    const b = document.createElement("button");
+                    b.type = "button";
+                    b.textContent = opt.label;
+                    b.addEventListener("click", (ev) => {
+                        ev.stopPropagation();
+                        opt.action();
+                        // Life changed — refresh the popup (or close if now empty).
+                        if (player.life.length) openMyLifePopup(player, playerKey);
+                        else overlay.remove();
+                    });
+                    menu.appendChild(b);
+                });
+                cell.appendChild(menu);
+            });
+
+            row.appendChild(cell);
         });
     }
     panel.appendChild(row);
@@ -9786,3 +9955,51 @@ function updateOnlinePhaseButton() {
             : (yourTurn ? "Your Turn" : "Opponent's Turn");
     }
 }
+
+// ── Mobile: game log behind a "View Game Log" button ────────────────────────
+// On the touch board the hand moves into the right rail, so the log collapses
+// behind a button and opens as an overlay panel. Desktop keeps the log inline
+// (the button is hidden by CSS there), so this just wires the toggle.
+(function setupViewLogButton() {
+    function wire() {
+        const btn = document.getElementById("viewLogBtn");
+        const panel = document.getElementById("gameLogPanel");
+        const closeBtn = document.getElementById("gameLogClose");
+        if (!btn || !panel) return;
+
+        // On the touch board, move YOUR hand out of the (transform:scaled) board
+        // and into the right rail, above the View-Log button. It must leave the
+        // board because a CSS transform makes the board the containing block for
+        // any position:fixed descendant, so a rail-positioned hand can't escape
+        // it otherwise. Rendering still targets it by id, so this is safe.
+        if (document.documentElement.classList.contains("touch-device")) {
+            const rail = document.querySelector(".card-preview-panel");
+            const hand = document.getElementById("player1Hand");
+            const preview = rail && rail.querySelector(".card-preview");
+            if (rail && hand && preview && hand.parentElement !== rail) {
+                preview.insertAdjacentElement("afterend", hand);
+            }
+        }
+
+        const setOpen = (open) => {
+            document.body.classList.toggle("log-popup-open", open);
+            btn.setAttribute("aria-expanded", open ? "true" : "false");
+        };
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            setOpen(!document.body.classList.contains("log-popup-open"));
+        });
+        closeBtn?.addEventListener("click", (e) => { e.stopPropagation(); setOpen(false); });
+        // Tapping outside the panel closes it.
+        document.addEventListener("click", (e) => {
+            if (!document.body.classList.contains("log-popup-open")) return;
+            if (panel.contains(e.target) || btn.contains(e.target)) return;
+            setOpen(false);
+        });
+    }
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", wire);
+    } else {
+        wire();
+    }
+})();

@@ -5342,19 +5342,288 @@ html.touch-device .hand .hand-card-img {
     min-height: 0 !important;
     object-fit: contain !important;
 }
-/* Hands OVERLAP the board edge (held in front of the play area) instead of
-   sitting as a detached strip beyond it. Negative margin pulls each hand onto
-   the nearest play area; a higher z-index keeps the cards in front. */
-html.touch-device .player-hand {
-    margin-top: calc(var(--mch) * -0.28) !important;
-    position: relative !important;
-    z-index: 60 !important;
-}
+/* ── Mobile: YOUR hand lives in the right rail, not overlapping the board ────
+   Overlapping the board made the DON!! row impossible to tap (hand cards sat on
+   top and stole the clicks). Moving the hand into the rail frees the whole board
+   AND gives the play areas more height (bigger cards). The opponent hand stays a
+   thin strip at the top of the board. */
 html.touch-device .opponent-hand {
-    margin-bottom: calc(var(--mch) * -0.28) !important;
-    position: relative !important;
-    z-index: 60 !important;
+    margin: 0 !important;
+    height: calc(var(--mch) * 0.5) !important;   /* just a hint of their hand */
+    opacity: .85 !important;
 }
-/* bigger card preview: give it most of the right rail, shrink the log */
-html.touch-device .card-preview { flex: 1 1 70% !important; }
-html.touch-device .game-log { flex: 1 1 30% !important; min-height: 84px !important; }
+/* the rail holds: card preview (top) · your hand (middle) · View Log button */
+html.touch-device .card-preview-panel {
+    padding: 8px 6px !important;
+    gap: 6px !important;
+}
+html.touch-device .card-preview { flex: 0 0 34% !important; min-height: 0 !important; }
+
+/* self.js moves #player1Hand into this rail (out of the transform:scaled board),
+   so here it's just a flex child that fills the space between the preview and
+   the View-Log button and scrolls if the hand is large. */
+html.touch-device .player-hand {
+    position: static !important;
+    flex: 1 1 auto !important;
+    width: auto !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    height: auto !important;
+    margin: 0 !important;
+    display: flex !important;
+    flex-flow: row wrap !important;
+    align-content: flex-start !important;
+    justify-content: center !important;
+    gap: 5px !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    background: rgba(10, 12, 18, .55) !important;
+    border: 1px solid rgba(255, 255, 255, .09) !important;
+    border-radius: 10px !important;
+    padding: 6px !important;
+    box-sizing: border-box !important;
+}
+html.touch-device .player-hand .hand-card {
+    flex: 0 0 calc(50% - 3px) !important;
+    width: auto !important;
+    height: auto !important;
+    aspect-ratio: 63 / 88 !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
+html.touch-device .player-hand .hand-card-img {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: contain !important;
+}
+/* an empty hand: keep the rail slot visible so you know where cards go */
+html.touch-device .player-hand:empty::after {
+    content: "Your hand";
+    color: rgba(255, 255, 255, .4);
+    font: 600 12px/1 system-ui, sans-serif;
+    margin: auto;
+}
+
+/* View Game Log button + the log as a slide-in overlay (mobile only) */
+.view-log-btn { display: none; }
+.game-log-head { display: flex; align-items: center; justify-content: space-between; }
+.game-log-close { display: none; }
+html.touch-device .view-log-btn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    height: 36px !important;
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, .16) !important;
+    border-radius: 9px !important;
+    background: rgba(30, 33, 42, .96) !important;
+    color: #fff !important;
+    font: 700 13px/1 system-ui, sans-serif !important;
+}
+html.touch-device .game-log { display: none !important; }
+html.touch-device body.log-popup-open .game-log {
+    display: flex !important;
+    flex-direction: column !important;
+    position: fixed !important;
+    right: 6px !important;
+    bottom: 48px !important;
+    width: min(360px, calc(100vw - 160px)) !important;
+    max-height: 70vh !important;
+    z-index: 10040 !important;
+    background: #14161d !important;
+    border: 1px solid rgba(255, 255, 255, .16) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, .55) !important;
+    padding: 10px !important;
+}
+html.touch-device .game-log-close { display: inline-flex !important; align-items: center; justify-content: center; width: 28px; height: 28px; border: none; border-radius: 7px; background: rgba(255,255,255,.1); color: #fff; font-size: 14px; cursor: pointer; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ONLINE OPPONENT COMPACT INDICATORS — the opponent's life pile becomes a heart
+   with their life count (tap to reveal the pile), and their DON!! becomes an
+   active/rested tally. Frees the board space their cards would take. These show
+   for the opponent only (rendered by self.js), on both desktop and mobile.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.opp-life-heart {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    z-index: 6;
+}
+.opp-life-heart .olh-icon {
+    width: 86%;
+    height: 86%;
+    fill: #e5364b;
+    filter: drop-shadow(0 3px 7px rgba(0, 0, 0, .55));
+    transition: fill .15s ease, transform .15s ease;
+}
+.opp-life-heart:hover .olh-icon,
+.opp-life-heart:active .olh-icon { fill: #ff4d63; transform: scale(1.05); }
+.opp-life-heart .olh-count {
+    position: absolute;
+    top: 47%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #fff;
+    font: 800 34px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, .85);
+    pointer-events: none;
+}
+/* the life column no longer needs the desktop drop-target height when it's a heart */
+.opp-life-heart:only-child { min-height: 0; }
+
+/* .don-area > div is hidden by an existing rule (0,2,0 + !important); match its
+   specificity and come later so our indicator wins and shows. */
+.don-area > .don-opp-indicator {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    height: 100%;
+    padding: 2px;
+    box-sizing: border-box;
+}
+.doi-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 40px;
+    padding: 5px 9px;
+    border-radius: 9px;
+    line-height: 1;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .35);
+}
+.doi-active { background: linear-gradient(180deg, #4a86f0, #3b6fd6); }
+.doi-rested { background: linear-gradient(180deg, #8a8f9c, #6c7280); }
+.doi-num { color: #fff; font: 800 20px/1 system-ui, sans-serif; text-shadow: 0 1px 2px rgba(0, 0, 0, .5); }
+.doi-lbl {
+    color: rgba(255, 255, 255, .9);
+    font: 700 9px/1 system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    margin-top: 3px;
+}
+
+/* tap-to-view popup for the opponent's life pile */
+.opp-life-popup-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    background: rgba(0, 0, 0, .62);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.opp-life-popup {
+    background: #1c1e26;
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 14px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .6);
+    padding: 16px;
+    max-width: min(92vw, 660px);
+    max-height: 86vh;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.opp-life-popup h3 { margin: 0; font: 700 16px/1.2 system-ui, sans-serif; }
+.opp-life-popup-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+}
+.opp-life-popup-cards img {
+    width: 88px;
+    height: auto;
+    border-radius: 6px;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, .4);
+}
+.opp-life-popup-empty { margin: 0; opacity: .8; }
+
+/* Your-life management popup: tappable cards with position labels + an action
+   menu (top/bottom deck, hand, trash). */
+.my-life-hint { margin: -4px 0 0; font: 500 12px/1.3 system-ui, sans-serif; opacity: .7; }
+.my-life-popup .opp-life-popup-cards { align-items: flex-start; }
+.mlp-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+.mlp-card > img {
+    width: 88px;
+    height: auto;
+    border-radius: 6px;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, .4);
+    border: 2px solid transparent;
+}
+.mlp-card:hover > img { border-color: #4a86f0; }
+.mlp-pos { font: 700 10px/1 system-ui, sans-serif; letter-spacing: .05em; color: rgba(255, 255, 255, .7); }
+.mlp-actions {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 5px;
+    background: rgba(18, 20, 27, .98);
+    border: 1px solid rgba(255, 255, 255, .18);
+    border-radius: 10px;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, .6);
+    min-width: 168px;
+}
+.mlp-actions button {
+    text-align: left;
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 11px;
+    background: transparent;
+    color: #fff;
+    font: 600 13px/1.1 system-ui, sans-serif;
+    white-space: nowrap;
+}
+.mlp-actions button:hover { background: rgba(74, 134, 240, .3); }
+
+.opp-life-popup-close {
+    align-self: flex-end;
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 18px;
+    background: #3b82f6;
+    color: #fff;
+    font: 700 14px/1 system-ui, sans-serif;
+}
+
+/* On the mobile board the heart count / chips are inside the transform-scaled
+   board, so give the heart count a size that reads well once scaled down. */
+html.touch-device .opp-life-heart .olh-count { font-size: 40px; }
+html.touch-device .doi-num { font-size: 22px; }
