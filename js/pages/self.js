@@ -9967,20 +9967,6 @@ function updateOnlinePhaseButton() {
         const closeBtn = document.getElementById("gameLogClose");
         if (!btn || !panel) return;
 
-        // On the touch board, move YOUR hand out of the (transform:scaled) board
-        // and into the right rail, above the View-Log button. It must leave the
-        // board because a CSS transform makes the board the containing block for
-        // any position:fixed descendant, so a rail-positioned hand can't escape
-        // it otherwise. Rendering still targets it by id, so this is safe.
-        if (document.documentElement.classList.contains("touch-device")) {
-            const rail = document.querySelector(".card-preview-panel");
-            const hand = document.getElementById("player1Hand");
-            const preview = rail && rail.querySelector(".card-preview");
-            if (rail && hand && preview && hand.parentElement !== rail) {
-                preview.insertAdjacentElement("afterend", hand);
-            }
-        }
-
         const setOpen = (open) => {
             document.body.classList.toggle("log-popup-open", open);
             btn.setAttribute("aria-expanded", open ? "true" : "false");
