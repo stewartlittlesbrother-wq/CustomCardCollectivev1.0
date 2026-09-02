@@ -5133,11 +5133,15 @@ html.touch-device .search-card-image-popup h3 { font-size: 13px !important; marg
 html.touch-device .search-card-image-buttons { gap: 6px !important; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   MOBILE FILL MODE (touch) — the board FILLS its whole region instead of being a
-   fixed-size board scaled down and centered (which left the dead space). No
-   transform scale, so only the viewport scale applies = everything bigger too.
-   This block is last so it overrides the earlier fixed-size touch rules.
+   MOBILE FILL MODE (touch) — the board FILLS its whole region (no scale-to-fit,
+   no dead space) AND every card is sized to FIT WITHIN its cell (capped by BOTH
+   width and height, aspect preserved) so nothing ever overflows or overlaps.
+   The earlier touch blocks forced height:100% on card images, which made cards
+   that live in a tall (2-row) cell blow up and spill sideways — that was the
+   "ultra zoomed in / unusable" bug. This block is last so it wins.
    ═══════════════════════════════════════════════════════════════════════════ */
+html.touch-device { --preview-rail-w: 264px !important; }   /* bigger card preview */
+
 html.touch-device .game-layout {
     align-items: stretch !important;
     justify-content: stretch !important;
@@ -5150,67 +5154,114 @@ html.touch-device .game-board {
     flex-direction: column !important;
     gap: 4px !important;
     padding: 2px 0 !important;
+    box-sizing: border-box !important;
 }
-/* hands take a fixed slice; the two play areas split the rest */
+/* hands take a fixed slice of the height; the two play areas split the rest */
 html.touch-device .hand {
     flex: 0 0 auto !important;
     min-height: 0 !important;
-    height: 17% !important;
+    height: 16% !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+    gap: 3px !important;
 }
 html.touch-device .play-area {
     flex: 1 1 0 !important;
     width: 100% !important;
     min-height: 0 !important;
-    grid-template-columns: 1fr 13% 13% 13% 13% !important;
-    grid-template-rows: 1fr 1fr 0.9fr !important;
-    gap: 4px !important;
-    padding: 4px 6px !important;
+    grid-template-columns: 1fr 12% 12% 12% 13% !important;
+    grid-template-rows: 1fr 1fr 1.05fr !important;   /* taller DON band */
+    gap: 4px 5px !important;
+    padding: 3px 6px !important;
+    box-sizing: border-box !important;
 }
-/* zones fill their cells; card images fit inside */
-html.touch-device .play-area .area,
-html.touch-device .play-area .life-area {
+/* every zone centers its card inside its cell */
+html.touch-device .play-area .area {
     width: auto !important;
     height: auto !important;
     min-width: 0 !important;
     min-height: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
 }
-html.touch-device .play-area .area img,
-html.touch-device .play-area .board-card-img,
-html.touch-device .play-area .leader-card-img,
-html.touch-device .play-area .deck-card-img,
-html.touch-device .play-area .life-card-img {
+/* THE KEY RULE: card images fit fully inside their cell — capped by both the
+   cell width AND height, aspect kept, auto size so neither dimension is forced.
+   (High specificity via .play-area img beats the desktop match-table block; the
+   per-zone rules below add a class so they beat this where they must.) */
+html.touch-device .play-area img,
+html.touch-device .hand img {
     width: auto !important;
-    height: 100% !important;
+    height: auto !important;
     max-width: 100% !important;
     max-height: 100% !important;
+    /* the desktop match-table pass forces min-width/min-height:165px on deck/trash
+       cards — and min-height BEATS max-height, so without resetting it the card
+       stays full desktop size and overflows its cell. This was the real overflow. */
+    min-width: 0 !important;
+    min-height: 0 !important;
     object-fit: contain !important;
+    display: block !important;
 }
-/* characters share the wide first column, each filling equally */
+/* characters share the wide first column, each slot an equal share of its width */
 html.touch-device .play-area .character-area {
     display: flex !important;
     flex-direction: row !important;
     flex-wrap: nowrap !important;
+    align-items: center !important;
+    justify-content: center !important;
     gap: 4px !important;
     height: auto !important;
-    padding: 0 !important;
+    padding: 0 4px !important;
+    overflow: hidden !important;
 }
 html.touch-device .play-area .character-slot {
     flex: 1 1 0 !important;
     width: auto !important;
     height: 100% !important;
     min-width: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
 }
-/* DON band fills its row; cards scale to it */
+/* DON band: a single centered row across the bottom; cards as tall as the band */
 html.touch-device .play-area .don-area {
     height: auto !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    overflow: hidden !important;
 }
 html.touch-device .play-area .don-card-img {
     width: auto !important;
-    height: 84% !important;
+    height: 100% !important;      /* DON art (don-card-custom.png) sizes by height */
+    max-height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
     margin-left: 0 !important;
 }
-/* hand cards fill the hand strip height */
+/* hand cards as tall as the hand strip, in a row */
+html.touch-device .hand .hand-card {
+    height: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    flex: 0 1 auto !important;
+    min-width: 0 !important;
+}
 html.touch-device .hand .hand-card-img {
     height: 100% !important;
     width: auto !important;
+    max-height: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
 }
+/* bigger card preview: give it most of the right rail, shrink the log */
+html.touch-device .card-preview { flex: 1 1 70% !important; }
+html.touch-device .game-log { flex: 1 1 30% !important; min-height: 84px !important; }
