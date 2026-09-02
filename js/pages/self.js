@@ -5654,7 +5654,14 @@ function renderPlayerLife(player, lifeAreaId) {
     const playerKey = player === gameState.player1 ? "player1" : "player2";
 
     const LIFE_CARD_TOP_BASE = 7;
-    const LIFE_CARD_STEP = 36;
+    // On the mobile (touch) board the life column is only ~1.5 cards tall, so the
+    // desktop 36px fan runs a 5-card life pile ~316px off the screen. Use a tight
+    // step there so the whole stack fits its card-sized column; adapt it down when
+    // the pile is large so it still fits.
+    const isTouchBoard = document.documentElement.classList.contains("touch-device");
+    const LIFE_CARD_STEP = isTouchBoard
+        ? Math.max(5, Math.min(12, Math.floor(60 / Math.max(1, player.life.length - 1 || 1))))
+        : 36;
     const LIFE_CARD_HEIGHT = 165;
 
     // Render life cards (face-down by default)
