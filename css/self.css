@@ -5174,7 +5174,7 @@ html.touch-device .play-area {
     grid-template-columns:
         calc(var(--mcw) * 5 + var(--mgap) * 4)   /* character row */
         var(--mcw) var(--mcw) var(--mcw) var(--mcw) var(--mcw) !important;
-    grid-template-rows: var(--mch) calc(var(--mch) * 0.52) !important;
+    grid-template-rows: var(--mch) calc(var(--mch) * 0.64) !important;   /* taller DON band for bigger DON */
     grid-template-areas:
         "chars stage deck  trash life leader"
         "dband dband dband dband  life dondeck" !important;
@@ -5251,13 +5251,13 @@ html.touch-device .play-area .don-area {
     align-items: center !important;
     justify-content: center !important;
     align-content: center !important;
-    gap: 3px !important;
+    gap: 2px !important;                          /* was 3px — tighten spacing */
     padding: 0 !important;
     overflow: hidden !important;
 }
 html.touch-device .play-area .don-card-img {
     width: auto !important;
-    height: calc(var(--mch) * 0.5) !important;   /* fixed, readable DON size */
+    height: calc(var(--mch) * 0.6) !important;    /* bigger DON (was 0.5) */
     max-height: 100% !important;
     min-width: 0 !important;
     min-height: 0 !important;
@@ -5621,3 +5621,84 @@ html.touch-device .game-log-close { display: inline-flex !important; align-items
    board, so give the heart count a size that reads well once scaled down. */
 html.touch-device .opp-life-heart .olh-count { font-size: 40px; }
 html.touch-device .doi-num { font-size: 22px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE: card action menus as a big WIDE bottom sheet ────────────────────────
+   The inline-built .context-menu is a small vertical list dropped at the tap
+   point — very easy to fat-finger on a phone. On touch, override it into a wide
+   sheet pinned to the bottom of the screen with large, 2-per-row buttons so the
+   options spread the long way instead of stacking up-and-down.
+   ═══════════════════════════════════════════════════════════════════════════ */
+html.touch-device .context-menu {
+    position: fixed !important;
+    left: 8px !important;
+    right: 8px !important;
+    top: auto !important;
+    bottom: 10px !important;
+    width: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 12px !important;
+    background: rgba(18, 20, 27, .98) !important;
+    border: 1px solid rgba(255, 255, 255, .18) !important;
+    border-radius: 16px !important;
+    box-shadow: 0 -10px 34px rgba(0, 0, 0, .55) !important;
+    z-index: 100000 !important;
+    justify-content: center !important;
+    max-height: 62vh !important;
+    overflow-y: auto !important;
+}
+html.touch-device .context-menu > * {
+    flex: 1 1 calc(50% - 8px) !important;
+    min-width: 140px !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    padding: 16px 14px !important;
+    font-size: 16px !important;
+    font-weight: 600 !important;
+    text-align: center !important;
+    color: #fff !important;
+    border: 1px solid rgba(255, 255, 255, .14) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, .14) !important;
+    border-radius: 11px !important;
+    background: rgba(255, 255, 255, .07) !important;
+}
+
+/* Confirm sheet for sending a card to the top/bottom of the deck. */
+.confirm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100001;
+    background: rgba(0, 0, 0, .58);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.confirm-panel {
+    background: #1b1e26;
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, .16);
+    border-radius: 14px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .6);
+    padding: 20px;
+    max-width: min(92vw, 440px);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+.confirm-msg { margin: 0; font: 500 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; text-align: center; }
+.confirm-actions { display: flex; gap: 10px; justify-content: center; }
+.confirm-actions button {
+    flex: 1 1 0;
+    cursor: pointer;
+    border: none;
+    border-radius: 10px;
+    padding: 14px 16px;
+    font: 700 15px/1 system-ui, sans-serif;
+}
+.confirm-no { background: rgba(255, 255, 255, .12); color: #fff; }
+.confirm-yes { background: #3b82f6; color: #fff; }

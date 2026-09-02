@@ -5432,7 +5432,7 @@ function renderPlayerHand(player, handElementId, hidden) {
                     },
                     {
                         label: "Send to Top Deck",
-                        action: () => {
+                        action: () => confirmDeckMove("top", card.name, () => {
                             const cardIndex = player.hand.findIndex(c => c.instanceId === card.instanceId);
                             if (cardIndex === -1) return;
                             const [removed] = player.hand.splice(cardIndex, 1);
@@ -5440,11 +5440,11 @@ function renderPlayerHand(player, handElementId, hidden) {
                             renderHands();
                             renderDecks();
                             addGameLog(`${removed.name} sent to top of deck from hand.`);
-                        }
+                        })
                     },
                     {
                         label: "Send to Bottom Deck",
-                        action: () => {
+                        action: () => confirmDeckMove("bottom", card.name, () => {
                             const cardIndex = player.hand.findIndex(c => c.instanceId === card.instanceId);
                             if (cardIndex === -1) return;
                             const [removed] = player.hand.splice(cardIndex, 1);
@@ -5452,7 +5452,7 @@ function renderPlayerHand(player, handElementId, hidden) {
                             renderHands();
                             renderDecks();
                             addGameLog(`${removed.name} sent to bottom of deck from hand.`);
-                        }
+                        })
                     },
                     {
                         label: "Send to Top Life",
@@ -6009,6 +6009,43 @@ function renderMyLifeHeart(player, lifeArea, playerKey) {
     lifeArea.appendChild(heart);
 }
 
+// A confirm sheet before moving a card to the TOP or BOTTOM of the deck. These
+// are easy to fat-finger on mobile and burying a card on the bottom is a big
+// deal, so ask first. `position` is "top" or "bottom".
+function confirmDeckMove(position, cardName, onConfirm) {
+    document.getElementById("deckMoveConfirm")?.remove();
+    const where = position === "top" ? "TOP" : "BOTTOM";
+
+    const overlay = document.createElement("div");
+    overlay.id = "deckMoveConfirm";
+    overlay.className = "confirm-overlay";
+    overlay.addEventListener("click", () => overlay.remove());
+
+    const panel = document.createElement("div");
+    panel.className = "confirm-panel";
+    panel.addEventListener("click", (e) => e.stopPropagation());
+
+    const msg = document.createElement("p");
+    msg.className = "confirm-msg";
+    msg.innerHTML = `Put <strong>${cardName || "this card"}</strong> on the <strong>${where}</strong> of your deck?`;
+    panel.appendChild(msg);
+
+    const row = document.createElement("div");
+    row.className = "confirm-actions";
+    const no = document.createElement("button");
+    no.type = "button"; no.className = "confirm-no"; no.textContent = "Cancel";
+    no.addEventListener("click", () => overlay.remove());
+    const yes = document.createElement("button");
+    yes.type = "button"; yes.className = "confirm-yes"; yes.textContent = `Yes, ${where.toLowerCase()}`;
+    yes.addEventListener("click", () => { overlay.remove(); onConfirm(); });
+    row.appendChild(no);
+    row.appendChild(yes);
+    panel.appendChild(row);
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+}
+
 // The per-card action list for a life card — mirrors the desktop right-click
 // life-card menu so mobile has the same top/bottom-deck / hand / trash options.
 function lifeCardActionList(player, lifeCard) {
@@ -6028,18 +6065,18 @@ function lifeCardActionList(player, lifeCard) {
             lifeCard.peeked = !lifeCard.peeked;
             renderLifeCards();
         } },
-        { label: "⬆ Send to Top of Deck", action: () => {
+        { label: "⬆ Send to Top of Deck", action: () => confirmDeckMove("top", lifeCard?.name, () => {
             const taken = takeLifeCard(); if (!taken) return;
             player.deck.push(taken);
             renderLifeCards(); window.renderDecks?.();
             window.addGameLog?.(`Card sent to top of deck`); window.scheduleOnlineBoardSync?.();
-        } },
-        { label: "⬇ Send to Bottom of Deck", action: () => {
+        }) },
+        { label: "⬇ Send to Bottom of Deck", action: () => confirmDeckMove("bottom", lifeCard?.name, () => {
             const taken = takeLifeCard(); if (!taken) return;
             player.deck.unshift(taken);
             renderLifeCards(); window.renderDecks?.();
             window.addGameLog?.(`Card sent to bottom of deck`); window.scheduleOnlineBoardSync?.();
-        } },
+        }) },
         { label: "✋ Send to Hand", action: () => {
             const taken = takeLifeCard(); if (!taken) return;
             clearFromLifeHighlights(player);
@@ -7626,21 +7663,21 @@ function setupBoardContextMenus() {
             if (cardType === "character") {
                 options.push({
                     label: "Send to Bottom Deck",
-                    action: () => {
+                    action: () => confirmDeckMove("bottom", card.name, () => {
                         player.characters.splice(slotIndex, 1);
                         player.deck.unshift(card);
                         renderCharacters();
                         addGameLog(`${card.name} sent to bottom of deck`);
-                    }
+                    })
                 });
                 options.push({
                     label: "Send to Top Deck",
-                    action: () => {
+                    action: () => confirmDeckMove("top", card.name, () => {
                         player.characters.splice(slotIndex, 1);
                         player.deck.push(card);
                         renderCharacters();
                         addGameLog(`${card.name} sent to top of deck`);
-                    }
+                    })
                 });
                 options.push({
                     label: "Send to Trash",
