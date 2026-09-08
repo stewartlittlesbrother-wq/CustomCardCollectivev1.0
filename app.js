@@ -5155,10 +5155,20 @@ function setToggle(onButton, offButton, isOn) {
 }
 
 function renderAll() {
+  // Adding/removing a card re-renders the builder, which would reset the card
+  // library + deck list scroll back to the top ("scrolls up on every click").
+  // Capture the real scroll containers' offsets and restore them afterwards.
+  // (#cardGrid scrolls the library; .deck-board-scroll wraps the deck list.)
+  const keepScroll = [el.cardGrid, document.querySelector(".deck-board-scroll")]
+    .filter(Boolean)
+    .map(node => [node, node.scrollTop]);
+
   showView(state.activeView);
   renderHome();
   renderBuilder();
   renderGame();
+
+  keepScroll.forEach(([node, top]) => { if (top) node.scrollTop = top; });
 }
 
 function renderHome() {
@@ -5230,9 +5240,6 @@ function renderTokenRow(card) {
       <span class="qty token-qty">TOKEN</span>
       <div class="deck-row-actions">
         <button class="deck-icon-btn remove-card-btn" type="button" data-remove="${escapeAttr(card.id)}" aria-label="Remove token ${escapeAttr(card.name)}" title="Remove token"><span aria-hidden="true">-</span></button>
-        <button class="deck-icon-btn inspect-card-btn" type="button" data-inspect="${escapeAttr(card.id)}" aria-label="Inspect ${escapeAttr(card.name)}" title="Inspect">
-          <span class="magnifier-icon" aria-hidden="true"></span>
-        </button>
       </div>
     </div>
   `;
@@ -5264,9 +5271,6 @@ function renderDeckRow(card, qty, isLeader = false) {
       <div class="deck-row-actions">
         ${controls}
         ${startBtn}
-        <button class="deck-icon-btn inspect-card-btn" type="button" data-inspect="${escapeAttr(card.id)}" aria-label="Inspect ${escapeAttr(card.name)}" title="Inspect">
-          <span class="magnifier-icon" aria-hidden="true"></span>
-        </button>
       </div>
     </div>
   `;
@@ -6467,7 +6471,14 @@ function bindEvents() {
     const removeId = event.target.closest("[data-remove]")?.dataset.remove;
     if (removeId) { removeFromDeck(removeId); return; }
     const inspectId = event.target.closest("[data-inspect]")?.dataset.inspect;
-    if (inspectId) previewCard(getCard(inspectId));
+    if (inspectId) { previewCard(getCard(inspectId)); return; }
+    // Eyeglass removed: tapping the card art opens the preview. This is the
+    // touch-friendly way to zoom, since hover doesn't fire on a phone/tablet.
+    const artNode = event.target.closest(".mini-card-art");
+    if (artNode) {
+      const row = artNode.closest("[data-card-id]");
+      if (row) previewCard(getCard(row.dataset.cardId));
+    }
   });
 
   el.tokenList?.addEventListener("click", event => {
