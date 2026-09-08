@@ -5843,3 +5843,19 @@ html.touch-device .context-menu > * {
     border-radius: 2px;
     background: #fff;
 }
+
+/* Card highlight (right-click a card to mark it for both players). */
+.card-highlighted {
+    outline: 3px solid #ffd23f !important;
+    outline-offset: -1px;
+    box-shadow: 0 0 14px 3px rgba(255, 210, 63, .85) !important;
+    border-radius: 8px;
+    z-index: 250 !important;
+}
+
+/* Chat: colour the sender name by role so players vs spectators are clear. */
+.chat-entry strong { color: #cdd3dd; }
+.chat-role-p1 strong { color: #5aa2ff; }
+.chat-role-p2 strong { color: #ff7a6b; }
+.chat-role-spectator { opacity: .85; }
+.chat-role-spectator strong { color: #c7b06a; font-style: italic; }

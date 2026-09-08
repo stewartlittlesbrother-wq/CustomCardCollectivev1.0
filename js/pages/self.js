@@ -1274,6 +1274,47 @@ async function syncOnlineCurrentAttack(attackState) {
     await onlineMultiplayerService.updateCurrentAttack(roomCode, attackState);
 }
 
+// ── Card highlights ──────────────────────────────────────────────────────────
+// Right-click a card (e.g. one in your opponent's hand) to mark it for BOTH
+// players. Online, the marks live in the shared public state so both sides — and
+// spectators — see them; in practice they're a local list. Each card carries a
+// data-hl-key; applyHighlights() toggles the .card-highlighted class to match.
+let localHighlights = [];
+function getHighlightKeys() {
+    if (isOnlineMatch) {
+        return Array.isArray(onlinePublicState?.highlights) ? onlinePublicState.highlights.slice() : [];
+    }
+    return localHighlights.slice();
+}
+function commitHighlightKeys(keys) {
+    if (isOnlineMatch) {
+        if (!isSpectator && onlineMultiplayerService) {
+            onlineMultiplayerService.updatePublicState(roomCode, { highlights: keys }).catch(() => {});
+        }
+    } else {
+        localHighlights = keys;
+    }
+    applyHighlights(keys);
+}
+function toggleHighlightKey(key) {
+    if (!key) return;
+    const keys = getHighlightKeys();
+    const i = keys.indexOf(key);
+    if (i === -1) keys.push(key); else keys.splice(i, 1);
+    commitHighlightKeys(keys);
+}
+function clearCardHighlights() {
+    commitHighlightKeys([]);
+    addGameLog("Highlights cleared.");
+}
+function applyHighlights(keys) {
+    const set = new Set(keys || getHighlightKeys());
+    document.querySelectorAll("[data-hl-key]").forEach(el => {
+        el.classList.toggle("card-highlighted", set.has(el.getAttribute("data-hl-key")));
+    });
+}
+window.applyHighlights = applyHighlights;
+
 function applyOnlinePrivateState(privateState = {}) {
     if (!isOnlineMatch) return;
 
@@ -1686,8 +1727,13 @@ function appendChatMessage(message) {
     if (!log) return;
 
     const isOwn = message.sender === getOwnChatName();
+    // Colour by role so players and spectators are easy to tell apart.
+    let roleCls = "chat-role-player";
+    if (message.sender === "Spectator") roleCls = "chat-role-spectator";
+    else if (message.sender === onlinePlayerLabels.p1) roleCls = "chat-role-p1";
+    else if (message.sender === onlinePlayerLabels.p2) roleCls = "chat-role-p2";
     const entry = document.createElement("div");
-    entry.className = `game-log-entry chat-entry${isOwn ? " chat-entry-own" : ""}`;
+    entry.className = `game-log-entry chat-entry ${roleCls}${isOwn ? " chat-entry-own" : ""}`;
 
     const who = document.createElement("strong");
     who.textContent = `${message.sender}: `;
@@ -3785,6 +3831,8 @@ function setupSidebarTurnToggles() {
             addGameLog(`Play Card now ${restOnlyEl.checked ? "only rests DON!!" : "plays the card out"}.`);
         });
     }
+
+    document.getElementById("clearHighlightsTool")?.addEventListener("click", clearCardHighlights);
 }
 
 // Set every one of a player's board cards (leader, characters, stage) to active,
@@ -5747,7 +5795,23 @@ function renderPlayerHand(player, handElementId, hidden) {
             img.className = "hand-card-img";
 
             cardElement.appendChild(img);
+
+            // Right-click an opponent hand card to highlight it for BOTH players.
+            const hlKey = `hand:${getPlayerKey(player)}:${index}`;
+            cardElement.setAttribute("data-hl-key", hlKey);
+            if (getHighlightKeys().includes(hlKey)) cardElement.classList.add("card-highlighted");
+            cardElement.addEventListener("contextmenu", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleHighlightKey(hlKey);
+            });
         } else {
+            // Same highlight key as the hidden view, so the card's OWNER sees the
+            // highlight on their own (face-up) hand card too — "both players see it".
+            const hlKey = `hand:${getPlayerKey(player)}:${index}`;
+            cardElement.setAttribute("data-hl-key", hlKey);
+            if (getHighlightKeys().includes(hlKey)) cardElement.classList.add("card-highlighted");
+
             cardElement.setAttribute("data-card-image", cardArtSrc(card));
             cardElement.setAttribute("data-player", player === gameState.player1 ? "player1" : "player2");
             cardElement.setAttribute("data-card-instance-id", card.instanceId);
