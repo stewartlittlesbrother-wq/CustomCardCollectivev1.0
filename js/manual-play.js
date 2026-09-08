@@ -718,16 +718,19 @@ const manualPlay = {
                 window.scheduleOnlineBoardSync?.();
             };
 
-            // Dropping a card onto the DECK is a big deal (burying it top/bottom),
-            // and easy to do by accident on a phone — confirm first. The card
-            // hasn't left its source yet (that happens inside the handlers), so a
-            // "Cancel" simply does nothing and the card stays where it was.
-            const deckDropTarget = (e.target && typeof e.target.closest === "function")
-                ? e.target.closest(".deck-area") : null;
+            // Dropping a card onto the DECK or LIFE pile is a big deal (buries it
+            // top/bottom), and easy to do by accident on a phone — confirm first.
+            // The card hasn't left its source yet (that happens inside the
+            // handlers), so a "Cancel" simply does nothing and the card stays put.
+            const canClosest = e.target && typeof e.target.closest === "function";
+            const deckDropTarget = canClosest ? e.target.closest(".deck-area") : null;
+            const lifeDropTarget = (!deckDropTarget && canClosest) ? e.target.closest(".life-area") : null;
+            const pileTarget = deckDropTarget || lifeDropTarget;
+            const pileLabel = deckDropTarget ? "deck" : "life";
             const isTouch = document.documentElement.classList.contains("touch-device");
-            if (deckDropTarget && !extraTarget && fromDonArea !== "true" &&
+            if (pileTarget && !extraTarget && fromDonArea !== "true" &&
                 isTouch && typeof window.confirmDeckMove === "function") {
-                const rect = deckDropTarget.getBoundingClientRect();
+                const rect = pileTarget.getBoundingClientRect();
                 const isTop = e.clientY < rect.top + rect.height / 2;
                 const player = gameState[playerKey];
                 let cardName = "this card";
@@ -739,7 +742,7 @@ const manualPlay = {
                     const c = pool.find(x => x && x.instanceId === cardInstanceId);
                     if (c) { cardName = c.name || cardName; break; }
                 }
-                window.confirmDeckMove(isTop ? "top" : "bottom", cardName, finishDrop);
+                window.confirmDeckMove(isTop ? "top" : "bottom", cardName, finishDrop, pileLabel);
                 return;   // wait for the player's answer
             }
 

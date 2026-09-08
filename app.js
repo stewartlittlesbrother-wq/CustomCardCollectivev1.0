@@ -1,5 +1,13 @@
 const STORAGE_KEY = "custom-cards-sim-luffy-only-v1";
 const SAVED_DECKS_KEY = "custom-cards-sim-luffy-only-saved-decks-v1";
+// When on, the deck builder lifts the 50-card main-deck cap so you can build
+// decks with more (or fewer) than 50 cards. Fewer than 50 already works; this
+// only removes the "can't add past 50" block. Persisted across sessions.
+const ALLOW_ANY_DECK_SIZE_KEY = "custom-cards-allow-any-deck-size-v1";
+function allowAnyDeckSize() {
+  try { return localStorage.getItem(ALLOW_ANY_DECK_SIZE_KEY) === "1"; } catch (e) { return false; }
+}
+function deckSizeCap() { return allowAnyDeckSize() ? Infinity : 50; }
 const CUSTOM_CARDS_KEY = "custom-cards-sim-imported-cards-v1";
 const PROJECT_CARDS_API = "/api/project-cards";
 const CARD_FILES = [
@@ -311,6 +319,8 @@ const el = {
   deckTitle: document.querySelector("#deckTitle"),
   deckName: document.querySelector("#deckName"),
   deckCount: document.querySelector("#deckCount"),
+  deckCountCap: document.querySelector("#deckCountCap"),
+  allowAnyDeckSize: document.querySelector("#allowAnyDeckSize"),
   deckWarnings: document.querySelector("#deckWarnings"),
   leaderSlot: document.querySelector("#leaderSlot"),
   deckList: document.querySelector("#deckList"),
@@ -4729,7 +4739,7 @@ function addToDeck(id) {
     return;
   }
 
-  if (deckMainCount() >= 50) {
+  if (deckMainCount() >= deckSizeCap()) {
     toast("Main deck is already at 50 cards");
     return;
   }
@@ -4765,7 +4775,7 @@ function addFourToDeck(id) {
   // Unlimited cards stop at the 50-card deck cap rather than running forever.
   const limit = cardCopyLimit(card);
   let added = 0;
-  while ((state.deck[id] || 0) < limit && deckMainCount() < 50) {
+  while ((state.deck[id] || 0) < limit && deckMainCount() < deckSizeCap()) {
     state.deck[id] = (state.deck[id] || 0) + 1;
     added += 1;
   }
@@ -5176,9 +5186,13 @@ function renderBuilder() {
 
   el.deckTitle.textContent = state.deckName || el.deckName.value.trim() || "Untitled Deck";
   el.deckCount.textContent = String(mainCount);
+  const anySize = allowAnyDeckSize();
+  if (el.deckCountCap) el.deckCountCap.textContent = anySize ? " cards" : "/50";
+  if (el.allowAnyDeckSize) el.allowAnyDeckSize.checked = anySize;
 
   if (!leader) warnings.push("Choose exactly 1 leader.");
-  if (mainCount !== 50) warnings.push(`Main deck has ${mainCount} cards. OPTCG style decks use 50.`);
+  // With the 50-card cap lifted, a non-50 deck is intentional — don't nag.
+  if (!anySize && mainCount !== 50) warnings.push(`Main deck has ${mainCount} cards. OPTCG style decks use 50.`);
 
   el.deckWarnings.innerHTML = warnings.map(text => `<div class="warning">${escapeHtml(text)}</div>`).join("");
   el.leaderSlot.innerHTML = leader ? renderDeckRow(leader, 1, true) : `<div class="empty">Leader slot</div>`;
@@ -6454,6 +6468,11 @@ function bindEvents() {
     }
     const inspectId = event.target.closest("[data-inspect]")?.dataset.inspect;
     if (inspectId) previewCard(getCard(inspectId));
+  });
+
+  el.allowAnyDeckSize?.addEventListener("change", () => {
+    try { localStorage.setItem(ALLOW_ANY_DECK_SIZE_KEY, el.allowAnyDeckSize.checked ? "1" : "0"); } catch (e) {}
+    renderAll();
   });
 
   el.clearDeck.addEventListener("click", clearDeck);

@@ -5440,8 +5440,10 @@ html.touch-device .opponent-hand .hand-card.hand-card-glide {
     z-index: 1000 !important;
 }
 /* Online: you can't use the opponent's hand, so keep it a thin row of backs. */
-html.touch-device.mode-online .opponent-hand { height: calc(var(--mch) * 0.55) !important; opacity: .85 !important; }
-html.touch-device.mode-online .opponent-hand .hand-card { height: calc(var(--mch) * 0.5) !important; }
+/* Online: the opponent's real hand strip is at the very top of the board, where
+   the phone's browser bar covers it — hide it and show their hand in the freed
+   DON band instead (see .opp-hand-inline). Reclaim the height for the board. */
+html.touch-device.mode-online .opponent-hand { display: none !important; }
 
 /* The life HEART sits inside the opponent play area, which is rotated 180° for
    the facing-table view — that flipped the heart upside-down so it read as a
@@ -5529,16 +5531,62 @@ html.touch-device .game-log-close { display: inline-flex !important; align-items
 .opp-life-heart:only-child { min-height: 0; }
 
 /* .don-area > div is hidden by an existing rule (0,2,0 + !important); match its
-   specificity and come later so our indicator wins and shows. */
-.don-area > .don-opp-indicator {
+   specificity and come later so our row wins and shows. */
+.don-area > .don-opp-row {
     display: flex !important;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    padding: 2px 4px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+/* The DON area itself is already double-rotated (its own 180° cancels the play
+   area's 180°), so its content renders upright — the row needs NO extra rotation. */
+
+.don-opp-indicator {
+    display: flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    width: 100%;
-    height: 100%;
+    flex: 0 0 auto;          /* the DON tally is pinned to the far left */
     padding: 2px;
     box-sizing: border-box;
+}
+/* Opponent's hand, surfaced here as overlapping card backs + a count, because the
+   real hand strip at the top of the board is hidden behind the phone browser bar. */
+.opp-hand-inline {
+    position: relative;
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    height: 100%;
+    min-width: 0;
+    overflow: hidden;
+    padding-left: 6px;
+}
+/* higher specificity + !important to beat the generic `.play-area img` rule that
+   would otherwise stretch these to fill (wrong aspect). */
+html.touch-device .play-area .opp-hand-back-card {
+    height: 92% !important;
+    width: auto !important;
+    max-height: 92% !important;
+    min-width: 0 !important;
+    border-radius: 4px !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .5) !important;
+    object-fit: contain !important;
+}
+.opp-hand-back-card:not(:first-child) { margin-left: -12px; }   /* slight overlap */
+.opp-hand-inline-count {
+    flex: 0 0 auto;
+    margin-left: 8px;
+    background: rgba(0, 0, 0, .6);
+    color: #fff;
+    font: 800 14px/1 system-ui, sans-serif;
+    border-radius: 10px;
+    padding: 4px 8px;
 }
 .doi-chip {
     display: flex;
@@ -5685,6 +5733,7 @@ html.touch-device .context-menu {
     max-width: none !important;
     min-width: 0 !important;
     display: flex !important;
+    flex-direction: row !important;   /* deck/trash menu sets column inline — force the wide 2-per-row look */
     flex-wrap: wrap !important;
     gap: 8px !important;
     padding: 12px !important;

@@ -2102,6 +2102,9 @@ function createInitialPlayerState(playerName, deckDefinition) {
         turns: 0,
         deck: shuffleDeck(parseDeckText(selectedDeck.deckText)),
         deckName: selectedDeck.name,
+        // Kept so a background card load can top up any cards that weren't in the
+        // fast targeted load yet (see topUpMissingDeckCards).
+        deckDef: selectedDeck.deckText,
         hasMulliganed: false,
         hand: [],
         life: [],
@@ -2468,9 +2471,71 @@ function collectNeededCardNumbers() {
 // The online card load pulls YOUR saved decks first, then the rest of the shared
 // library in the background. When that finishes, re-render so any opponent cards
 // that were waiting on their artwork now show it.
+// Copy freshly-loaded card data (art, name, stats) onto the existing card
+// INSTANCES on the board, so cards that were built before their data arrived
+// (background load) render correctly without rebuilding the whole game.
+function refreshCardDataFromDatabase() {
+    if (!gameState || typeof window.getCardById !== "function") return;
+    const FIELDS = ["image", "altArts", "altArt", "name", "cost", "power", "counter",
+                    "color", "type", "cardType", "effect", "attribute", "cardNumber"];
+    const refresh = (card) => {
+        if (!card) return;
+        const src = window.getCardById(card.cardNumber || card.id);
+        if (!src) return;
+        FIELDS.forEach(f => {
+            const empty = card[f] === undefined || card[f] === null || card[f] === "";
+            if (src[f] !== undefined && empty) card[f] = src[f];
+        });
+    };
+    ["player1", "player2"].forEach(pk => {
+        const p = gameState[pk]; if (!p) return;
+        refresh(p.leader);
+        [p.deck, p.hand, p.life, p.trash, p.characters,
+         p.extraFaceUp, p.extraFaceDown, p.extraSlotA, p.extraSlotB]
+            .forEach(arr => { if (Array.isArray(arr)) arr.forEach(refresh); });
+        if (p.stage) refresh(p.stage);
+    });
+}
+
+// parseDeckText drops cards that weren't loaded yet, so a background load can
+// leave a deck a few cards short. Re-add any now-available cards to reach each
+// deck's intended counts (inserted at random spots, face-down, so it's fair).
+function topUpMissingDeckCards() {
+    if (!gameState || typeof window.getCardById !== "function") return;
+    ["player1", "player2"].forEach(pk => {
+        const p = gameState[pk];
+        if (!p || !p.deckDef || !Array.isArray(p.deck)) return;
+        const have = {};
+        const bump = k => { if (k) have[k] = (have[k] || 0) + 1; };
+        const tally = arr => { if (Array.isArray(arr)) arr.forEach(c => {
+            if (!c) return; bump(c.id); if (c.cardNumber && c.cardNumber !== c.id) bump(c.cardNumber);
+        }); };
+        [p.deck, p.hand, p.life, p.trash, p.characters,
+         p.extraFaceUp, p.extraFaceDown, p.extraSlotA, p.extraSlotB].forEach(tally);
+        if (p.stage) tally([p.stage]);
+
+        String(p.deckDef).trim().split("\n").forEach(line => {
+            const m = line.trim().match(/^(\d+)x(.+)$/i);
+            if (!m) return;
+            const want = parseInt(m[1], 10) || 0;
+            const id = m[2].trim();
+            for (let n = have[id] || 0; n < want; n++) {
+                const src = window.getCardById(id);
+                if (!src) break;   // still not loaded — try again next update
+                const at = Math.floor(Math.random() * (p.deck.length + 1));
+                p.deck.splice(at, 0, createCardInstance(src));
+            }
+        });
+    });
+}
+
 window.onCardDatabaseUpdated = function reRenderAfterCardLoad() {
     if (typeof gameState === "undefined" || !gameState) return;
     try {
+        // A background card load just landed — fill in any placeholder art and
+        // restore deck cards that were dropped before their data was available.
+        refreshCardDataFromDatabase();
+        topUpMissingDeckCards();
         renderLeaders(); renderCharacters(); renderStages();
         renderTrash(); renderHands(); renderDecks();
     } catch (e) { /* board not ready yet */ }
@@ -2485,7 +2550,19 @@ async function initializeGamePage() {
     try {
         await loadCardDatabase(collectNeededCardNumbers());
 
-        gameState = createInitialGameState();
+        try {
+            gameState = createInitialGameState();
+        } catch (buildErr) {
+            // The fast targeted load can miss a card the board can't open without
+            // (its leader keyed by an id ≠ its number). Do the one blocking full
+            // load and retry before surfacing the error.
+            if (typeof window.loadFullCardLibraryBlocking === "function") {
+                await window.loadFullCardLibraryBlocking();
+                gameState = createInitialGameState();
+            } else {
+                throw buildErr;
+            }
+        }
 
         // Apply the player's chosen custom DON!! deck (size + per-slot art). In
         // practice you control both sides, so both use it; online, only your own
@@ -3422,24 +3499,44 @@ function showMulliganChoice(player, playerName, callback) {
         background: #1a1a2e;
         border: 2px solid #4a90e2;
         border-radius: 8px;
-        padding: 30px;
+        padding: 24px;
         text-align: center;
         color: #fff;
         font-size: 16px;
-        max-width: 400px;
+        max-width: min(720px, 94vw);
+        max-height: 92vh;
+        overflow: auto;
     `;
-    
+
+    // Show the opening hand right in the dialog so it's readable on a phone (you
+    // can't hover to preview). Each card is tappable to zoom full-screen.
+    const handHtml = (player.hand || []).map((card, i) =>
+        `<img class="mull-card" data-mi="${i}" src="${cardArtSrc(card)}" ` +
+        `alt="${String(card && card.name || "").replace(/"/g, "&quot;")}" ` +
+        `style="height:132px;width:auto;border-radius:7px;cursor:pointer;` +
+        `box-shadow:0 3px 10px rgba(0,0,0,.55);">`
+    ).join("");
+
     dialog.innerHTML = `
-        <h2 style="color: #4a90e2; margin-bottom: 20px;">${playerName}</h2>
-        <p style="margin-bottom: 20px;">Do you want to mulligan?<br>(Shuffle hand back and draw 5 new cards)</p>
+        <h2 style="color: #4a90e2; margin-bottom: 10px;">${playerName}</h2>
+        <p style="margin: 0 0 14px; font-size: 14px; opacity: .85;">Tap a card to zoom. Keep this hand, or shuffle it back and draw 5 new cards.</p>
+        <div class="mull-hand" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:20px;">${handHtml}</div>
         <div style="display: flex; gap: 10px; justify-content: center;">
-            <button id="mulliganYes" style="padding: 10px 20px; background: #4a90e2; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">Yes, Mulligan</button>
-            <button id="mulliganNo" style="padding: 10px 20px; background: #666; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">No, Keep Hand</button>
+            <button id="mulliganYes" style="padding: 12px 22px; background: #4a90e2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: bold;">Yes, Mulligan</button>
+            <button id="mulliganNo" style="padding: 12px 22px; background: #666; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: bold;">No, Keep Hand</button>
         </div>
     `;
-    
+
     modal.appendChild(dialog);
     document.body.appendChild(modal);
+
+    // Tap a card in the hand preview to zoom it full-screen (over this modal).
+    dialog.querySelectorAll(".mull-card").forEach((imgEl) => {
+        imgEl.addEventListener("click", (e) => {
+            e.stopPropagation();
+            window.showBigCardImage?.(imgEl.src);
+        });
+    });
     
     document.getElementById("mulliganYes").addEventListener("click", () => {
         // Shuffle hand back into deck
@@ -3878,18 +3975,45 @@ function renderDonArea(player, areaId) {
     const slots = getDonSlots(player);
 
     // Online opponent: don't lay out their DON!! cards on the board. Show a
-    // compact active / rested tally instead, which frees the DON band's space.
+    // compact active / rested tally (pushed to the far left), and use the rest of
+    // the freed DON band to show their HAND as a row of card backs + a count —
+    // their real hand strip at the very top is cut off by the phone's browser bar,
+    // so this is the only place you can actually see how many cards they hold.
     // Your own DON!! still render as cards you can pick up and attach.
-    if (isOnlineOpponent(player)) {
+    if (isOnlineOpponent(player) && document.documentElement.classList.contains("touch-device")) {
         const activeCount = slots.filter(slot => slot !== "rested").length;
         const restedCount = slots.filter(slot => slot === "rested").length;
+
+        const row = document.createElement("div");
+        row.className = "don-opp-row";
+
         const indicator = document.createElement("div");
         indicator.className = "don-opp-indicator";
         indicator.title = `Opponent DON!!  ·  ${activeCount} active, ${restedCount} rested`;
         indicator.innerHTML =
             `<span class="doi-chip doi-active"><span class="doi-num">${activeCount}</span><span class="doi-lbl">active</span></span>` +
             `<span class="doi-chip doi-rested"><span class="doi-num">${restedCount}</span><span class="doi-lbl">rested</span></span>`;
-        donArea.appendChild(indicator);
+        row.appendChild(indicator);
+
+        const handCount = Array.isArray(player.hand) ? player.hand.length : 0;
+        const handWrap = document.createElement("div");
+        handWrap.className = "opp-hand-inline";
+        handWrap.title = `Opponent hand: ${handCount} card${handCount === 1 ? "" : "s"}`;
+        for (let i = 0; i < handCount; i++) {
+            const back = document.createElement("img");
+            back.className = "opp-hand-back-card";
+            back.src = cardBackImage;
+            back.alt = "";
+            back.style.setProperty("--ohb-index", String(i));
+            handWrap.appendChild(back);
+        }
+        const badge = document.createElement("div");
+        badge.className = "opp-hand-inline-count";
+        badge.textContent = handCount;
+        handWrap.appendChild(badge);
+        row.appendChild(handWrap);
+
+        donArea.appendChild(row);
         return;
     }
 
@@ -5705,7 +5829,7 @@ function renderPlayerLife(player, lifeAreaId) {
     // Online opponent: don't show their life cards on the board. Show a compact
     // heart with the life count instead (tap it to reveal the pile in a popup).
     // Frees the space their life column would take. Your own life still fans.
-    if (isOnlineOpponent(player)) {
+    if (isOnlineOpponent(player) && document.documentElement.classList.contains("touch-device")) {
         lifeArea.classList.remove("open");
         lifeArea.style.removeProperty("min-height");
         renderOpponentLifeHeart(player, lifeArea, playerKey);
@@ -6036,7 +6160,7 @@ function renderMyLifeHeart(player, lifeArea, playerKey) {
 // A confirm sheet before moving a card to the TOP or BOTTOM of the deck. These
 // are easy to fat-finger on mobile and burying a card on the bottom is a big
 // deal, so ask first. `position` is "top" or "bottom".
-function confirmDeckMove(position, cardName, onConfirm) {
+function confirmDeckMove(position, cardName, onConfirm, pileLabel = "deck") {
     document.getElementById("deckMoveConfirm")?.remove();
     const where = position === "top" ? "TOP" : "BOTTOM";
 

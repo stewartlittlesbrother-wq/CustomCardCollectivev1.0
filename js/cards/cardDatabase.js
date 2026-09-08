@@ -71,15 +71,24 @@ async function loadCardDatabase(neededNumbers) {
     const importedCards = loadImportedCardsForGame();
 
     if (neededNumbers) {
-        // Practice: pull ONLY the two decks' cards, with a full-load safety net if
-        // a card is keyed by an odd imported uuid that the targeted load missed.
-        let { cards, deleted } = await loadSharedCardsForGame(neededNumbers);
+        // Practice: pull ONLY the two decks' cards. This is the fast path that
+        // keeps the board from waiting on the whole custom library on a phone.
+        const { cards, deleted } = await loadSharedCardsForGame(neededNumbers);
         assembleGameDatabase(loadedCards, cards, importedCards, deleted);
+
+        // A card can still be "missing" when a deck references it by an id that
+        // differs from its number-based library key (custom cards). Rather than
+        // BLOCK the whole board on the full library (which is what made practice
+        // take ages), pull the rest in the BACKGROUND and let self.js top up the
+        // decks + refresh art once it lands (window.onCardDatabaseUpdated). If it's
+        // the LEADER that's missing the board can't build at all, so that one case
+        // still forces a blocking full load via loadFullCardLibraryBlocking().
         const missing = [...neededNumbers].some(num => num && !cardDatabase[num] && !leaders[num]);
         if (missing) {
-            console.log("Targeted card load missed a deck card; loading full library.");
-            ({ cards, deleted } = await loadSharedCardsForGame());
-            assembleGameDatabase(loadedCards, cards, importedCards, deleted);
+            loadSharedCardsForGame().then(({ cards, deleted }) => {
+                assembleGameDatabase(loadedCards, cards, importedCards, deleted);
+                try { if (typeof window.onCardDatabaseUpdated === "function") window.onCardDatabaseUpdated(); } catch (e) {}
+            }).catch(() => {});
         }
         return;
     }
@@ -103,6 +112,16 @@ async function loadCardDatabase(neededNumbers) {
         assembleGameDatabase(loadedCards, cards, importedCards, deleted);
     }
 }
+
+// Blocking full-library load. Used as a fallback when the fast targeted load
+// left out a card the board CAN'T open without (its leader). Everything else is
+// pulled in the background, so this rarely runs.
+window.loadFullCardLibraryBlocking = async function loadFullCardLibraryBlocking() {
+    const loadedCards = await loadPermanentCardFiles();
+    const importedCards = loadImportedCardsForGame();
+    const { cards, deleted } = await loadSharedCardsForGame();
+    assembleGameDatabase(loadedCards, cards, importedCards, deleted);
+};
 
 function assembleGameDatabase(loadedCards, sharedCards, importedCards, deleted) {
     const mainCards = {};

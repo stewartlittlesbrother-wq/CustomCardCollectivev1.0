@@ -18,8 +18,14 @@
     <script>
     (function () {
       try {
-        if ((window.matchMedia && (matchMedia("(pointer: coarse)").matches || matchMedia("(any-pointer: coarse)").matches))
-            || navigator.maxTouchPoints > 0 || "ontouchstart" in window) {
+        // Mobile UI only when the PRIMARY pointer is touch. A desktop's primary
+        // pointer is its mouse/trackpad (fine) even if it also has a touchscreen
+        // or reports touch points - so Linux/Windows desktops correctly stay on
+        // the desktop UI, while phones/tablets (primary pointer coarse, stylus or
+        // not) get the mobile UI. The old maxTouchPoints/ontouchstart checks were
+        // what mis-flagged Linux desktops as mobile.
+        var mm = window.matchMedia;
+        if (mm && mm("(pointer: coarse)").matches) {
           document.documentElement.classList.add("touch-device");
         }
       } catch (e) {}
@@ -28,7 +34,7 @@
 
     <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
     <link rel="stylesheet" href="../css/style.css">
-    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-48">
+    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-49">
     <link rel="stylesheet" href="../css/manual-play.css?v=manual-5">
 </head>
 <body>
@@ -297,14 +303,14 @@
     </main>
 
     <script src="../js/core/phases.js?v=creation-13&t=20260714172304"></script>
-    <script src="../js/manual-play.js?v=manual-13&t=20260816000002"></script>
-    <script src="../js/cards/cardDatabase.js?v=cardnum-10"></script>
+    <script src="../js/manual-play.js?v=manual-14&t=20260816000002"></script>
+    <script src="../js/cards/cardDatabase.js?v=cardnum-11"></script>
     <script src="../js/cards/decks.js?v=creation-14&t=20260714172304"></script>
     <script src="../js/core/deckParser.js?v=starting-1&t=20260714172304"></script>
 
-    <script src="../js/pages/self.js?v=spectate-56&t=20260816000002"></script>
+    <script src="../js/pages/self.js?v=spectate-59&t=20260816000002"></script>
   <script src="../js/rotate-prompt.js"></script>
 
-  <script src="../js/version.js?v=139"></script>
+  <script src="../js/version.js?v=142"></script>
 </body>
 </html>

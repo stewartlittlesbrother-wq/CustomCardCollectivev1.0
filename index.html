@@ -13,8 +13,11 @@
   <script>
   (function () {
     try {
-      if ((window.matchMedia && (matchMedia("(pointer: coarse)").matches || matchMedia("(any-pointer: coarse)").matches))
-          || navigator.maxTouchPoints > 0 || "ontouchstart" in window) {
+      // Mobile UI only when the PRIMARY pointer is touch. Desktops (primary
+      // pointer = mouse/trackpad = fine) stay on desktop even with a touchscreen
+      // or reported touch points; phones/tablets (primary coarse) get mobile.
+      var mm = window.matchMedia;
+      if (mm && mm("(pointer: coarse)").matches) {
         document.documentElement.classList.add("touch-device");
       }
     } catch (e) {}
@@ -343,8 +346,11 @@
                   <input id="deckName" type="text" placeholder="Deck name">
                 </label>
                 <div class="deck-counts">
-                  <strong><span id="deckCount">0</span>/50</strong>
+                  <strong><span id="deckCount">0</span><span id="deckCountCap">/50</span></strong>
                   <span>Main deck</span>
+                  <label class="deck-size-toggle" title="Lift the 50-card cap so you can build a deck with more or fewer than 50 cards">
+                    <input type="checkbox" id="allowAnyDeckSize"> Any size
+                  </label>
                 </div>
                 <div class="deck-tools">
                   <button class="red-button" type="button" id="saveDeckMini">Save</button>
@@ -828,11 +834,11 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=139"></script>
+  <script src="js/version.js?v=142"></script>
   <script src="js/rotate-prompt.js"></script>
   <script src="js/cards/decks.js?v=creation-9"></script>
   <script src="js/manual-play.js?v=manual-12"></script>
-  <script src="app.js?v=creation-57"></script>
+  <script src="app.js?v=creation-58"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).
