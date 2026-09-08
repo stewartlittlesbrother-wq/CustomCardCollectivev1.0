@@ -1065,6 +1065,126 @@ function revealCardToOpponent(card) {
 }
 window.revealCardToOpponent = revealCardToOpponent;
 
+// ── Manual "Play Card" (hand right-click) ────────────────────────────────────
+// Rests DON!! equal to the card's cost, announces + reveals the play in the log,
+// and (unless "rest DON only" is on) puts the card in the zone for its type:
+//   event → trash · character → character area · stage → stage (replacing any).
+const PLAY_CARD_REST_ONLY_KEY = "optcgPlayCardRestOnly";
+function playCardRestOnly() {
+    try { return localStorage.getItem(PLAY_CARD_REST_ONLY_KEY) === "1"; } catch { return false; }
+}
+
+// Rest up to `cost` of a player's ACTIVE DON!!; returns how many were rested.
+function restDonForCost(player, cost) {
+    const want = Math.max(0, Math.floor(Number(cost) || 0));
+    if (!want) return 0;
+    const slots = getDonSlots(player);
+    let rested = 0;
+    for (let i = 0; i < slots.length && rested < want; i++) {
+        if (slots[i] === "active") { slots[i] = "rested"; rested++; }
+    }
+    if (rested) { setDonSlots(player, slots); updateDonDisplay(); }
+    return rested;
+}
+
+// Drop a character into the first open slot (5 base, up to 10 with the extra row).
+function placeCharacterCard(player, card) {
+    if (!Array.isArray(player.characters)) player.characters = [];
+    while (player.characters.length < 5) player.characters.push(null);
+    const idx = player.characters.findIndex(c => !c);
+    if (idx !== -1) { player.characters[idx] = card; return true; }
+    if (player.characters.length < 10) { player.characters.push(card); return true; }
+    return false;
+}
+
+function playCardFromHand(player, card) {
+    if (!player || !card) return;
+    const cost = Number(getCardPlayCost(card)) || 0;
+    const rested = restDonForCost(player, cost);
+    const restNote = cost > 0 ? ` — rested ${rested}${rested < cost ? `/${cost}` : ""} DON!!` : "";
+
+    // Announce + reveal the play in the log (shows the art). Online: reveal to foe.
+    addGameLog(`${player.name} played ${card.name}${restNote}.`, [{ name: card.name, image: card.image }]);
+    if (isOnlineMatch) window.revealCardToOpponent?.(card);
+
+    // "Rest DON only" mode: pay the cost + reveal, but leave the card in hand.
+    if (playCardRestOnly()) {
+        window.scheduleOnlineBoardSync?.();
+        playCardSound();
+        return;
+    }
+
+    const type = String(card.cardType || card.category || "").toLowerCase();
+    const idx = player.hand.findIndex(c => c.instanceId === card.instanceId);
+
+    if (type === "event") {
+        if (idx !== -1) player.hand.splice(idx, 1);
+        (player.trash = player.trash || []).push(card);
+        renderTrash();
+    } else if (type === "character") {
+        if (idx !== -1) player.hand.splice(idx, 1);
+        card.state = "active";
+        if (!placeCharacterCard(player, card)) {
+            player.hand.push(card);   // board full — keep it in hand
+            addGameLog(`${player.name}'s character area is full — ${card.name} stays in hand.`);
+            renderHands();
+            return;
+        }
+        renderCharacters();
+    } else if (type === "stage") {
+        if (idx !== -1) player.hand.splice(idx, 1);
+        card.state = "active";
+        placeCardOnStage(player, card);   // sends any existing stage to trash
+    } else {
+        // No / unknown type: only the DON rest + reveal happened; leave it in hand.
+        window.scheduleOnlineBoardSync?.();
+        playCardSound();
+        return;
+    }
+
+    renderHands();
+    window.scheduleOnlineBoardSync?.();
+    playCardSound();
+}
+
+// Small menu on the DON!! band's hamburger button (your DON!! only).
+function openDonMenu(anchor, player) {
+    document.getElementById("donActionMenu")?.remove();
+    const menu = document.createElement("div");
+    menu.id = "donActionMenu";
+    menu.className = "context-menu";
+    menu.style.cssText = "position:fixed;z-index:10001;background:rgba(20,20,20,.98);" +
+        "border:1px solid #555;border-radius:8px;padding:6px;display:flex;flex-direction:column;" +
+        "gap:4px;box-shadow:0 12px 32px rgba(0,0,0,.55);min-width:150px;";
+    const addItem = (label, onClick) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        b.style.cssText = "padding:9px 12px;border:0;border-radius:5px;background:transparent;" +
+            "color:#fff;font-size:13px;font-weight:700;text-align:left;cursor:pointer;";
+        b.onmouseenter = () => { b.style.background = "rgba(255,255,255,.12)"; };
+        b.onmouseleave = () => { b.style.background = "transparent"; };
+        b.onclick = (e) => { e.stopPropagation(); menu.remove(); onClick(); };
+        menu.appendChild(b);
+    };
+    addItem("Rest all DON!!", () => {
+        const slots = getDonSlots(player).map(() => "rested");
+        setDonSlots(player, slots);
+        updateDonDisplay();
+        addGameLog(`${player.name} rested all DON!!.`);
+        window.scheduleOnlineBoardSync?.();
+    });
+
+    document.body.appendChild(menu);
+    const r = anchor.getBoundingClientRect();
+    menu.style.top = `${r.bottom + 4}px`;
+    menu.style.left = `${Math.max(8, r.left)}px`;
+    const mr = menu.getBoundingClientRect();
+    if (mr.right > window.innerWidth) menu.style.left = `${window.innerWidth - mr.width - 8}px`;
+    if (mr.bottom > window.innerHeight) menu.style.top = `${Math.max(8, r.top - mr.height - 4)}px`;
+    setTimeout(() => document.addEventListener("click", () => menu.remove(), { once: true }), 0);
+}
+
 function handleOnlineGameOver() {
     if (!isOnlineMatch || !gameState || onlinePublicState?.phase !== "gameOver" || !onlinePublicState?.winner) {
         return;
@@ -3648,6 +3768,17 @@ function setupSidebarTurnToggles() {
             addGameLog(`${el.checked ? "Enabled" : "Disabled"} ${key === "autoDraw" ? "auto draw" : "auto DON!!"} at turn start.`);
         });
     });
+
+    // "Play Card: rest DON!! only" — when on, the hand's Play Card just rests DON!!
+    // for the cost and reveals, without putting the card onto the field.
+    const restOnlyEl = document.getElementById("sidebarPlayRestOnly");
+    if (restOnlyEl) {
+        restOnlyEl.checked = playCardRestOnly();
+        restOnlyEl.addEventListener("change", () => {
+            try { localStorage.setItem(PLAY_CARD_REST_ONLY_KEY, restOnlyEl.checked ? "1" : "0"); } catch (e) {}
+            addGameLog(`Play Card now ${restOnlyEl.checked ? "only rests DON!!" : "plays the card out"}.`);
+        });
+    }
 }
 
 // Set every one of a player's board cards (leader, characters, stage) to active,
@@ -4127,6 +4258,24 @@ function renderDonArea(player, areaId) {
         `<span class="dc-active">${activeCount}</span><span class="dc-lbl">act</span>` +
         `<span class="dc-rested">${restedCount}</span><span class="dc-lbl">rest</span>`;
     donArea.appendChild(badge);
+
+    // Hamburger menu on the DON!! band (only on DON!! you control) with quick
+    // actions like "Rest all DON!!".
+    const canControlDon = !isSpectator && (!isOnlineMatch || isOwnOnlinePlayer(player));
+    if (canControlDon) {
+        const menuBtn = document.createElement("button");
+        menuBtn.type = "button";
+        menuBtn.className = "don-menu-btn";
+        menuBtn.title = "DON!! actions";
+        menuBtn.setAttribute("aria-label", "DON!! actions");
+        menuBtn.innerHTML = "<span></span><span></span><span></span>";
+        menuBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            openDonMenu(menuBtn, player);
+        });
+        donArea.appendChild(menuBtn);
+    }
 }
 
 function renderFloatingDon() {
@@ -5626,6 +5775,12 @@ function renderPlayerHand(player, handElementId, hidden) {
                 menu.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.5)";
 
                 const options = [
+                    {
+                        // Rest DON!! for the cost, reveal + announce the play, and
+                        // (unless "rest DON only" is on) place it by its type.
+                        label: "Play Card",
+                        action: () => playCardFromHand(player, card)
+                    },
                     {
                         // Reveal this hand card to the opponent (log + hover preview).
                         label: "Reveal to Opponent",

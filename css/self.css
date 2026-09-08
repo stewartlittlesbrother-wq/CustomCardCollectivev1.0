@@ -5817,3 +5817,29 @@ html.touch-device .context-menu > * {
     cursor: pointer;
     accent-color: #4a90e2;
 }
+
+/* Hamburger menu button on the DON!! band (quick actions like "Rest all DON!!"). */
+.don-menu-btn {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    flex: 0 0 auto;
+    margin-left: 4px;
+    border: 1px solid rgba(255, 255, 255, .28);
+    border-radius: 6px;
+    background: rgba(50, 50, 50, .92);
+    cursor: pointer;
+}
+.don-menu-btn:hover { background: rgba(74, 144, 226, .55); }
+.don-menu-btn span {
+    display: block;
+    width: 14px;
+    height: 2px;
+    border-radius: 2px;
+    background: #fff;
+}
