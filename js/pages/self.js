@@ -946,6 +946,27 @@ function renderMulliganStep(heading, body, actions) {
 
     status.textContent = "Keep your opening hand, or shuffle it back and draw a new one.";
     body.appendChild(status);
+
+    // Show your opening hand in the overlay so it's readable on a phone (you can't
+    // hover to preview). Tap a card to zoom it full-screen.
+    const ownKey = typeof getOwnOnlinePlayerKey === "function" ? getOwnOnlinePlayerKey() : null;
+    const hand = (ownKey && gameState && gameState[ownKey] && Array.isArray(gameState[ownKey].hand))
+        ? gameState[ownKey].hand : [];
+    if (hand.length) {
+        const handRow = document.createElement("div");
+        handRow.className = "mull-hand";
+        handRow.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:10px 0;max-height:46vh;overflow:auto;";
+        hand.forEach(card => {
+            const img = document.createElement("img");
+            img.src = cardArtSrc(card);
+            img.alt = String(card && card.name || "");
+            img.style.cssText = "height:130px;width:auto;border-radius:7px;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.55);";
+            img.addEventListener("click", (e) => { e.stopPropagation(); window.showBigCardImage?.(img.src); });
+            handRow.appendChild(img);
+        });
+        body.appendChild(handRow);
+    }
+
     actions.appendChild(buildSetupButton("Keep Hand", () => handleOnlineMulligan(false)));
     actions.appendChild(buildSetupButton("Mulligan", () => handleOnlineMulligan(true), "secondary"));
 }
@@ -2468,6 +2489,20 @@ function collectNeededCardNumbers() {
     return nums.size ? nums : null;
 }
 
+// The card ids that are set to start in play (practice only). These must be fully
+// loaded before the board is built so applyStartingCards can place them.
+function collectStartingCardIds() {
+    if (isOnlineMatch || isSpectator) return [];
+    const practice = getPracticeSnapshotDecks();
+    if (!practice) return [];
+    const ids = [];
+    [practice.player1Deck, practice.player2Deck].forEach(deck => {
+        (deck && Array.isArray(deck.startingCards) ? deck.startingCards : [])
+            .forEach(entry => { if (entry && entry.id) ids.push(entry.id); });
+    });
+    return ids;
+}
+
 // The online card load pulls YOUR saved decks first, then the rest of the shared
 // library in the background. When that finishes, re-render so any opponent cards
 // that were waiting on their artwork now show it.
@@ -2544,11 +2579,23 @@ window.onCardDatabaseUpdated = function reRenderAfterCardLoad() {
 async function initializeGamePage() {
     applyBoardDisplaySettings();
     setupExtraSlotsToggle();
+    setupSidebarTurnToggles();
     setupDiceRoller();
     setupSfxToggle();
     setupDeckViewerInspect();
     try {
         await loadCardDatabase(collectNeededCardNumbers());
+
+        // "Start in play" cards MUST be loaded before the board is built, or
+        // applyStartingCards can't find them in the deck and silently skips them
+        // (the "sometimes it triggers, sometimes it doesn't" bug — a custom card
+        // whose id ≠ its number can miss the fast targeted load). If any starting
+        // card isn't loaded yet, do the one blocking full load first.
+        const startIds = collectStartingCardIds();
+        if (startIds.length && typeof window.loadFullCardLibraryBlocking === "function"
+            && startIds.some(id => !window.getCardById(id))) {
+            await window.loadFullCardLibraryBlocking();
+        }
 
         try {
             gameState = createInitialGameState();
@@ -2611,9 +2658,9 @@ async function initializeGamePage() {
         setupDonAttachmentClearListener();
         autoStartSelfMatch();
 
-        // If the player has saved DON!! decks, let them choose one for this game
-        // (or the standard 10). No saved decks → keep standard silently.
-        maybePromptDonDeckChoice();
+        // DON!! deck is now chosen from a dropdown in the lobby/deck picker (its id
+        // is read via getActiveDonDeck at init above), so the old in-game pop-up is
+        // no longer shown.
 
         // Practice board: auto-lay each side's life from their leader's life
         // value. Online life is handled in maybeAutoLayOnlineLife after mulligan.
@@ -3582,6 +3629,25 @@ function getTurnAutomationSettings() {
     } catch {
         return defaults;
     }
+}
+
+// In-match sidebar toggles for the two most-flipped automations (draw / DON!! at
+// turn start). They read + write the SAME localStorage key as the Settings page,
+// so a change here sticks and takes effect from the next turn start.
+function setupSidebarTurnToggles() {
+    const map = { autoDraw: "sidebarAutoDraw", autoAddDon: "sidebarAutoAddDon" };
+    const current = getTurnAutomationSettings();
+    Object.entries(map).forEach(([key, id]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.checked = current[key] !== false;
+        el.addEventListener("change", () => {
+            const settings = getTurnAutomationSettings();
+            settings[key] = el.checked;
+            try { localStorage.setItem(TURN_AUTOMATION_KEY, JSON.stringify(settings)); } catch (e) {}
+            addGameLog(`${el.checked ? "Enabled" : "Disabled"} ${key === "autoDraw" ? "auto draw" : "auto DON!!"} at turn start.`);
+        });
+    });
 }
 
 // Set every one of a player's board cards (leader, characters, stage) to active,

@@ -54,6 +54,7 @@ const mpLandingError = $("mpLandingError");
 // Create
 const lobbyNameInput    = $("lobbyNameInput");
 const createDeckSelect  = $("createDeckSelect");
+const createDonDeckSelect = $("createDonDeckSelect");
 const btnConfirmCreate  = $("btnConfirmCreate");
 const btnBackFromCreate = $("btnBackFromCreate");
 const mpCreateError     = $("mpCreateError");
@@ -64,6 +65,7 @@ const lobbyCodeBox     = $("lobbyCodeBox");
 const lobbyCodeDisplay = $("lobbyCodeDisplay");
 const btnCopyCode      = $("btnCopyCode");
 const lobbyDeckSelect  = $("lobbyDeckSelect");
+const lobbyDonDeckSelect = $("lobbyDonDeckSelect");
 const btnReady         = $("btnReady");
 const btnStart         = $("btnStart");
 const mpLobbyMsg       = $("mpLobbyMsg");
@@ -84,6 +86,44 @@ function clearError(el) {
 function setStatus(text, cls) {
     mpConnStatus.textContent = text;
     mpConnStatus.className = "mp-status " + cls;
+}
+
+// DON!! deck dropdowns (create + lobby). Selecting one sets the active DON!! deck
+// the game reads at match start, so there's no in-game DON!! pop-up. The two
+// selects mirror each other since it's one per-device setting.
+const DON_DECKS_KEY = "custom-don-decks-v1";
+const DON_ACTIVE_DECK_KEY = "custom-don-active-deck-v1";
+function populateDonDecks(select) {
+    if (!select) return;
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(DON_DECKS_KEY) || "[]"); } catch {}
+    list = Array.isArray(list) ? list.filter(d => d && Array.isArray(d.cards) && d.cards.length) : [];
+    let active = "";
+    try { active = localStorage.getItem(DON_ACTIVE_DECK_KEY) || ""; } catch {}
+
+    select.innerHTML = "";
+    const std = document.createElement("option");
+    std.value = "";
+    std.textContent = "Standard DON!! (10)";
+    select.appendChild(std);
+    list.forEach(d => {
+        const o = document.createElement("option");
+        o.value = d.id;
+        o.textContent = `${d.name || "DON!! deck"} (${d.cards.length})`;
+        select.appendChild(o);
+    });
+    select.value = active;
+
+    if (!select.dataset.wired) {
+        select.dataset.wired = "1";
+        select.addEventListener("change", () => {
+            try {
+                if (select.value) localStorage.setItem(DON_ACTIVE_DECK_KEY, select.value);
+                else localStorage.removeItem(DON_ACTIVE_DECK_KEY);
+            } catch {}
+            [createDonDeckSelect, lobbyDonDeckSelect].forEach(s => { if (s && s !== select) s.value = select.value; });
+        });
+    }
 }
 
 function populateDecks(select) {
@@ -319,6 +359,8 @@ async function init() {
     if (typeof loadCardDatabase === "function") await loadCardDatabase().catch(() => {});
     populateDecks(createDeckSelect);
     populateDecks(lobbyDeckSelect);
+    populateDonDecks(createDonDeckSelect);
+    populateDonDecks(lobbyDonDeckSelect);
 
     // Firebase auth
     try {

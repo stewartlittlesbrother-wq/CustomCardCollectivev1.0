@@ -5882,12 +5882,30 @@ function renderPracticeSetup() {
         ${renderPracticeDeckPicker("player", "Player 1 Board")}
         ${renderPracticeDeckPicker("opponent", "Player 2 Board")}
       </div>
+      <div class="practice-don-picker">
+        <label>
+          <span>DON!! deck</span>
+          <select data-don-deck>${renderDonDeckOptions()}</select>
+        </label>
+      </div>
       <div class="practice-setup-actions">
         <button type="button" data-start-practice ${canStart ? "" : "disabled"}>Start Game</button>
         <button class="ghost" type="button" data-open-builder>Open Deck Builder</button>
       </div>
     </section>
   `;
+}
+
+// DON!! deck <option>s for the lobby dropdowns — Standard plus every saved DON!!
+// deck, with the currently-active one selected. Selecting one sets the active
+// DON!! deck the game reads at start (no more in-game pop-up).
+function renderDonDeckOptions() {
+  const active = getActiveDonDeckId();
+  const opts = [`<option value="" ${active ? "" : "selected"}>Standard DON!! (10)</option>`];
+  getDonDecks().filter(d => d && Array.isArray(d.cards) && d.cards.length).forEach(d => {
+    opts.push(`<option value="${escapeAttr(d.id)}" ${d.id === active ? "selected" : ""}>${escapeHtml(d.name || "DON!! deck")} (${d.cards.length})</option>`);
+  });
+  return opts.join("");
 }
 
 function renderPracticeDeckPicker(key, label) {
@@ -6411,7 +6429,8 @@ function bindEvents() {
   // every tile without per-card listeners.
   const showHoverPreview = (article, pointerX) => {
     if (!el.builderHoverPreview || !article) return;
-    const card = getCard(article.dataset.id);
+    // Library tiles use data-id; deck-list rows use data-card-id.
+    const card = getCard(article.dataset.id || article.dataset.cardId);
     const hoverSrc = card ? preferredCardImageUrl(card) : "";
     if (!hoverSrc) { hideHoverPreview(); return; }
     el.builderHoverPreviewImg.src = hoverSrc;
@@ -6432,8 +6451,13 @@ function bindEvents() {
     showHoverPreview(event.target.closest(".card-tile"), event.clientX);
   });
   el.cardGrid.addEventListener("mouseleave", hideHoverPreview);
-  // Hide it when the deck grid (deck list) is hovered too, and on view change.
-  el.deckList?.addEventListener("mouseover", hideHoverPreview);
+  // Hovering a card you've already added to the deck shows the same big preview.
+  el.deckList?.addEventListener("mouseover", event => {
+    const row = event.target.closest("[data-card-id]");
+    if (row) showHoverPreview(row, event.clientX);
+    else hideHoverPreview();
+  });
+  el.deckList?.addEventListener("mouseleave", hideHoverPreview);
 
   el.deckList.addEventListener("click", event => {
     const startEl = event.target.closest("[data-start]");
@@ -6694,6 +6718,8 @@ function bindEvents() {
   });
 
   el.gameBoard.addEventListener("change", event => {
+    const donSelect = event.target.closest("[data-don-deck]");
+    if (donSelect) { setActiveDonDeckId(donSelect.value); return; }
     const select = event.target.closest("[data-practice-deck]");
     if (!select) return;
     state.practiceDecks[select.dataset.practiceDeck] = select.value;

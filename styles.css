@@ -6363,3 +6363,8 @@ html.touch-device .builder-hover-preview {
     color: rgba(255, 255, 255, .55);
     line-height: 1.35;
 }
+
+/* DON!! deck dropdown under the practice deck pickers. */
+.practice-don-picker { margin: 16px 0 4px; display: flex; justify-content: center; }
+.practice-don-picker label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; align-items: flex-start; }
+.practice-don-picker select { min-width: 260px; padding: 8px 10px; }

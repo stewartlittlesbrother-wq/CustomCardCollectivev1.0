@@ -5797,3 +5797,23 @@ html.touch-device .context-menu > * {
 }
 .confirm-no { background: rgba(255, 255, 255, .12); color: #fff; }
 .confirm-yes { background: #3b82f6; color: #fff; }
+
+/* In-match sidebar Turn Automation toggles (replaced the How-to-Play tips). */
+.auto-turn-section { padding: 0 2px; }
+.auto-turn-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 4px;
+    font-size: 12px;
+    line-height: 1.25;
+    color: #d8dce6;
+    cursor: pointer;
+}
+.auto-turn-row input {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    cursor: pointer;
+    accent-color: #4a90e2;
+}

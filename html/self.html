@@ -34,7 +34,7 @@
 
     <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
     <link rel="stylesheet" href="../css/style.css">
-    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-49">
+    <link rel="stylesheet" href="../css/self.css?v=bleach-effects-50">
     <link rel="stylesheet" href="../css/manual-play.css?v=manual-5">
 </head>
 <body>
@@ -86,80 +86,16 @@
 
         <div class="separator"></div>
 
-        <div class="tips-section">
-            <h3>How to Play</h3>
-
-            <div class="tip-group">
-                <div class="tip-title">Cards</div>
-                <div class="tip-item">
-                    <span class="tip-icon">↻</span>
-                    <span><strong>Double-click</strong> any card to rest or unrest it</span>
-                </div>
-                <div class="tip-item">
-                    <span class="tip-icon">👁</span>
-                    <span><strong>Hover</strong> a card to preview it</span>
-                </div>
-                <div class="tip-item">
-                    <span class="tip-icon">🖱</span>
-                    <span><strong>Right-click</strong> board cards for a move menu</span>
-                </div>
-            </div>
-
-            <div class="tip-group">
-                <div class="tip-title">DON!!</div>
-                <div class="tip-item">
-                    <span class="tip-icon">+</span>
-                    <span><strong>Click</strong> a DON card to select it (blue glow), then click a character or leader to attach it</span>
-                </div>
-                <div class="tip-item">
-                    <span class="tip-icon">−</span>
-                    <span><strong>Right-click</strong> a DON card to remove 1 from your count</span>
-                </div>
-            </div>
-
-            <div class="tip-group">
-                <div class="tip-title">Life Cards</div>
-                <div class="tip-item">
-                    <span class="tip-icon">👀</span>
-                    <span><strong>Hover</strong> the life area to fan out your cards</span>
-                </div>
-                <div class="tip-item">
-                    <span class="tip-icon">🖱</span>
-                    <span><strong>Right-click</strong> a life card to reveal it or send it somewhere</span>
-                </div>
-            </div>
-
-            <div class="tip-group">
-                <div class="tip-title">Hand</div>
-                <div class="tip-item">
-                    <span class="tip-icon">🖱</span>
-                    <span><strong>Right-click</strong> a hand card to send it to trash, deck, or life</span>
-                </div>
-            </div>
-
-            <div class="tip-group">
-                <div class="tip-title">Deck</div>
-                <div class="tip-item">
-                    <span class="tip-icon">🖱</span>
-                    <span><strong>Right-click</strong> your deck to view all cards inside</span>
-                </div>
-            </div>
-
-            <div class="tip-group">
-                <div class="tip-title">Tools</div>
-                <div class="tip-item">
-                    <span class="tip-icon">→</span>
-                    <span><strong>Draw Arrow:</strong> click button, then click 2 cards to draw a red line between them</span>
-                </div>
-                <div class="tip-item">
-                    <span class="tip-icon">✎</span>
-                    <span><strong>Add Note:</strong> click button, then click any card to add coloured text on it</span>
-                </div>
-                <div class="tip-item">
-                    <span class="tip-icon">↺</span>
-                    <span><strong>Restand All</strong> untaps every card and detaches all DON</span>
-                </div>
-            </div>
+        <div class="auto-turn-section">
+            <div class="dice-roller-title">Turn Automation</div>
+            <label class="auto-turn-row">
+                <input type="checkbox" id="sidebarAutoDraw">
+                <span>Auto draw at start of turn</span>
+            </label>
+            <label class="auto-turn-row">
+                <input type="checkbox" id="sidebarAutoAddDon">
+                <span>Auto add DON!! at start</span>
+            </label>
         </div>
     </aside>
 
@@ -308,9 +244,9 @@
     <script src="../js/cards/decks.js?v=creation-14&t=20260714172304"></script>
     <script src="../js/core/deckParser.js?v=starting-1&t=20260714172304"></script>
 
-    <script src="../js/pages/self.js?v=spectate-59&t=20260816000002"></script>
+    <script src="../js/pages/self.js?v=spectate-61&t=20260816000002"></script>
   <script src="../js/rotate-prompt.js"></script>
 
-  <script src="../js/version.js?v=142"></script>
+  <script src="../js/version.js?v=144"></script>
 </body>
 </html>
