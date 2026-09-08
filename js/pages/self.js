@@ -1100,6 +1100,12 @@ function placeCharacterCard(player, card) {
 function playCardFromHand(player, card) {
     if (!player || !card) return;
     const cost = Number(getCardPlayCost(card)) || 0;
+    const activeDon = Number(player.don) || 0;
+    // Can't play what you can't pay for — need enough ACTIVE DON!! for the cost.
+    if (cost > activeDon) {
+        addGameLog(`Not enough active DON!! to play ${card.name} (needs ${cost}, has ${activeDon}).`);
+        return;
+    }
     const rested = restDonForCost(player, cost);
     const restNote = cost > 0 ? ` — rested ${rested}${rested < cost ? `/${cost}` : ""} DON!!` : "";
 
