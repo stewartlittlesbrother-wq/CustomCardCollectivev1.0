@@ -15,11 +15,15 @@ import {
 
 import { firebaseConfig } from "./firebaseConfig.js";
 
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 
 export const database = getDatabase(app);
 
 const auth = getAuth(app);
+
+// Shared auth instance, so the account system (authService.js) signs in on the
+// SAME Firebase app as multiplayer instead of spinning up a second one.
+export { auth };
 
 // Previously this module handed out a plain `{ uid }` object and never actually
 // authenticated. Realtime Database security rules that require `auth != null`

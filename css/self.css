@@ -5845,12 +5845,48 @@ html.touch-device .context-menu > * {
 }
 
 /* Card highlight (right-click a card to mark it for both players). */
+/* Highlight a card in place: an inset gold ring + glow that stays WITHIN the
+   card's own footprint and does NOT raise its stacking order, so a highlighted
+   hand card no longer pops forward and hide the cards next to it. */
 .card-highlighted {
     outline: 3px solid #ffd23f !important;
-    outline-offset: -1px;
-    box-shadow: 0 0 14px 3px rgba(255, 210, 63, .85) !important;
+    outline-offset: -3px;
+    box-shadow: inset 0 0 12px 2px rgba(255, 210, 63, .85) !important;
     border-radius: 8px;
-    z-index: 250 !important;
+}
+
+/* Flat hand (Settings ▸ "Flat hand"): lay hand cards side by side instead of the
+   overlapping fan, so every card is fully visible. Overrides the fan transforms
+   set on .hand-card (including the responsive breakpoints) via body.hand-flat. */
+body.hand-flat .hand {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: clamp(2px, 0.6vw, 8px);
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding: 0 44px;
+}
+body.hand-flat .opponent-hand.hand { align-items: flex-start; }
+body.hand-flat .hand-card {
+    position: relative;
+    left: auto;
+    right: auto;
+    top: auto;
+    bottom: auto;
+    flex: 0 0 auto;
+    transform: none !important;
+    z-index: auto;
+}
+body.hand-flat .hand-card:hover,
+body.hand-flat .hand-card.selected-card {
+    transform: translateY(-14px) scale(1.06) !important;
+    z-index: 200;
+}
+body.hand-flat .opponent-hand .hand-card:hover,
+body.hand-flat .opponent-hand .hand-card.selected-card {
+    transform: translateY(14px) scale(1.06) !important;
 }
 
 /* Hotkeys: the last card the player clicked, which a hotkey will act on. */

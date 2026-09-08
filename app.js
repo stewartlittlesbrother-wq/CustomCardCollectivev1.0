@@ -3441,12 +3441,23 @@ function creationCardFromForm(imageDataUrl, altArts = []) {
       el.creationCollection?.value || state.activeCollection || COLLECTION_DEFAULT
     ),
     imported: true,
-    importedAt: new Date().toISOString()
+    importedAt: new Date().toISOString(),
+    // The account that owns this card. Only the owner may edit it later. New
+    // cards get the current account's uid; empty means "unowned" (editable by
+    // anyone), which is how every card from before the accounts update stays.
+    ownerUid: (window.ccAccount && window.ccAccount.uid()) || ""
   };
 }
 
 async function saveCreatedCard(event) {
   event.preventDefault();
+
+  // Adding/altering a card publishes to the shared library, so it needs an
+  // account. Guests are prompted to sign in instead.
+  if (!window.ccAccount || !window.ccAccount.requireAccount("You need an account to create or edit cards.")) {
+    return;
+  }
+
   const file = el.creationImage.files?.[0];
   const imageUrl = el.creationImageUrl?.value.trim() || "";
 
@@ -3514,6 +3525,16 @@ async function saveCreatedCard(event) {
   // Compress just this card's artwork, then publish only this card - no need to
   // load, diff and re-upload the entire library to add one entry.
   const [card] = await compressImportedCardImages([creationCardFromForm(imageSource, altArts)]);
+
+  // Card ownership: a brand-new card is stamped with the creator's account uid
+  // (done in creationCardFromForm). When EDITING, preserve whatever the original
+  // had — so a card made before this update (no ownerUid) stays editable by
+  // anyone, and one you own stays yours rather than being re-stamped.
+  if (state.editingCardId) {
+    const prior = getCard(state.editingCardId);
+    card.ownerUid = (prior && prior.ownerUid) ? prior.ownerUid : "";
+  }
+
   if (!await publishSingleCard(card)) return;
 
   // Editing a card so its IDENTITY moves - a new number OR a new collection -
@@ -4334,6 +4355,9 @@ function openCollectionEditor(slug = null) {
   overlay.querySelector("#colEditCancel").addEventListener("click", close);
 
   overlay.querySelector("#colEditSave").addEventListener("click", async () => {
+    if (!window.ccAccount || !window.ccAccount.requireAccount("You need an account to create or edit collections.")) {
+      return;
+    }
     const name = overlay.querySelector("#colEditName").value.trim();
     if (!name) { toast("Give the collection a name"); return; }
     const image = uploadedDataUrl || urlInput.value.trim() || existing?.image || "";
@@ -4351,6 +4375,20 @@ function openCollectionEditor(slug = null) {
 function openCardForEditing(card) {
   if (!card?.imported) {
     toast("Only custom cards can be edited here");
+    return;
+  }
+
+  // Editing publishes to the shared library, so it needs an account.
+  if (!window.ccAccount || !window.ccAccount.requireAccount("Sign in to edit cards.")) {
+    return;
+  }
+
+  // Ownership: cards made after the accounts update can only be edited by the
+  // account that made them. Cards with no owner (made before the update) stay
+  // editable by anyone so nobody is stuck with an old card they can't fix.
+  const owner = card.ownerUid || "";
+  if (owner && owner !== window.ccAccount.uid()) {
+    toast("This card belongs to another account, so only they can edit it.");
     return;
   }
 

@@ -2555,7 +2555,22 @@ function ownExtraRowKey() {
 
 function applyBoardDisplaySettings() {
     applyExtraRowLayout();
+    applyHandFanSetting();
 }
+
+// Flat hand (no fanning): when on, hand cards lay side by side instead of the
+// overlapping fan. Stored under optcgFlatHand by the home Settings page; the CSS
+// (body.hand-flat .hand-card) does the actual layout swap.
+function applyHandFanSetting() {
+    let flat = false;
+    try { flat = localStorage.getItem("optcgFlatHand") === "true"; } catch {}
+    document.body.classList.toggle("hand-flat", flat);
+}
+
+// Reflect the setting live if it's changed on the Settings tab in another tab.
+window.addEventListener("storage", (e) => {
+    if (e.key === "optcgFlatHand") applyHandFanSetting();
+});
 
 // Show/hide each seat's second character row, size the board canvas to match,
 // and keep the toggle button's label in step. Called on load, on toggle, and

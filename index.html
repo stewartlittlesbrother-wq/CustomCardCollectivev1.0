@@ -132,6 +132,13 @@
                 <small>Show two extra single-card slots on the board that act like the Stage slot. You can also toggle these with the "Extra Slots" button in the game's Tools panel.</small>
               </span>
             </label>
+            <label class="settings-row">
+              <input type="checkbox" id="setFlatHand">
+              <span>
+                <strong>Flat hand (no fanning)</strong>
+                <small>Lay your hand cards side by side instead of fanned out. Easier to see every card at once.</small>
+              </span>
+            </label>
           </section>
 
           <section class="settings-group" aria-label="Custom board images">
@@ -848,11 +855,12 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=150"></script>
+  <script src="js/version.js?v=151"></script>
   <script src="js/rotate-prompt.js"></script>
+  <script src="js/auth-ui.js?v=151"></script>
   <script src="js/cards/decks.js?v=creation-9"></script>
   <script src="js/manual-play.js?v=manual-12"></script>
-  <script src="app.js?v=creation-61"></script>
+  <script src="app.js?v=creation-62"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).
@@ -892,6 +900,18 @@
     (function () {
       const KEY = "optcgExtraSlots";
       const box = document.getElementById("setExtraSlots");
+      if (!box) return;
+      box.checked = localStorage.getItem(KEY) === "true";
+      box.addEventListener("change", () => {
+        localStorage.setItem(KEY, String(box.checked));
+      });
+    })();
+
+    // Board Display: flat hand (no fanning). Default OFF. self.js reads this key
+    // (optcgFlatHand) to lay hand cards side by side instead of fanned.
+    (function () {
+      const KEY = "optcgFlatHand";
+      const box = document.getElementById("setFlatHand");
       if (!box) return;
       box.checked = localStorage.getItem(KEY) === "true";
       box.addEventListener("change", () => {
