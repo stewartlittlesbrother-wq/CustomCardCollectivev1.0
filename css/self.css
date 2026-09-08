@@ -5859,3 +5859,17 @@ html.touch-device .context-menu > * {
 .chat-role-p2 strong { color: #ff7a6b; }
 .chat-role-spectator { opacity: .85; }
 .chat-role-spectator strong { color: #c7b06a; font-style: italic; }
+
+/* Optional spectator display-name input (shown only when spectating). */
+.spectator-name-input {
+    width: 100%;
+    box-sizing: border-box;
+    margin: 6px 0 4px;
+    padding: 7px 9px;
+    border: 1px solid rgba(255, 255, 255, .18);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, .06);
+    color: #fff;
+    font: 500 12px/1.2 system-ui, sans-serif;
+}
+.spectator-name-input::placeholder { color: rgba(255, 255, 255, .45); }

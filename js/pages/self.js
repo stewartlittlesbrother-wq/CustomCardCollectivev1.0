@@ -659,6 +659,7 @@ function applyOnlinePublicState(publicState = {}) {
         setup: publicState.setup || {},
         revealedCards: publicState.revealedCards || [],
         currentAttack: publicState.currentAttack || null,
+        highlights: normalizeHighlights(publicState.highlights),
         player1: publicState.player1 || null,
         player2: publicState.player2 || null
     };
@@ -711,6 +712,7 @@ function applyOnlinePublicState(publicState = {}) {
     }
 
     applyOnlineStateToGame();
+    applyHighlights();   // reflect the synced highlights on the freshly-rendered board
     updateOnlineMatchInfo();
     renderOnlineSetupOverlay();
     // Nothing used to call this, so a finished match (including a concede) was
@@ -1280,19 +1282,27 @@ async function syncOnlineCurrentAttack(attackState) {
 // spectators — see them; in practice they're a local list. Each card carries a
 // data-hl-key; applyHighlights() toggles the .card-highlighted class to match.
 let localHighlights = [];
+// Firebase stores an array as an array when contiguous, but can hand it back as
+// an object ({0:..,1:..}) or drop it entirely when empty — normalise all three.
+function normalizeHighlights(h) {
+    if (Array.isArray(h)) return h.filter(Boolean);
+    if (h && typeof h === "object") return Object.values(h).filter(Boolean);
+    return [];
+}
 function getHighlightKeys() {
-    if (isOnlineMatch) {
-        return Array.isArray(onlinePublicState?.highlights) ? onlinePublicState.highlights.slice() : [];
-    }
+    if (isOnlineMatch) return normalizeHighlights(onlinePublicState?.highlights);
     return localHighlights.slice();
 }
 function commitHighlightKeys(keys) {
     if (isOnlineMatch) {
+        // Optimistically reflect it locally so rapid toggles accumulate before the
+        // write round-trips; the authoritative state overwrites this on sync.
+        if (onlinePublicState) onlinePublicState.highlights = keys.slice();
         if (!isSpectator && onlineMultiplayerService) {
             onlineMultiplayerService.updatePublicState(roomCode, { highlights: keys }).catch(() => {});
         }
     } else {
-        localHighlights = keys;
+        localHighlights = keys.slice();
     }
     applyHighlights(keys);
 }
@@ -1714,8 +1724,9 @@ function applyOwnSidePerspective() {
 let onlineChatUnsubscribe = null;
 let renderedChatIds = new Set();
 
+let spectatorChatName = "";
 function getOwnChatName() {
-    if (isSpectator) return "Spectator";
+    if (isSpectator) return spectatorChatName.trim() || "Spectator";
     // Use the player's chosen nickname (from the match's players node, via
     // setupOnlinePlayerNames) rather than a hardcoded "Player 1/2".
     const slot = playerSlot === "p2" ? "p2" : "p1";
@@ -1727,11 +1738,13 @@ function appendChatMessage(message) {
     if (!log) return;
 
     const isOwn = message.sender === getOwnChatName();
-    // Colour by role so players and spectators are easy to tell apart.
+    // Colour by role so players and spectators are easy to tell apart. Prefer the
+    // explicit role on the message; fall back to the sender name for old messages.
+    const role = message.role;
     let roleCls = "chat-role-player";
-    if (message.sender === "Spectator") roleCls = "chat-role-spectator";
-    else if (message.sender === onlinePlayerLabels.p1) roleCls = "chat-role-p1";
-    else if (message.sender === onlinePlayerLabels.p2) roleCls = "chat-role-p2";
+    if (role === "spectator" || (!role && message.sender === "Spectator")) roleCls = "chat-role-spectator";
+    else if (role === "p1" || (!role && message.sender === onlinePlayerLabels.p1)) roleCls = "chat-role-p1";
+    else if (role === "p2" || (!role && message.sender === onlinePlayerLabels.p2)) roleCls = "chat-role-p2";
     const entry = document.createElement("div");
     entry.className = `game-log-entry chat-entry ${roleCls}${isOwn ? " chat-entry-own" : ""}`;
 
@@ -1753,6 +1766,20 @@ function setupOnlineChat() {
     if (!form || !input) return;
 
     form.classList.remove("hidden");
+    if (isSpectator) {
+        input.placeholder = "Message the game…";
+        // Optional display name for spectators (remembered per device).
+        const nameInput = document.getElementById("spectatorNameInput");
+        if (nameInput) {
+            nameInput.classList.remove("hidden");
+            try { spectatorChatName = localStorage.getItem("cc_spectator_name") || ""; } catch (e) {}
+            nameInput.value = spectatorChatName;
+            nameInput.addEventListener("input", () => {
+                spectatorChatName = nameInput.value;
+                try { localStorage.setItem("cc_spectator_name", spectatorChatName); } catch (e) {}
+            });
+        }
+    }
 
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -1760,7 +1787,9 @@ function setupOnlineChat() {
         if (!text) return;
         input.value = "";
         try {
-            await onlineMultiplayerService.sendChatMessage(roomCode, getOwnChatName(), text);
+            await onlineMultiplayerService.sendChatMessage(
+                roomCode, getOwnChatName(), text, isSpectator ? "spectator" : playerSlot
+            );
         } catch (error) {
             console.warn("Chat send failed:", error);
             addGameLog("Could not send message.");
@@ -1801,7 +1830,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-10");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-11");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1864,7 +1893,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-10");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-11");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -3310,7 +3339,9 @@ function buildGameOverChat() {
         if (!text || !onlineMultiplayerService) return;
         input.value = "";
         try {
-            await onlineMultiplayerService.sendChatMessage(roomCode, getOwnChatName(), text);
+            await onlineMultiplayerService.sendChatMessage(
+                roomCode, getOwnChatName(), text, isSpectator ? "spectator" : playerSlot
+            );
         } catch (error) {
             console.warn("Game-over chat send failed:", error);
         }

@@ -580,7 +580,7 @@ export async function setPlayerDeck(roomCode, playerSlot, deckData) {
 // ── In-match chat ────────────────────────────────────────
 // Messages live under the match so both clients get them in realtime and they
 // disappear with the room. Kept deliberately small (sender/text/at).
-export async function sendChatMessage(roomCode, sender, text) {
+export async function sendChatMessage(roomCode, sender, text, role) {
     const message = String(text || "").trim();
     if (!message) return;
 
@@ -588,6 +588,9 @@ export async function sendChatMessage(roomCode, sender, text) {
     await push(chatRef, {
         sender: String(sender || "Player").slice(0, 24),
         text: message.slice(0, 300),
+        // "p1" | "p2" | "spectator" so the UI can colour senders by role even
+        // when a spectator picks a custom name.
+        role: (role === "p1" || role === "p2" || role === "spectator") ? role : null,
         at: Date.now()
     });
 }
@@ -1168,6 +1171,16 @@ export async function startMatch(roomCode) {
     }
 
     try {
+        // The host builds BOTH players' decks here, so it needs every deck +
+        // "start in play" card loaded — including the OPPONENT's custom cards,
+        // which a fast/targeted load may not have. Without this, parseDeckText
+        // silently drops the missing cards and applyStartingCards can't place
+        // them, which is why starting cards were spotty online. Cached after the
+        // first load, so it's only slow once.
+        if (typeof globalThis.loadFullCardLibraryBlocking === "function") {
+            await globalThis.loadFullCardLibraryBlocking().catch(() => {});
+        }
+
         await initializeMultiplayerGame(code);
         // Release the claim and clear any previous failure so both clients unblock.
         await update(ref(database, `matches/${code}`), { startError: null, startClaim: null });
