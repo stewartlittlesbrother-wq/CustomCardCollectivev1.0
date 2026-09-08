@@ -79,6 +79,24 @@
         .cc-account-chip button:hover{background:rgba(255,255,255,.16);}
         .cc-account-chip .avatar{width:24px;height:24px;border-radius:50%;background:#3a4a6a;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;overflow:hidden;}
         .cc-account-chip .avatar img{width:100%;height:100%;object-fit:cover;}
+        .cc-pw-wrap{position:relative;display:flex;}
+        .cc-pw-wrap input{flex:1;padding-right:42px;}
+        .cc-pw-eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:1rem;opacity:.7;padding:4px;}
+        .cc-pw-eye:hover{opacity:1;}
+        .account-settings{display:flex;flex-direction:column;gap:14px;}
+        .account-settings .acc-row{display:flex;flex-direction:column;gap:6px;}
+        .account-settings .acc-row label{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted,#8b93a1);}
+        .account-settings .acc-inline{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;}
+        .account-settings .acc-inline input{flex:1;min-width:150px;padding:9px 12px;border-radius:8px;border:1px solid var(--line,rgba(255,255,255,.14));background:rgba(255,255,255,.05);color:#fff;}
+        .account-settings .acc-inline .cc-pw-wrap{flex:1;min-width:150px;}
+        .account-settings .acc-save{padding:9px 16px;border-radius:8px;border:none;background:#d33;color:#fff;font-weight:700;cursor:pointer;}
+        .account-settings .acc-save:hover{background:#e64545;}
+        .account-settings .acc-note{font-size:.82rem;color:var(--muted,#8b93a1);margin:0;}
+        .account-settings .acc-msg{font-size:.82rem;min-height:1em;}
+        .account-settings .acc-msg.err{color:#ff8a8a;}
+        .account-settings .acc-msg.ok{color:#5ad17a;}
+        .account-settings .acc-whoami{font-size:.9rem;color:#dfe4ec;}
+        .account-settings .acc-signout{align-self:flex-start;padding:8px 14px;border-radius:8px;border:1px solid var(--line,rgba(255,255,255,.14));background:rgba(255,255,255,.06);color:#dfe4ec;font-weight:700;cursor:pointer;}
         `;
         const style = document.createElement("style");
         style.id = "cc-auth-styles";
@@ -104,7 +122,7 @@
             <div class="cc-auth-or">or</div>
             <div class="cc-auth-error" data-err></div>
             <div class="cc-auth-field"><label>Username</label><input data-f="username" autocomplete="username" maxlength="20" placeholder="3–20 letters/numbers"></div>
-            <div class="cc-auth-field"><label>Password</label><input data-f="password" type="password" autocomplete="current-password" placeholder="At least 6 characters"></div>
+            <div class="cc-auth-field"><label>Password</label><div class="cc-pw-wrap"><input data-f="password" type="password" autocomplete="current-password" placeholder="At least 6 characters"><button type="button" class="cc-pw-eye" data-pw-toggle aria-label="Show password">👁</button></div></div>
             <button class="cc-auth-btn primary" data-act="userpass"><span data-submit-label>Log in</span></button>
             <div class="cc-auth-toggle"><span data-toggle-text>New here?</span> <button data-act="toggle" data-toggle-label>Create an account</button></div>
             <div class="cc-auth-guest">
@@ -218,14 +236,101 @@
             .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
 
+    function pwField(attr, placeholder, autocomplete) {
+        return `<div class="cc-pw-wrap"><input data-f="${attr}" type="password" autocomplete="${autocomplete}" placeholder="${escapeHtml(placeholder)}"><button type="button" class="cc-pw-eye" data-pw-toggle aria-label="Show password">👁</button></div>`;
+    }
+
+    // ── Account settings panel (Settings ▸ Account) ──────────────────────────
+    async function renderAccountSettings() {
+        const host = document.getElementById("accountSettings");
+        if (!host) return; // page has no Settings ▸ Account section
+        if (!ccAccount.isSignedIn()) {
+            host.innerHTML = `<p class="acc-note">You're browsing as a guest. Sign in to set your name and save your data.</p>
+                <button class="acc-save" data-act="signin">Sign in</button>`;
+            host.querySelector('[data-act="signin"]').addEventListener("click", () => openPopup());
+            return;
+        }
+        let details = null;
+        try { const svc = await service(); details = await svc.getAccountDetails(); } catch (_) {}
+        if (!details) { host.innerHTML = `<p class="acc-note">Account details unavailable.</p>`; return; }
+
+        const usernameRow = details.hasPassword
+            ? `<div class="acc-row">
+                 <label>Change password</label>
+                 <div class="acc-inline">${pwField("newpass", "New password (min 6)", "new-password")}<button class="acc-save" data-act="password">Save</button></div>
+                 <div class="acc-msg" data-msg="password"></div>
+               </div>`
+            : `<div class="acc-row">
+                 <label>Set a username &amp; password (optional)</label>
+                 <p class="acc-note">You signed in with Google. Add a username and password so you can also log in that way.</p>
+                 <div class="acc-inline"><input data-f="newuser" maxlength="20" placeholder="Username (3–20)">${pwField("linkpass", "Password (min 6)", "new-password")}<button class="acc-save" data-act="setlogin">Save</button></div>
+                 <div class="acc-msg" data-msg="setlogin"></div>
+               </div>`;
+
+        const methods = [];
+        if (details.hasGoogle) methods.push("Google");
+        if (details.hasPassword) methods.push(details.username ? `username “${details.username}”` : "username/password");
+
+        host.innerHTML = `
+          <p class="acc-whoami">Signed in as <strong>${escapeHtml(details.displayName)}</strong>${methods.length ? ` · ${escapeHtml(methods.join(" + "))}` : ""}</p>
+          <div class="acc-row">
+            <label>Display name (your name in game &amp; chat)</label>
+            <div class="acc-inline"><input data-f="dname" maxlength="30" value="${escapeHtml(details.displayName)}"><button class="acc-save" data-act="name">Save</button></div>
+            <div class="acc-msg" data-msg="name"></div>
+          </div>
+          ${usernameRow}
+          <button class="acc-signout" data-act="signout">Sign out</button>`;
+
+        const svc = await service();
+        const setMsg = (key, text, ok) => {
+            const el = host.querySelector(`[data-msg="${key}"]`);
+            if (el) { el.textContent = text || ""; el.className = `acc-msg ${ok ? "ok" : "err"}`; }
+        };
+
+        host.querySelector('[data-act="name"]').addEventListener("click", async () => {
+            const name = host.querySelector('[data-f="dname"]').value;
+            try { await svc.updateDisplayName(name); setMsg("name", "Saved.", true); }
+            catch (e) { setMsg("name", e.message, false); }
+        });
+        host.querySelector('[data-act="password"]')?.addEventListener("click", async () => {
+            const pw = host.querySelector('[data-f="newpass"]').value;
+            try { await svc.changePassword(pw); setMsg("password", "Password changed.", true); host.querySelector('[data-f="newpass"]').value = ""; }
+            catch (e) { setMsg("password", e.message, false); }
+        });
+        host.querySelector('[data-act="setlogin"]')?.addEventListener("click", async () => {
+            const user = host.querySelector('[data-f="newuser"]').value;
+            const pw = host.querySelector('[data-f="linkpass"]').value;
+            try { await svc.setUsernameLogin(user, pw); setMsg("setlogin", "Username & password set.", true); renderAccountSettings(); }
+            catch (e) { setMsg("setlogin", e.message, false); }
+        });
+        host.querySelector('[data-act="signout"]').addEventListener("click", async () => {
+            await svc.signOutAccount();
+            markGuest();
+        });
+    }
+
     // ── Boot ─────────────────────────────────────────────────────────────────
     function boot() {
         injectStyles();
+
+        // Password show/hide: works for every [data-pw-toggle] (popup + settings).
+        document.addEventListener("click", (e) => {
+            const btn = e.target.closest && e.target.closest("[data-pw-toggle]");
+            if (!btn) return;
+            const input = btn.parentElement && btn.parentElement.querySelector("input");
+            if (!input) return;
+            const show = input.type === "password";
+            input.type = show ? "text" : "password";
+            btn.textContent = show ? "🙈" : "👁";
+            btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+        });
+
         service().then(svc => {
             svc.onAccountChange((account) => {
                 ccAccount.user = account;
                 ccAccount.ready = true;
                 renderChip();
+                renderAccountSettings();
                 // Let app.js refresh gated UI (e.g. card edit buttons) on change.
                 document.dispatchEvent(new CustomEvent("cc-account-change", { detail: account }));
                 // Show the popup once on first load for a brand-new visitor who

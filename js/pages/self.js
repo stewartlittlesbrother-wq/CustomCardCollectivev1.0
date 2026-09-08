@@ -1725,8 +1725,13 @@ let onlineChatUnsubscribe = null;
 let renderedChatIds = new Set();
 
 let spectatorChatName = "";
+// The name from the signed-in account, used as the default identity everywhere.
+function accountName() {
+    try { return (window.ccAccount && window.ccAccount.user && window.ccAccount.user.displayName) || ""; }
+    catch (e) { return ""; }
+}
 function getOwnChatName() {
-    if (isSpectator) return spectatorChatName.trim() || "Spectator";
+    if (isSpectator) return spectatorChatName.trim() || accountName() || "Spectator";
     // Use the player's chosen nickname (from the match's players node, via
     // setupOnlinePlayerNames) rather than a hardcoded "Player 1/2".
     const slot = playerSlot === "p2" ? "p2" : "p1";
@@ -1773,6 +1778,8 @@ function setupOnlineChat() {
         if (nameInput) {
             nameInput.classList.remove("hidden");
             try { spectatorChatName = localStorage.getItem("cc_spectator_name") || ""; } catch (e) {}
+            // Default a signed-in spectator's name to their account name.
+            if (!spectatorChatName.trim()) spectatorChatName = accountName();
             nameInput.value = spectatorChatName;
             nameInput.addEventListener("input", () => {
                 spectatorChatName = nameInput.value;

@@ -27,6 +27,16 @@ let startWatchdogTimer = null;    // fallback poll for missed "started" events
 function getNickname() { return nicknameInput ? nicknameInput.value.trim() : ""; }
 function saveNickname(v) { /* intentionally no-op — no persistence */ }
 
+// Prefill the nickname with the signed-in account's name, so your in-game name
+// matches your account everywhere. Left editable so you can still override it.
+function prefillNicknameFromAccount() {
+    try {
+        const name = window.ccAccount && window.ccAccount.user && window.ccAccount.user.displayName;
+        if (name && nicknameInput && !nicknameInput.value.trim()) nicknameInput.value = name;
+    } catch (e) {}
+}
+document.addEventListener("cc-account-change", prefillNicknameFromAccount);
+
 // ── DOM refs ─────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
@@ -368,6 +378,7 @@ async function init() {
         await signInGuest();
         currentUser = await waitForUser();
         setStatus("Connected", "connected");
+        prefillNicknameFromAccount();
         watchActiveGames();
     } catch (e) {
         setStatus("Connection failed", "error");
