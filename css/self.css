@@ -5853,6 +5853,13 @@ html.touch-device .context-menu > * {
     z-index: 250 !important;
 }
 
+/* Hotkeys: the last card the player clicked, which a hotkey will act on. */
+.hotkey-target-card {
+    outline: 2px dashed #5ad1ff !important;
+    outline-offset: -1px;
+    border-radius: 8px;
+}
+
 /* Chat: colour the sender name by role so players vs spectators are clear. */
 .chat-entry strong { color: #cdd3dd; }
 .chat-role-p1 strong { color: #5aa2ff; }

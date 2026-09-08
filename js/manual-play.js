@@ -1723,6 +1723,74 @@ const manualPlay = {
         window.scheduleOnlineBoardSync?.();
     },
 
+    // ── Hotkey actions (run against a specific clicked card element) ──────
+    // These let the Hotkeys feature (app.js/self.js) apply a note/arrow action to
+    // whatever card the player last clicked, without going through the toolbar
+    // toggle-modes. Each resolves the card's annotation key and reuses the same
+    // reapply/push pipeline as the manual tools so online sync still works.
+
+    // Draw an arrow starting from the given card: arm arrow mode with this card as
+    // the first endpoint, so the player's next card click completes the arrow.
+    startArrowFromElement(el) {
+        if (!el) return;
+        const key = getAnnotationTargetKey(el);
+        if (!key) return;
+        if (!this.state.arrowMode) this.toggleArrowMode();
+        // Reset any prior first selection, then mark this card as the start.
+        resolveAnnotationTargetElement(this.state.arrowFirstKey)?.classList.remove("arrow-selected-first");
+        this.state.arrowFirstKey = key;
+        resolveAnnotationTargetElement(key)?.classList.add("arrow-selected-first");
+        console.log("✓ Hotkey arrow: first card =", key);
+    },
+
+    // Open the note dialog for a specific card (the "open the notes menu" action).
+    openNoteDialogForElement(el) {
+        if (!el) return;
+        const key = getAnnotationTargetKey(el);
+        if (!key) return;
+        const existing = this.state.notes[key];
+        const defaultColor = existing ? existing.color : NOTE_COLORS[Object.keys(this.state.notes).length % NOTE_COLORS.length];
+        showNoteDialog({
+            text: existing ? existing.text : "",
+            color: defaultColor,
+            fontSize: existing ? existing.fontSize : 12
+        }, (result) => {
+            if (result.text.trim() === "") {
+                delete this.state.notes[key];
+            } else {
+                this.state.notes[key] = { text: result.text.trim(), color: result.color, fontSize: result.fontSize };
+            }
+            this.reapplyAnnotations();
+            this.pushAnnotations();
+        });
+    },
+
+    // Write a preset note straight onto a specific card (no dialog).
+    writeNoteOnElement(el, text) {
+        if (!el) return;
+        const key = getAnnotationTargetKey(el);
+        if (!key) return;
+        const clean = String(text || "").trim();
+        if (!clean) return;
+        const existing = this.state.notes[key];
+        const color = existing ? existing.color : NOTE_COLORS[Object.keys(this.state.notes).length % NOTE_COLORS.length];
+        this.state.notes[key] = { text: clean, color, fontSize: existing ? existing.fontSize : 12 };
+        this.reapplyAnnotations();
+        this.pushAnnotations();
+    },
+
+    // Delete the note on a specific card.
+    deleteNoteOnElement(el) {
+        if (!el) return;
+        const key = getAnnotationTargetKey(el);
+        if (!key) return;
+        if (this.state.notes[key]) {
+            delete this.state.notes[key];
+            this.reapplyAnnotations();
+            this.pushAnnotations();
+        }
+    },
+
     undo() {
         console.log("Undo (not yet implemented)");
     }

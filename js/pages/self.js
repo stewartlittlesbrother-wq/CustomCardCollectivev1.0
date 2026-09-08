@@ -10511,3 +10511,92 @@ function updateOnlinePhaseButton() {
         wire();
     }
 })();
+
+// ── User hotkeys on the board ───────────────────────────────────────────────
+// Hotkeys are made on the main app's Hotkeys tab and saved to localStorage
+// (cc_hotkeys_v1). Here on the match board we track the last card the player
+// clicked, then run the matching hotkey's action on that card when its key is
+// pressed. Each hotkey: { id, key, trigger:"click"|"hold", action, noteText }.
+//   action: "arrow" (start an arrow from the card), "notes" (open note dialog),
+//           "write" (write the preset noteText), "delete" (remove the note).
+(function setupBoardHotkeys() {
+    const HOTKEYS_KEY = "cc_hotkeys_v1";
+    const CARD_SELECTOR = ".character-slot, .board-leader-card, .board-stage-card, .hand-card[data-card-instance-id]";
+    const HOLD_MS = 300; // a "hold" hotkey fires only after the key is held this long
+
+    let selectedCard = null;
+    const holdStarts = {}; // key -> timestamp of keydown (for hold hotkeys)
+
+    function loadHotkeys() {
+        try {
+            const list = JSON.parse(localStorage.getItem(HOTKEYS_KEY) || "[]");
+            return Array.isArray(list) ? list.filter(h => h && h.key) : [];
+        } catch { return []; }
+    }
+
+    function setSelectedCard(el) {
+        if (selectedCard === el) return;
+        document.querySelectorAll(".hotkey-target-card").forEach(n => n.classList.remove("hotkey-target-card"));
+        selectedCard = el || null;
+        if (selectedCard) selectedCard.classList.add("hotkey-target-card");
+    }
+
+    function runAction(hotkey) {
+        if (!selectedCard || !document.body.contains(selectedCard)) {
+            // The board re-rendered and dropped the element; keep the reference for
+            // key computation (its data attributes still resolve) but only if it
+            // still carries an id. Otherwise nothing to act on.
+            if (!selectedCard) return;
+        }
+        const mp = window.manualPlay;
+        if (!mp) return;
+        switch (hotkey.action) {
+            case "arrow": mp.startArrowFromElement?.(selectedCard); break;
+            case "notes": mp.openNoteDialogForElement?.(selectedCard); break;
+            case "write": mp.writeNoteOnElement?.(selectedCard, hotkey.noteText || ""); break;
+            case "delete": mp.deleteNoteOnElement?.(selectedCard); break;
+        }
+    }
+
+    // Track the last-clicked card (capture phase so it runs before re-renders).
+    document.addEventListener("click", (e) => {
+        if (!e.target || typeof e.target.closest !== "function") return;
+        const card = e.target.closest(CARD_SELECTOR);
+        if (card) setSelectedCard(card);
+    }, true);
+
+    function typingInField(e) {
+        const t = e.target;
+        return t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+    }
+
+    document.addEventListener("keydown", (e) => {
+        if (e.repeat) return;
+        if (typingInField(e)) return;
+        const hotkeys = loadHotkeys();
+        if (!hotkeys.length) return;
+        let handled = false;
+        hotkeys.forEach(hk => {
+            if (hk.key !== e.key) return;
+            if (hk.trigger === "hold") {
+                holdStarts[hk.id] = Date.now();
+                handled = true;
+            } else {
+                runAction(hk);
+                handled = true;
+            }
+        });
+        if (handled && selectedCard) e.preventDefault();
+    });
+
+    document.addEventListener("keyup", (e) => {
+        if (typingInField(e)) return;
+        const hotkeys = loadHotkeys();
+        hotkeys.forEach(hk => {
+            if (hk.trigger !== "hold" || hk.key !== e.key) return;
+            const start = holdStarts[hk.id];
+            delete holdStarts[hk.id];
+            if (start && Date.now() - start >= HOLD_MS) runAction(hk);
+        });
+    });
+})();

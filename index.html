@@ -25,7 +25,7 @@
   </script>
   <title>Custom Cards Simulator</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=creation-32">
+  <link rel="stylesheet" href="styles.css?v=creation-33">
 </head>
 <body>
   <div class="app-shell">
@@ -46,6 +46,7 @@
         <button class="nav-tab" type="button" id="navCardCreator">Card Creator</button>
         <button class="nav-tab" type="button" data-view="game">Practice Board</button>
         <button class="nav-tab" type="button" id="navMultiplayer">Multiplayer</button>
+        <button class="nav-tab" type="button" data-view="hotkeys">Hotkeys</button>
         <button class="nav-tab" type="button" data-view="settings">Settings</button>
       </nav>
 
@@ -254,6 +255,19 @@
               <button class="red-button" type="button" id="restoreCards">Restore</button>
             </div>
           </section>
+        </div>
+      </section>
+
+      <section class="view" id="hotkeysView" data-view-panel="hotkeys">
+        <div class="settings-page hotkeys-page">
+          <header class="settings-header">
+            <h1>Hotkeys</h1>
+            <p>Make keyboard shortcuts for the game board. In a match, click a card, then press your key to run the action on that card. Saved on this device.</p>
+          </header>
+          <div class="hotkeys-actions-bar">
+            <button type="button" class="red-button" id="addHotkeyBtn">+ New Hotkey</button>
+          </div>
+          <div id="hotkeysList" class="hotkeys-list"></div>
         </div>
       </section>
 
@@ -834,11 +848,11 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=149"></script>
+  <script src="js/version.js?v=150"></script>
   <script src="js/rotate-prompt.js"></script>
   <script src="js/cards/decks.js?v=creation-9"></script>
   <script src="js/manual-play.js?v=manual-12"></script>
-  <script src="app.js?v=creation-60"></script>
+  <script src="app.js?v=creation-61"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).

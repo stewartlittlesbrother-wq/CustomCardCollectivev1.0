@@ -6368,3 +6368,45 @@ html.touch-device .builder-hover-preview {
 .practice-don-picker { margin: 16px 0 4px; display: flex; justify-content: center; }
 .practice-don-picker label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; align-items: flex-start; }
 .practice-don-picker select { min-width: 260px; padding: 8px 10px; }
+
+/* ── Hotkeys page ──────────────────────────────────────────────────────── */
+.hotkeys-actions-bar { display: flex; justify-content: flex-start; }
+.hotkeys-list { display: flex; flex-direction: column; gap: 12px; }
+.hotkeys-empty { color: var(--muted); font-size: .95rem; margin: 8px 0; }
+.hotkey-card {
+  background: rgba(15, 18, 23, .72);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.hotkey-row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+.hotkey-field { display: flex; flex-direction: column; gap: 5px; }
+.hotkey-field-grow { flex: 1; min-width: 180px; }
+.hotkey-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.hotkey-key-btn {
+  min-width: 120px; padding: 9px 14px; border-radius: 8px;
+  border: 1px solid var(--line); background: rgba(255,255,255,.06);
+  color: #fff; font-weight: 700; cursor: pointer; font-size: .95rem;
+}
+.hotkey-key-btn:hover { background: rgba(255,255,255,.12); }
+.hotkey-key-btn.capturing { border-color: #ff5a5a; background: rgba(255,90,90,.16); color: #ffb3b3; }
+.hotkey-trigger { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.hotkey-trigger-btn {
+  padding: 9px 16px; background: rgba(255,255,255,.04); color: var(--muted);
+  border: none; cursor: pointer; font-weight: 600; font-size: .9rem;
+}
+.hotkey-trigger-btn + .hotkey-trigger-btn { border-left: 1px solid var(--line); }
+.hotkey-trigger-btn.active { background: #d33; color: #fff; }
+.hotkey-field select { padding: 9px 12px; border-radius: 8px; min-width: 190px; }
+.hotkey-delete-btn {
+  margin-left: auto; align-self: center; width: 34px; height: 34px; border-radius: 8px;
+  border: 1px solid var(--line); background: rgba(255,255,255,.05); color: #ff8a8a;
+  cursor: pointer; font-size: 1rem; line-height: 1;
+}
+.hotkey-delete-btn:hover { background: rgba(255,90,90,.18); }
+.hotkey-note-field { display: flex; flex-direction: column; gap: 5px; }
+.hotkey-note-field span { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.hotkey-note-field input { padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,.06); color: #fff; }

@@ -1564,6 +1564,162 @@ function setActiveDonDeckId(id) {
   } catch {}
 }
 
+// ---- Hotkeys ----------------------------------------------------------
+// User-defined keyboard shortcuts for the game board. Each hotkey:
+//   { id, key, trigger:"click"|"hold", action:"arrow"|"notes"|"write"|"delete", noteText }
+// In a match, the player clicks a card then presses the key to run the action
+// on that card. Stored per-device in localStorage; self.js reads the same key.
+const HOTKEYS_KEY = "cc_hotkeys_v1";
+const HOTKEY_ACTIONS = [
+  { value: "arrow", label: "Draw an arrow" },
+  { value: "notes", label: "Open the notes menu" },
+  { value: "write", label: "Write a note" },
+  { value: "delete", label: "Delete note" },
+];
+
+function getHotkeys() {
+  try {
+    const list = JSON.parse(localStorage.getItem(HOTKEYS_KEY) || "[]");
+    return Array.isArray(list) ? list.filter(h => h && h.id) : [];
+  } catch { return []; }
+}
+
+function saveHotkeys(list) {
+  try { localStorage.setItem(HOTKEYS_KEY, JSON.stringify(list || [])); } catch {}
+}
+
+function hotkeyKeyLabel(key) {
+  if (!key) return "Not set";
+  if (key === " ") return "Space";
+  if (key.length === 1) return key.toUpperCase();
+  return key;
+}
+
+function actionLabel(action) {
+  return (HOTKEY_ACTIONS.find(a => a.value === action) || {}).label || "Draw an arrow";
+}
+
+// State: which hotkey is currently capturing a keypress (id or "").
+let hotkeyCapturingId = "";
+
+function renderHotkeys() {
+  const list = document.getElementById("hotkeysList");
+  if (!list) return;
+  const hotkeys = getHotkeys();
+  if (!hotkeys.length) {
+    list.innerHTML = `<p class="hotkeys-empty">No hotkeys yet. Click "+ New Hotkey" to make one.</p>`;
+    return;
+  }
+  list.innerHTML = hotkeys.map(hk => {
+    const capturing = hotkeyCapturingId === hk.id;
+    const keyBtnLabel = capturing ? "Press any key…" : hotkeyKeyLabel(hk.key);
+    const optionsHtml = HOTKEY_ACTIONS.map(a =>
+      `<option value="${a.value}"${a.value === hk.action ? " selected" : ""}>${a.label}</option>`
+    ).join("");
+    const noteRow = hk.action === "write"
+      ? `<label class="hotkey-note-field"><span>Note text</span>
+           <input type="text" data-hotkey-note="${hk.id}" maxlength="120" value="${escapeAttr(hk.noteText || "")}" placeholder="Text to write on the card"></label>`
+      : "";
+    return `<div class="hotkey-card" data-hotkey-id="${hk.id}">
+      <div class="hotkey-row">
+        <div class="hotkey-field">
+          <span class="hotkey-label">Key</span>
+          <button type="button" class="hotkey-key-btn${capturing ? " capturing" : ""}" data-hotkey-capture="${hk.id}">${keyBtnLabel}</button>
+        </div>
+        <div class="hotkey-field">
+          <span class="hotkey-label">Trigger</span>
+          <div class="hotkey-trigger" data-hotkey-trigger-group="${hk.id}">
+            <button type="button" class="hotkey-trigger-btn${hk.trigger !== "hold" ? " active" : ""}" data-hotkey-trigger="${hk.id}" data-trigger-val="click">Click</button>
+            <button type="button" class="hotkey-trigger-btn${hk.trigger === "hold" ? " active" : ""}" data-hotkey-trigger="${hk.id}" data-trigger-val="hold">Hold</button>
+          </div>
+        </div>
+        <div class="hotkey-field hotkey-field-grow">
+          <span class="hotkey-label">Does</span>
+          <select data-hotkey-action="${hk.id}">${optionsHtml}</select>
+        </div>
+        <button type="button" class="hotkey-delete-btn" data-hotkey-delete="${hk.id}" title="Delete hotkey">✕</button>
+      </div>
+      ${noteRow}
+    </div>`;
+  }).join("");
+}
+
+function escapeAttr(str) {
+  return String(str).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function addHotkey() {
+  const list = getHotkeys();
+  list.push({ id: `hk_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, key: "", trigger: "click", action: "arrow", noteText: "" });
+  saveHotkeys(list);
+  renderHotkeys();
+}
+
+// Wire the Hotkeys view once. Delegated so per-hotkey controls keep working.
+function setupHotkeysView() {
+  const view = document.getElementById("hotkeysView");
+  if (!view || view.dataset.wired) return;
+  view.dataset.wired = "1";
+
+  document.getElementById("addHotkeyBtn")?.addEventListener("click", addHotkey);
+
+  view.addEventListener("click", event => {
+    const captureBtn = event.target.closest("[data-hotkey-capture]");
+    if (captureBtn) {
+      hotkeyCapturingId = hotkeyCapturingId === captureBtn.dataset.hotkeyCapture ? "" : captureBtn.dataset.hotkeyCapture;
+      renderHotkeys();
+      return;
+    }
+    const triggerBtn = event.target.closest("[data-hotkey-trigger]");
+    if (triggerBtn) {
+      const id = triggerBtn.dataset.hotkeyTrigger;
+      const list = getHotkeys();
+      const hk = list.find(h => h.id === id);
+      if (hk) { hk.trigger = triggerBtn.dataset.triggerVal; saveHotkeys(list); renderHotkeys(); }
+      return;
+    }
+    const deleteBtn = event.target.closest("[data-hotkey-delete]");
+    if (deleteBtn) {
+      saveHotkeys(getHotkeys().filter(h => h.id !== deleteBtn.dataset.hotkeyDelete));
+      renderHotkeys();
+      return;
+    }
+  });
+
+  view.addEventListener("change", event => {
+    const actionSel = event.target.closest("[data-hotkey-action]");
+    if (actionSel) {
+      const id = actionSel.dataset.hotkeyAction;
+      const list = getHotkeys();
+      const hk = list.find(h => h.id === id);
+      if (hk) { hk.action = actionSel.value; saveHotkeys(list); renderHotkeys(); }
+    }
+  });
+
+  view.addEventListener("input", event => {
+    const noteInput = event.target.closest("[data-hotkey-note]");
+    if (noteInput) {
+      const id = noteInput.dataset.hotkeyNote;
+      const list = getHotkeys();
+      const hk = list.find(h => h.id === id);
+      if (hk) { hk.noteText = noteInput.value; saveHotkeys(list); }
+    }
+  });
+
+  // Capture the next keypress when a key button is armed.
+  document.addEventListener("keydown", event => {
+    if (!hotkeyCapturingId) return;
+    if (state.activeView !== "hotkeys") return;
+    event.preventDefault();
+    if (event.key === "Escape") { hotkeyCapturingId = ""; renderHotkeys(); return; }
+    const list = getHotkeys();
+    const hk = list.find(h => h.id === hotkeyCapturingId);
+    if (hk) { hk.key = event.key; saveHotkeys(list); }
+    hotkeyCapturingId = "";
+    renderHotkeys();
+  }, true);
+}
+
 // Every DON!! card currently in the shared pool.
 function getDonPoolCards() {
   return (state.cards || []).filter(card => card && card.donCard);
@@ -4657,6 +4813,7 @@ function showView(view) {
   el.viewPanels.forEach(panel => panel.classList.toggle("active", panel.dataset.viewPanel === view));
   el.navTabs.forEach(button => button.classList.toggle("active", button.dataset.view === view));
   if (view === "builder") queueDeckTableResize();
+  if (view === "hotkeys") renderHotkeys();
 }
 
 function cardsByCategory(category) {
@@ -6334,6 +6491,8 @@ function bindEvents() {
   el.viewButtons.forEach(button => {
     button.addEventListener("click", () => showView(button.dataset.view));
   });
+
+  setupHotkeysView();
 
   document.getElementById("multiplayerButton").addEventListener("click", () => {
     window.location.href = "html/multiplayer.html";
