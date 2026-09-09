@@ -145,7 +145,38 @@ const manualPlay = {
 
     setupCardInteractions() {
         console.log("=== setupCardInteractions called ===");
-        
+
+        // Global drag flag (so other code — e.g. the context-menu on-screen
+        // watcher — can stay completely out of the way during a drag) plus a
+        // synchronous breadcrumb written to localStorage on every dragover. If a
+        // drag ever hard-freezes the tab, the LAST breadcrumb tells us exactly
+        // where it stalled (which zone, how many overlays / body nodes) even
+        // though the console is unusable. Read it with:
+        //   localStorage.getItem("cc_drag_debug")
+        document.addEventListener("dragstart", () => {
+            window.__ccDragActive = true;
+            window.__ccDragOvers = 0;
+        }, true);
+        const endDrag = () => { window.__ccDragActive = false; };
+        document.addEventListener("dragend", endDrag, true);
+        document.addEventListener("drop", endDrag, true);
+        document.addEventListener("dragover", (e) => {
+            window.__ccDragOvers = (window.__ccDragOvers || 0) + 1;
+            // Only sample occasionally to keep it cheap.
+            if (window.__ccDragOvers % 15 !== 1) return;
+            try {
+                const z = (e.target && e.target.closest) ? e.target.closest("[class]") : null;
+                localStorage.setItem("cc_drag_debug", JSON.stringify({
+                    t: Date.now(),
+                    dragovers: window.__ccDragOvers,
+                    zone: z ? z.className : "",
+                    splitZones: document.querySelectorAll(".split-drop-zone").length,
+                    bodyChildren: document.body.children.length,
+                    ver: window.APP_VERSION || "?"
+                }));
+            } catch (_) {}
+        }, true);
+
         const highlightClass = "drop-zone-highlight";
         
         // Helper to highlight all zones

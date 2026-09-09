@@ -10822,6 +10822,9 @@ function updateOnlinePhaseButton() {
     };
     const wire = () => {
         new MutationObserver((mutations) => {
+            // Do nothing while a card is being dragged — no menus open then, and
+            // this keeps the watcher entirely out of the drag path.
+            if (window.__ccDragActive) return;
             mutations.forEach(m => m.addedNodes.forEach(clamp));
         }).observe(document.body, { childList: true });
     };
