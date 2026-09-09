@@ -6052,6 +6052,10 @@ button.trash-area {
   background: #171a21;
   color: #f2f4f8;
   box-shadow: 0 20px 60px rgba(0, 0, 0, .6);
+  /* The dialog can get tall (editors + co-owners + transfer), so cap its height
+     and let it scroll instead of overflowing off-screen. */
+  max-height: 90vh;
+  overflow-y: auto;
 }
 .collection-editor h2 { margin: 0 0 4px; font-size: 1.1rem; }
 .collection-editor label {
