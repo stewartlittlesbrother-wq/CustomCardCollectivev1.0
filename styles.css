@@ -6432,8 +6432,21 @@ html.touch-device .builder-hover-preview {
    the deck table take the rest. !important so it wins over the many per-width
    `.builder-main` grid rules. */
 .builder-window.deck-large .builder-main {
-    grid-template-rows: minmax(96px, 22vh) minmax(0, 1fr) !important;
+    /* Moderate: shrink the search a bit (was way too small at 22vh) and give the
+       deck the rest. */
+    grid-template-rows: minmax(150px, 32vh) minmax(0, 1fr) !important;
 }
+/* Bump the deck cards up a size too, so the extra room shows bigger cards. */
+.builder-window.deck-large .deck-table .deck-list {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)) !important;
+}
+.builder-window.deck-large .mini-card-art { width: 106px !important; }
+.builder-window.deck-large .deck-table .deck-row { min-height: 188px !important; }
+.builder-window.deck-large .deck-table .leader-slot {
+    min-width: 142px !important;
+    min-height: 188px !important;
+}
+.builder-window.deck-large .deck-table .qty { left: 88px !important; }
 .builder-size-toggle {
     display: flex;
     align-items: center;

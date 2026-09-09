@@ -6906,6 +6906,15 @@ function bindEvents() {
   });
   el.deckList?.addEventListener("mouseleave", hideHoverPreview);
 
+  // The leader sits in its own slot (not the deck list), so wire the same
+  // hover-to-zoom there — otherwise you could preview every card but the leader.
+  el.leaderSlot?.addEventListener("mouseover", event => {
+    const row = event.target.closest("[data-card-id]");
+    if (row) showHoverPreview(row, event.clientX);
+    else hideHoverPreview();
+  });
+  el.leaderSlot?.addEventListener("mouseleave", hideHoverPreview);
+
   el.deckList.addEventListener("click", event => {
     const startEl = event.target.closest("[data-start]");
     if (startEl) { openStartMenu(startEl.dataset.start, startEl); return; }
