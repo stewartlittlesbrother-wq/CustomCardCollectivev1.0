@@ -1005,9 +1005,11 @@ function showOnlineRevealedCards() {
 
     onlineLastRevealKey = revealKey;
 
-    // Card names render as hoverable chips (preview on hover) via addGameLog.
+    // Card names render as hoverable yellow chips (preview on hover) via
+    // addGameLog. `verb` lets other actions (e.g. "declared the effect of") reuse
+    // the same chip rendering instead of the fixed "revealed:".
     addGameLog(
-        `${onlinePlayerLabels[latestReveal.player] || "Player"} revealed:`,
+        `${onlinePlayerLabels[latestReveal.player] || "Player"} ${latestReveal.verb || "revealed:"}`,
         cards.map(card => ({ name: card.name, image: card.image }))
     );
 }
@@ -1272,7 +1274,7 @@ function handleOnlineGameOver() {
     );
 }
 
-async function publishOnlineReveal(cards) {
+async function publishOnlineReveal(cards, verb = "revealed:") {
     if (!isOnlineMatch || !onlineMultiplayerService || !cards?.length) return;
 
     const revealedCards = onlinePublicState?.revealedCards || [];
@@ -1283,6 +1285,7 @@ async function publishOnlineReveal(cards) {
             {
                 id: crypto.randomUUID(),
                 player: playerSlot,
+                verb,
                 cards: cards.map(card => ({
                     name: card.name,
                     image: card.image,
@@ -4436,22 +4439,33 @@ function renderDonArea(player, areaId) {
         `<span class="dc-rested">${restedCount}</span><span class="dc-lbl">rest</span>`;
     donArea.appendChild(badge);
 
-    // Hamburger menu on the DON!! band (only on DON!! you control) with quick
-    // actions like "Rest all DON!!".
+    // Two direct DON!! action buttons (only on DON!! you control): "Rest All" and
+    // "Stand All", for instant clicking. Replaces the old hamburger menu that a
+    // rested (rotated) DON!! card partly covered. Pinned to the far right of the
+    // band, above the cards, so nothing overlaps them.
     const canControlDon = !isSpectator && (!isOnlineMatch || isOwnOnlinePlayer(player));
     if (canControlDon) {
-        const menuBtn = document.createElement("button");
-        menuBtn.type = "button";
-        menuBtn.className = "don-menu-btn";
-        menuBtn.title = "DON!! actions";
-        menuBtn.setAttribute("aria-label", "DON!! actions");
-        menuBtn.innerHTML = "<span></span><span></span><span></span>";
-        menuBtn.addEventListener("click", (event) => {
-            event.stopPropagation();
-            event.preventDefault();
-            openDonMenu(menuBtn, player);
-        });
-        donArea.appendChild(menuBtn);
+        const actions = document.createElement("div");
+        actions.className = "don-actions";
+        const mk = (label, title, next, logMsg) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "don-action-btn";
+            b.textContent = label;
+            b.title = title;
+            b.addEventListener("click", (event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                setDonSlots(player, getDonSlots(player).map(() => next));
+                updateDonDisplay();
+                addGameLog(logMsg.replace("{name}", player.name));
+                window.scheduleOnlineBoardSync?.();
+            });
+            return b;
+        };
+        actions.appendChild(mk("Rest All", "Rest all DON!!", "rested", "{name} rested all DON!!."));
+        actions.appendChild(mk("Stand All", "Set all DON!! active", "active", "{name} set all DON!! active."));
+        donArea.appendChild(actions);
     }
 }
 
@@ -5375,6 +5389,12 @@ function showDeckContextMenu(event, player, pileKey = "deck", pileLabel = "Deck"
             window.renderDecks?.();
             window.renderHands?.();
             addGameLog(`${player.name} drew a card.`);
+            window.scheduleOnlineBoardSync?.();
+        });
+        addItem("Shuffle deck", () => {
+            player.deck = shuffleDeck(player.deck);
+            window.renderDecks?.();
+            addGameLog(`${player.name} shuffled their deck.`);
             window.scheduleOnlineBoardSync?.();
         });
     }
@@ -10709,18 +10729,18 @@ function updateOnlinePhaseButton() {
         return null;
     }
 
-    // Announce a declared effect to both players (chat online, game log solo).
+    // Announce a declared effect to both players. Uses the reveal-log path so the
+    // card name shows as a yellow, hoverable chip (preview on hover) in the log —
+    // not just plain chat text.
     function declareEffect(el) {
         const card = cardFromElement(el);
-        const cardName = (card && card.name) ? card.name : "a card";
-        const who = (typeof getOwnChatName === "function") ? getOwnChatName() : (ownPlayer()?.name || "Player");
-        if (isOnlineMatch && onlineMultiplayerService && roomCode) {
-            const role = isSpectator ? "spectator" : playerSlot;
-            onlineMultiplayerService.sendChatMessage(
-                roomCode, who, `declared the effect of ${cardName}`, role
-            ).catch(() => {});
+        if (!card) return;
+        if (isOnlineMatch && onlineMultiplayerService && roomCode && !isSpectator) {
+            // Shared reveal log -> both players see "<name> declared the effect of <chip>".
+            publishOnlineReveal([{ name: card.name, image: card.image, cardNumber: card.cardNumber, cardType: card.cardType, type: card.type }], "declared the effect of");
         } else {
-            addGameLog(`${who} declared the effect of ${cardName}.`);
+            const who = (typeof getOwnChatName === "function") ? getOwnChatName() : (ownPlayer()?.name || "Player");
+            addGameLog(`${who} declared the effect of`, [{ name: card.name, image: card.image }]);
         }
     }
 
@@ -10782,4 +10802,37 @@ function updateOnlinePhaseButton() {
             if (start && Date.now() - start >= HOLD_MS) runAction(hk);
         });
     });
+})();
+
+// ── Keep every right-click / context menu on screen ─────────────────────────
+// Many card menus (hand, board, life, DON, floating DON) were positioned at the
+// raw cursor point, so a click low on the board opened a menu that ran off the
+// bottom (or right) of the screen and got cropped. This watches for any
+// `.context-menu` added to the page and nudges it fully back into view, so they
+// never need to be reached from the very top of a card.
+(function keepContextMenusOnScreen() {
+    const PAD = 8;
+    const clamp = (menu) => {
+        if (!(menu instanceof HTMLElement) || !menu.classList.contains("context-menu")) return;
+        // Measure on the next frame so any post-append positioning has run.
+        requestAnimationFrame(() => {
+            if (!menu.isConnected) return;
+            if (getComputedStyle(menu).position !== "fixed") return;
+            const r = menu.getBoundingClientRect();
+            let left = r.left, top = r.top;
+            if (r.right > window.innerWidth - PAD) left = window.innerWidth - r.width - PAD;
+            if (r.bottom > window.innerHeight - PAD) top = window.innerHeight - r.height - PAD;
+            left = Math.max(PAD, left);
+            top = Math.max(PAD, top);
+            menu.style.left = `${left}px`;
+            menu.style.top = `${top}px`;
+        });
+    };
+    const wire = () => {
+        new MutationObserver((mutations) => {
+            mutations.forEach(m => m.addedNodes.forEach(clamp));
+        }).observe(document.body, { childList: true });
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire);
+    else wire();
 })();

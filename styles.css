@@ -6414,3 +6414,13 @@ html.touch-device .builder-hover-preview {
 .hotkey-note-field { display: flex; flex-direction: column; gap: 5px; }
 .hotkey-note-field span { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .hotkey-note-field input { padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,.06); color: #fff; }
+
+/* ── Deck builder: never clip the bottom row ─────────────────────────────────
+   Several breakpoints set the deck-list / card-grid scroll area to
+   `overflow: hidden`, which cut off the last row of cards (and its +/- buttons
+   were unreachable). Force vertical scrolling and add bottom room so the whole
+   grid — including the final row's controls — is always reachable. */
+.deck-board-scroll { overflow-y: auto !important; }
+.deck-table .deck-list { padding-bottom: 28px; }
+.collection-panel .card-grid { overflow-y: auto; }
+#cardGrid { padding-bottom: 24px; }
