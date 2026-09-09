@@ -482,6 +482,22 @@ export async function deleteSharedCollection(slug) {
     await remove(ref(database, `${COLLECTIONS_PATH}/${key}`));
 }
 
+// Every registered account username (lowercased), for the admin's collection
+// editor picker. Read from the shared `usernames` node (any signed-in user may
+// read it). Accounts that never set a username - e.g. Google-only sign-ins that
+// haven't added one - won't appear, since editor access is matched by username.
+export async function listAllUsernames() {
+    try {
+        await waitForUser();
+        const snap = await get(ref(database, "usernames"));
+        const val = snap.val() || {};
+        return Object.keys(val).map(u => String(u).toLowerCase()).sort();
+    } catch (error) {
+        console.warn("Could not list usernames:", error);
+        return [];
+    }
+}
+
 // Used by the "clear editable cards" action.
 export async function clearSharedCards() {
     await waitForUser();

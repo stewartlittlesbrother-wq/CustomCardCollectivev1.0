@@ -1068,7 +1068,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-6")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-7")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -4365,11 +4365,13 @@ function openCollectionEditor(slug = null) {
         <input type="file" id="colEditImageFile" accept="image/png,image/jpeg,image/webp">
       </label>
       ${isAdminAccount() ? `
-      <label>Allowed editors <small style="opacity:.6">(usernames, comma-separated)</small>
-        <input type="text" id="colEditEditors" placeholder="e.g. Body_Chewer, SomeoneElse" value="${escapeAttr((existing?.editors || []).join(", "))}">
-      </label>
-      <p class="collection-editor-note" style="opacity:.7;font-size:.8rem;margin:2px 0 0">
-        Admin only: these users can edit the cards in this collection even if they didn't make them.
+      <label>Allowed editors <small style="opacity:.6">(admin only — pick accounts)</small></label>
+      <input type="text" id="colEditEditorSearch" placeholder="Search accounts…" autocomplete="off" style="margin-top:4px">
+      <div id="colEditEditorList" class="collection-editor-editors" style="max-height:180px;overflow:auto;border:1px solid var(--line,#333);border-radius:8px;padding:6px;margin-top:6px;display:flex;flex-direction:column;gap:2px;text-align:left;">
+        <div style="opacity:.6;padding:6px;">Loading accounts…</div>
+      </div>
+      <p class="collection-editor-note" style="opacity:.7;font-size:.8rem;margin:4px 0 0;text-align:left;">
+        Checked users can edit the cards in this collection even if they didn't make them. Only accounts with a username appear.
       </p>` : ""}
       <div class="collection-editor-preview" id="colEditPreview">${
         existing?.image ? `<img src="${escapeAttr(existing.image)}" alt="">` : `<span>No image</span>`
@@ -4386,6 +4388,40 @@ function openCollectionEditor(slug = null) {
   const preview = overlay.querySelector("#colEditPreview");
   const urlInput = overlay.querySelector("#colEditImageUrl");
   const fileInput = overlay.querySelector("#colEditImageFile");
+
+  // Admin: fill the editor picker with every registered account username as a
+  // searchable checkbox list, pre-checking the ones already granted.
+  if (isAdminAccount()) {
+    const listEl = overlay.querySelector("#colEditEditorList");
+    const searchEl = overlay.querySelector("#colEditEditorSearch");
+    const selected = new Set((existing?.editors || []).map(e => String(e).toLowerCase()));
+    (async () => {
+      let names = [];
+      try {
+        const library = await getCardLibrary();
+        names = (library?.listAllUsernames ? await library.listAllUsernames() : []) || [];
+      } catch (error) { console.warn("Editor list unavailable:", error); }
+      // Keep any already-granted names even if they're missing from the fetch.
+      selected.forEach(n => { if (!names.includes(n)) names.push(n); });
+      names = [...new Set(names)].sort();
+      if (!listEl) return;
+      if (!names.length) {
+        listEl.innerHTML = `<div style="opacity:.6;padding:6px;">No accounts found yet.</div>`;
+        return;
+      }
+      listEl.innerHTML = names.map(n => `
+        <label class="cc-editor-row" data-name="${escapeAttr(n)}" style="display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;cursor:pointer;">
+          <input type="checkbox" value="${escapeAttr(n)}" ${selected.has(n) ? "checked" : ""}>
+          <span>${escapeHtml(n)}</span>
+        </label>`).join("");
+    })();
+    searchEl?.addEventListener("input", () => {
+      const q = searchEl.value.trim().toLowerCase();
+      listEl?.querySelectorAll(".cc-editor-row").forEach(row => {
+        row.style.display = row.dataset.name.includes(q) ? "flex" : "none";
+      });
+    });
+  }
 
   const refreshPreview = (src) => {
     preview.innerHTML = src ? `<img src="${escapeAttr(src)}" alt="">` : `<span>No image</span>`;
@@ -4416,13 +4452,14 @@ function openCollectionEditor(slug = null) {
     if (!name) { toast("Give the collection a name"); return; }
     const image = uploadedDataUrl || urlInput.value.trim() || existing?.image || "";
     const targetSlug = existing?.slug || collectionSlugFromName(name);
-    // Only the admin account may set the editors list. For everyone else, pass
-    // undefined so saveCollection preserves whatever is already there (a
-    // non-admin editing the name must never wipe the admin's editor grants).
+    // Only the admin account may set the editors list. Collect the checked
+    // accounts from the picker. For everyone else, pass undefined so
+    // saveCollection preserves whatever is already there (a non-admin editing the
+    // name must never wipe the admin's editor grants).
     const editors = isAdminAccount()
       ? [...new Set(
-          String(overlay.querySelector("#colEditEditors")?.value || "")
-            .split(",").map(s => s.trim().toLowerCase()).filter(Boolean)
+          [...overlay.querySelectorAll("#colEditEditorList input[type=checkbox]:checked")]
+            .map(cb => String(cb.value).trim().toLowerCase()).filter(Boolean)
         )]
       : undefined;
     // Record the owner on create so only they (and their chosen editors) manage it.
