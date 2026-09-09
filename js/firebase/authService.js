@@ -65,10 +65,19 @@ export function isRealAccount(user = auth.currentUser) {
 export function getAccount() {
     const u = auth.currentUser;
     if (!isRealAccount(u)) return null;
+    // Every email tied to this account: the primary plus each linked provider's
+    // (e.g. the real Gmail from a Google sign-in). Used for admin detection, which
+    // must still work after a username/password login was linked and possibly
+    // changed the primary email to the synthetic <username>@... address.
+    const emails = [...new Set(
+        [u.email, ...((u.providerData || []).map(p => p && p.email))]
+            .filter(Boolean).map(e => String(e).toLowerCase())
+    )];
     return {
         uid: u.uid,
         displayName: u.displayName || (u.email ? u.email.split("@")[0] : "Player"),
         email: u.email || "",
+        emails,
         photoURL: u.photoURL || "",
         provider: (u.providerData?.[0]?.providerId) || ""
     };

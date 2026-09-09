@@ -4230,8 +4230,15 @@ const COLLECTION_MANAGE_CODE = "5433";
 // list. Matched on the signed-in account's email (case-insensitive).
 const ADMIN_EMAIL = "goldrush071710@gmail.com";
 function isAdminAccount() {
-  const email = String(window.ccAccount?.user?.email || "").trim().toLowerCase();
-  return !!email && email === ADMIN_EMAIL;
+  const u = window.ccAccount?.user;
+  if (!u) return false;
+  // Check every email linked to the account (primary + each provider), so a
+  // Google admin still matches even after linking a username/password login that
+  // changed the primary email to the synthetic <username>@... address.
+  const emails = Array.isArray(u.emails) && u.emails.length
+    ? u.emails
+    : [u.email].filter(Boolean);
+  return emails.map(e => String(e).trim().toLowerCase()).includes(ADMIN_EMAIL);
 }
 
 function populateCollectionManageSelect() {
