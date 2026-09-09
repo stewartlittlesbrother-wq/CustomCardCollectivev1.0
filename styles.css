@@ -6482,3 +6482,29 @@ html.touch-device .builder-hover-preview {
 .builder-size-toggle input:checked + .builder-size-track { background: #d33; }
 .builder-size-toggle input:checked + .builder-size-track .builder-size-thumb { transform: translateX(16px); }
 .builder-size-toggle input:focus-visible + .builder-size-track { outline: 2px solid #5aa2ff; outline-offset: 2px; }
+
+/* Card creator: Attribute is a multi-select checkbox group (pick one or more,
+   including the "???" unknown attribute). */
+.attr-multi {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin-top: 5px;
+}
+.attr-multi > label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0;
+    font-weight: 600;
+    font-size: .85rem;
+    cursor: pointer;
+    text-transform: none;
+}
+.attr-multi input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    cursor: pointer;
+    accent-color: #d33;
+}

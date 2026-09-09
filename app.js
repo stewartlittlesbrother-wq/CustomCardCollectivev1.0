@@ -3442,6 +3442,26 @@ async function collectAltArtSources() {
   return [...new Set(arts.filter(Boolean))];
 }
 
+// The card creator's Attribute field is now a multi-select checkbox group (a
+// character can have more than one, e.g. Slash + Special — plus the "???"
+// unknown attribute). Stored comma-separated to match the importer's format.
+function getCreationAttributes() {
+  const host = el.creationAttribute;
+  if (!host) return "";
+  return [...host.querySelectorAll('input[type="checkbox"]:checked')]
+    .map(cb => cb.value).join(", ");
+}
+function setCreationAttributes(value) {
+  const host = el.creationAttribute;
+  if (!host) return;
+  const wanted = new Set(
+    String(value || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean)
+  );
+  host.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.checked = wanted.has(cb.value.trim().toLowerCase());
+  });
+}
+
 function creationCardFromForm(imageDataUrl, altArts = []) {
   const cardNumber = el.creationCardNumber.value.trim() || nextImportedCardNumber();
   const category = normalizeCategory(el.creationCategory.value);
@@ -3463,7 +3483,7 @@ function creationCardFromForm(imageDataUrl, altArts = []) {
     life: category === "leader" ? costOrLife : "",
     power: el.creationPower.value === "" ? "" : Number(el.creationPower.value),
     counter: el.creationCounter.value === "" ? "" : Number(el.creationCounter.value),
-    attribute: el.creationAttribute.value.trim(),
+    attribute: getCreationAttributes(),
     rarity: el.creationRarity.value.trim(),
     // How many copies of this card a deck may hold. 0 means unlimited; absent
     // on older cards, which fall back to the standard 4 (see cardCopyLimit).
@@ -4563,7 +4583,7 @@ function openCardForEditing(card) {
   setSelectValueWithFallback(el.creationCost, card.category === "leader" ? card.life || "" : card.cost || "");
   el.creationPower.value = card.power || "";
   setSelectValueWithFallback(el.creationCounter, card.counter || "");
-  setSelectValueWithFallback(el.creationAttribute, card.attribute || "");
+  setCreationAttributes(card.attribute || "");
   el.creationTypes.value = card.type || "";
   setSelectValueWithFallback(el.creationRarity, card.rarity || "");
   // 0 is a real value here (unlimited), so don't collapse it with || "".
