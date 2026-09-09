@@ -4439,34 +4439,8 @@ function renderDonArea(player, areaId) {
         `<span class="dc-rested">${restedCount}</span><span class="dc-lbl">rest</span>`;
     donArea.appendChild(badge);
 
-    // Two direct DON!! action buttons (only on DON!! you control): "Rest All" and
-    // "Stand All", for instant clicking. Replaces the old hamburger menu that a
-    // rested (rotated) DON!! card partly covered. Pinned to the far right of the
-    // band, above the cards, so nothing overlaps them.
-    const canControlDon = !isSpectator && (!isOnlineMatch || isOwnOnlinePlayer(player));
-    if (canControlDon) {
-        const actions = document.createElement("div");
-        actions.className = "don-actions";
-        const mk = (label, title, next, logMsg) => {
-            const b = document.createElement("button");
-            b.type = "button";
-            b.className = "don-action-btn";
-            b.textContent = label;
-            b.title = title;
-            b.addEventListener("click", (event) => {
-                event.stopPropagation();
-                event.preventDefault();
-                setDonSlots(player, getDonSlots(player).map(() => next));
-                updateDonDisplay();
-                addGameLog(logMsg.replace("{name}", player.name));
-                window.scheduleOnlineBoardSync?.();
-            });
-            return b;
-        };
-        actions.appendChild(mk("Rest All", "Rest all DON!!", "rested", "{name} rested all DON!!."));
-        actions.appendChild(mk("Stand All", "Set all DON!! active", "active", "{name} set all DON!! active."));
-        donArea.appendChild(actions);
-    }
+    // DON!! quick actions live on a 3-line (hamburger) button under the DON!!
+    // deck circle now (see renderDonDeck), not here.
 }
 
 function renderFloatingDon() {
@@ -4987,9 +4961,27 @@ function renderDonDeck(player, areaId) {
     
     // Only add handler to symbol, not donDeckArea (avoid duplicate handlers)
     symbol.addEventListener("click", handleClick);
-    
+
     donDeckArea.appendChild(symbol);
     donDeckArea.appendChild(count);
+
+    // 3-line (hamburger) button UNDER the DON!! deck circle, on the DON!! you
+    // control. Opens the DON!! actions menu (Rest all / Stand all).
+    const canControlDon = !isSpectator && (!isOnlineMatch || isOwnOnlinePlayer(player));
+    if (canControlDon) {
+        const menuBtn = document.createElement("button");
+        menuBtn.type = "button";
+        menuBtn.className = "don-deck-menu-btn";
+        menuBtn.title = "DON!! actions (Rest all / Stand all)";
+        menuBtn.setAttribute("aria-label", "DON!! actions");
+        menuBtn.innerHTML = "<span></span><span></span><span></span>";
+        menuBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            openDonMenu(menuBtn, player);
+        });
+        donDeckArea.appendChild(menuBtn);
+    }
 }
 
 // =========================
