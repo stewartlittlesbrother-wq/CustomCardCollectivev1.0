@@ -173,7 +173,11 @@ const manualPlay = {
 
         // Helper to show TOP/BOTTOM split drop indicators over a pile (life or deck)
         const showSplitDropZone = (zone) => {
-            if (zone.querySelectorAll(".split-drop-zone").length > 0) return;
+            // The two indicators are appended to <body>, so checking the ZONE for
+            // them never matched — every dragover frame appended two more, piling
+            // up thousands of fixed full-screen divs during a drag and freezing
+            // the whole board. Clear any existing ones first so at most two exist.
+            document.querySelectorAll(".split-drop-zone").forEach(z => z.remove());
             const rect = zone.getBoundingClientRect();
 
             const topZone = document.createElement("div");
@@ -630,6 +634,9 @@ const manualPlay = {
                 // Life and deck piles support dropping on the top or bottom half
                 if (zone.classList.contains("life-area") || zone.classList.contains("deck-area")) {
                     showSplitDropZone(zone);
+                } else {
+                    // Left a pile for another zone — clear the split indicators.
+                    document.querySelectorAll(".split-drop-zone").forEach(z => z.remove());
                 }
             }
         }, false);
