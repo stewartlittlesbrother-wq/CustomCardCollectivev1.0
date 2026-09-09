@@ -5839,30 +5839,44 @@ html.touch-device .context-menu > * {
 
 /* Two direct DON!! action buttons ("Rest All" / "Stand All") pinned to the far
    right of the DON!! band, above the cards, so a rested (rotated) DON!! never
-   covers them and they're instant to click. */
-.don-actions {
-    position: absolute;
+   covers them and they're instant to click.
+   NOTE the `.don-area .don-actions` selector + !important: `.don-area > div`
+   sets `display:none !important` to hide stray children, which was hiding these
+   buttons entirely — this higher-specificity rule brings them back. */
+.don-area .don-actions {
+    position: absolute !important;
     right: 4px;
     top: 50%;
     transform: translateY(-50%);
-    display: flex;
+    display: flex !important;
     flex-direction: column;
+    align-items: stretch;
     gap: 4px;
+    width: auto !important;
+    height: auto !important;
     z-index: 350;
     pointer-events: auto;
 }
-.don-action-btn {
-    padding: 4px 9px;
-    font: 700 11px/1.1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    white-space: nowrap;
-    border: 1px solid rgba(255, 255, 255, .28);
-    border-radius: 6px;
-    background: rgba(35, 35, 40, .95);
-    color: #fff;
-    cursor: pointer;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, .5);
+.don-area .don-action-btn {
+    display: inline-block !important;
+    box-sizing: border-box !important;
+    width: auto !important;
+    min-width: 64px !important;
+    height: auto !important;
+    min-height: 24px !important;
+    padding: 4px 10px !important;
+    margin: 0 !important;
+    font: 700 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif !important;
+    white-space: nowrap !important;
+    border: 1px solid rgba(255, 255, 255, .3) !important;
+    border-radius: 6px !important;
+    background: rgba(35, 35, 40, .96) !important;
+    color: #fff !important;
+    cursor: pointer !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .5) !important;
+    transform: none !important;
 }
-.don-action-btn:hover { background: rgba(74, 144, 226, .8); }
+.don-area .don-action-btn:hover { background: rgba(74, 144, 226, .85) !important; }
 
 /* Card highlight (right-click a card to mark it for both players). */
 /* Highlight a card in place: an inset gold ring + glow that stays WITHIN the
@@ -5884,8 +5898,11 @@ body.hand-flat .hand {
     justify-content: center;
     gap: clamp(2px, 0.6vw, 8px);
     flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: visible;
+    /* overflow VISIBLE (not auto): an `overflow-x:auto` row auto-scrolled to keep
+       a hovered/enlarged edge card in view, which made the whole hand jump far to
+       the left or right. Visible lets a hovered card rise up over the board and
+       spill past the edges without ever scrolling the row. */
+    overflow: visible;
     padding: 0 44px;
 }
 body.hand-flat .opponent-hand.hand { align-items: flex-start; }
@@ -5900,19 +5917,24 @@ body.hand-flat .hand-card {
     /* Grow UPWARD from the bottom edge on hover. A translateY used to move the
        card up out from under the cursor, which dropped :hover and re-triggered it
        forever (the "bouncing" bug). Scaling from the bottom keeps the cursor over
-       the card no matter where on it you point, so there's no flicker loop. */
+       the card no matter where on it you point, so there's no flicker loop — and
+       the upward growth is what makes it pop UP over the board. */
     transform-origin: bottom center;
-    z-index: auto;
+    z-index: 1;
 }
 body.hand-flat .hand-card:hover,
 body.hand-flat .hand-card.selected-card {
-    transform: scale(1.12) !important;
-    z-index: 200;
+    /* Bigger scale from the bottom = the card rises clearly over the play area
+       (like the fanned cards do), with the bottom edge pinned under the cursor so
+       there's no bounce. High z-index so it draws ON TOP of the board. */
+    transform: scale(1.26) !important;
+    z-index: 500 !important;
 }
 body.hand-flat .opponent-hand .hand-card { transform-origin: top center; }
 body.hand-flat .opponent-hand .hand-card:hover,
 body.hand-flat .opponent-hand .hand-card.selected-card {
-    transform: scale(1.12) !important;
+    transform: scale(1.26) !important;
+    z-index: 500 !important;
 }
 
 /* Hotkeys: the last card the player clicked, which a hotkey will act on. */
