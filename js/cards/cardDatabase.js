@@ -709,11 +709,20 @@ function cloneCard(card) {
     return JSON.parse(JSON.stringify(card));
 }
 
+const __warnedMissingCards = new Set();
 function getCardById(cardId) {
     const card = cardDatabase[cardId];
 
     if (!card) {
-        console.error(`Card not found in database: ${cardId}`);
+        // Warn ONCE per missing id. This is called on every render for every card,
+        // so a board holding a card that isn't in this client's library used to
+        // flood the console with thousands of identical errors on each re-render —
+        // and a console flood with DevTools open can freeze the whole tab (which
+        // is exactly what happened while dragging, since dragging re-renders).
+        if (!__warnedMissingCards.has(cardId)) {
+            __warnedMissingCards.add(cardId);
+            console.warn(`Card not found in database: ${cardId}`);
+        }
         return null;
     }
 

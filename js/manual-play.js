@@ -153,9 +153,23 @@ const manualPlay = {
         // where it stalled (which zone, how many overlays / body nodes) even
         // though the console is unusable. Read it with:
         //   localStorage.getItem("cc_drag_debug")
-        document.addEventListener("dragstart", () => {
+        window.__ccMPVer = 20; // manual-play build marker (paste window.__ccMPVer to check)
+        document.addEventListener("dragstart", (e) => {
             window.__ccDragActive = true;
             window.__ccDragOvers = 0;
+            // Breadcrumb at the very start of a drag, before anything else runs, so
+            // even a freeze at drag-start (before any dragover) is recorded.
+            try {
+                const src = (e.target && e.target.closest) ? e.target.closest("[class]") : null;
+                localStorage.setItem("cc_drag_debug", JSON.stringify({
+                    at: "dragstart",
+                    t: Date.now(),
+                    source: src ? src.className : "",
+                    totalElements: document.getElementsByTagName("*").length,
+                    ver: window.APP_VERSION || "?",
+                    mp: window.__ccMPVer
+                }));
+            } catch (_) {}
         }, true);
         const endDrag = () => { window.__ccDragActive = false; };
         document.addEventListener("dragend", endDrag, true);
