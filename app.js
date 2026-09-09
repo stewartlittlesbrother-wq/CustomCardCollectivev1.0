@@ -95,7 +95,9 @@ function applyCustomCollections(customList) {
       // though they didn't create them (see isCollectionEditor).
       ownerUid: entry.ownerUid ?? existing.ownerUid ?? "",
       editors: Array.isArray(entry.editors) ? entry.editors
-        : (Array.isArray(existing.editors) ? existing.editors : [])
+        : (Array.isArray(existing.editors) ? existing.editors : []),
+      coOwners: Array.isArray(entry.coOwners) ? entry.coOwners
+        : (Array.isArray(existing.coOwners) ? existing.coOwners : [])
     });
   });
 
@@ -153,18 +155,21 @@ let customCollections = [];
 // Create or update a collection (name + optional cover image), then refresh the
 // picker and the collection dropdowns. Writes to the shared library so everyone
 // gets it, with a local fallback when the library is unreachable.
-async function saveCollection({ slug, name, image, editors, ownerUid }) {
+async function saveCollection({ slug, name, image, editors, ownerUid, coOwners }) {
   const prior = customCollections.find(c => c.slug === String(slug || "").trim())
     || CARD_COLLECTIONS.find(c => c.slug === String(slug || "").trim());
   const entry = {
     slug: String(slug || "").trim(),
     name: String(name || slug || "").trim(),
     image: String(image || ""),
-    // Owner is set once (on create) and preserved thereafter.
+    // Owner: set explicitly (create / transfer) or preserved.
     ownerUid: ownerUid !== undefined ? ownerUid : (prior?.ownerUid || ""),
     // Usernames (lowercased) allowed to edit this collection's cards.
     editors: Array.isArray(editors) ? editors
-      : (Array.isArray(prior?.editors) ? prior.editors : [])
+      : (Array.isArray(prior?.editors) ? prior.editors : []),
+    // Co-owners (usernames) — like editors for card access; managed by the owner.
+    coOwners: Array.isArray(coOwners) ? coOwners
+      : (Array.isArray(prior?.coOwners) ? prior.coOwners : [])
   };
   if (!entry.slug) return;
 
@@ -1068,7 +1073,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-7")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-8")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -4374,15 +4379,27 @@ function openCollectionEditor(slug = null) {
       <label>…or upload an image
         <input type="file" id="colEditImageFile" accept="image/png,image/jpeg,image/webp">
       </label>
-      ${isAdminAccount() ? `
-      <label>Allowed editors <small style="opacity:.6">(admin only — pick accounts)</small></label>
-      <input type="text" id="colEditEditorSearch" placeholder="Search accounts…" autocomplete="off" style="margin-top:4px">
-      <div id="colEditEditorList" class="collection-editor-editors" style="max-height:180px;overflow:auto;border:1px solid var(--line,#333);border-radius:8px;padding:6px;margin-top:6px;display:flex;flex-direction:column;gap:2px;text-align:left;">
-        <div style="opacity:.6;padding:6px;">Loading accounts…</div>
-      </div>
-      <p class="collection-editor-note" style="opacity:.7;font-size:.8rem;margin:4px 0 0;text-align:left;">
-        Checked users can edit the cards in this collection even if they didn't make them. Only accounts with a username appear.
-      </p>` : ""}
+      ${canManageCollectionSettings(existing) ? `
+      <div class="col-edit-mgmt" style="text-align:left;display:flex;flex-direction:column;gap:12px;margin-top:4px;">
+        <div>
+          <label>Allowed editors <small style="opacity:.6">(can edit this collection's cards)</small></label>
+          <input type="text" data-picker-search="editors" placeholder="Search accounts…" autocomplete="off" style="margin-top:4px">
+          <div data-picker-list="editors" class="cc-account-list" style="max-height:150px;overflow:auto;border:1px solid var(--line,#333);border-radius:8px;padding:6px;margin-top:6px;display:flex;flex-direction:column;gap:2px;"><div style="opacity:.6;padding:6px;">Loading accounts…</div></div>
+        </div>
+        <div>
+          <label>Co-owners <small style="opacity:.6">(can also edit this collection's cards)</small></label>
+          <input type="text" data-picker-search="coOwners" placeholder="Search accounts…" autocomplete="off" style="margin-top:4px">
+          <div data-picker-list="coOwners" class="cc-account-list" style="max-height:150px;overflow:auto;border:1px solid var(--line,#333);border-radius:8px;padding:6px;margin-top:6px;display:flex;flex-direction:column;gap:2px;"><div style="opacity:.6;padding:6px;">Loading accounts…</div></div>
+        </div>
+        ${existing ? `
+        <div>
+          <label>Transfer ownership <small style="opacity:.6">(hands this collection to another account)</small></label>
+          <div style="display:flex;gap:8px;margin-top:4px;">
+            <select data-transfer-select style="flex:1;min-width:0"><option value="">Loading accounts…</option></select>
+            <button type="button" class="red-button" data-transfer-btn>Transfer</button>
+          </div>
+        </div>` : ""}
+      </div>` : ""}
       <div class="collection-editor-preview" id="colEditPreview">${
         existing?.image ? `<img src="${escapeAttr(existing.image)}" alt="">` : `<span>No image</span>`
       }</div>
@@ -4399,37 +4416,63 @@ function openCollectionEditor(slug = null) {
   const urlInput = overlay.querySelector("#colEditImageUrl");
   const fileInput = overlay.querySelector("#colEditImageFile");
 
-  // Admin: fill the editor picker with every registered account username as a
-  // searchable checkbox list, pre-checking the ones already granted.
-  if (isAdminAccount()) {
-    const listEl = overlay.querySelector("#colEditEditorList");
-    const searchEl = overlay.querySelector("#colEditEditorSearch");
-    const selected = new Set((existing?.editors || []).map(e => String(e).toLowerCase()));
+  // Owner/admin: populate the editors + co-owners pickers and the transfer
+  // dropdown from every registered account (username + uid).
+  if (canManageCollectionSettings(existing)) {
     (async () => {
-      let names = [];
+      let accounts = [];
       try {
         const library = await getCardLibrary();
-        names = (library?.listAllUsernames ? await library.listAllUsernames() : []) || [];
-      } catch (error) { console.warn("Editor list unavailable:", error); }
-      // Keep any already-granted names even if they're missing from the fetch.
-      selected.forEach(n => { if (!names.includes(n)) names.push(n); });
-      names = [...new Set(names)].sort();
-      if (!listEl) return;
-      if (!names.length) {
-        listEl.innerHTML = `<div style="opacity:.6;padding:6px;">No accounts found yet.</div>`;
-        return;
+        accounts = (library?.listAllAccounts ? await library.listAllAccounts() : []) || [];
+      } catch (error) { console.warn("Account list unavailable:", error); }
+
+      const fillPicker = (kind, preselected) => {
+        const listEl = overlay.querySelector(`[data-picker-list="${kind}"]`);
+        const searchEl = overlay.querySelector(`[data-picker-search="${kind}"]`);
+        if (!listEl) return;
+        const selected = new Set((preselected || []).map(e => String(e).toLowerCase()));
+        let names = accounts.map(a => a.username);
+        selected.forEach(n => { if (!names.includes(n)) names.push(n); }); // keep granted-but-missing
+        names = [...new Set(names)].sort();
+        listEl.innerHTML = names.length
+          ? names.map(n => `
+            <label class="cc-account-row" data-name="${escapeAttr(n)}" style="display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;cursor:pointer;">
+              <input type="checkbox" value="${escapeAttr(n)}" ${selected.has(n) ? "checked" : ""}>
+              <span>${escapeHtml(n)}</span>
+            </label>`).join("")
+          : `<div style="opacity:.6;padding:6px;">No accounts found yet.</div>`;
+        searchEl?.addEventListener("input", () => {
+          const q = searchEl.value.trim().toLowerCase();
+          listEl.querySelectorAll(".cc-account-row").forEach(row => {
+            row.style.display = row.dataset.name.includes(q) ? "flex" : "none";
+          });
+        });
+      };
+      fillPicker("editors", existing?.editors || []);
+      fillPicker("coOwners", existing?.coOwners || []);
+
+      // Transfer-ownership dropdown (existing collections only).
+      const transferSel = overlay.querySelector("[data-transfer-select]");
+      if (transferSel) {
+        transferSel.innerHTML = `<option value="">Choose an account…</option>` +
+          accounts.map(a => `<option value="${escapeAttr(a.uid)}">${escapeHtml(a.username)}</option>`).join("");
       }
-      listEl.innerHTML = names.map(n => `
-        <label class="cc-editor-row" data-name="${escapeAttr(n)}" style="display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;cursor:pointer;">
-          <input type="checkbox" value="${escapeAttr(n)}" ${selected.has(n) ? "checked" : ""}>
-          <span>${escapeHtml(n)}</span>
-        </label>`).join("");
     })();
-    searchEl?.addEventListener("input", () => {
-      const q = searchEl.value.trim().toLowerCase();
-      listEl?.querySelectorAll(".cc-editor-row").forEach(row => {
-        row.style.display = row.dataset.name.includes(q) ? "flex" : "none";
-      });
+
+    overlay.querySelector("[data-transfer-btn]")?.addEventListener("click", async () => {
+      const sel = overlay.querySelector("[data-transfer-select]");
+      const newOwnerUid = sel?.value || "";
+      const newOwnerName = sel?.selectedOptions?.[0]?.textContent || "that account";
+      if (!newOwnerUid) { toast("Pick an account to transfer to"); return; }
+      if (!confirm(`Transfer ownership of "${existing?.name || "this collection"}" to ${newOwnerName}? You will no longer be the owner.`)) return;
+      // Persist the current dialog state plus the new owner.
+      const name = overlay.querySelector("#colEditName").value.trim() || existing?.name || existing?.slug;
+      const image = uploadedDataUrl || urlInput.value.trim() || existing?.image || "";
+      const editors = [...new Set([...overlay.querySelectorAll('[data-picker-list="editors"] input:checked')].map(cb => cb.value.toLowerCase()))];
+      const coOwners = [...new Set([...overlay.querySelectorAll('[data-picker-list="coOwners"] input:checked')].map(cb => cb.value.toLowerCase()))];
+      close();
+      await saveCollection({ slug: existing.slug, name, image, editors, coOwners, ownerUid: newOwnerUid });
+      toast(`Ownership transferred to ${newOwnerName}`);
     });
   }
 
@@ -4462,20 +4505,21 @@ function openCollectionEditor(slug = null) {
     if (!name) { toast("Give the collection a name"); return; }
     const image = uploadedDataUrl || urlInput.value.trim() || existing?.image || "";
     const targetSlug = existing?.slug || collectionSlugFromName(name);
-    // Only the admin account may set the editors list. Collect the checked
-    // accounts from the picker. For everyone else, pass undefined so
-    // saveCollection preserves whatever is already there (a non-admin editing the
-    // name must never wipe the admin's editor grants).
-    const editors = isAdminAccount()
-      ? [...new Set(
-          [...overlay.querySelectorAll("#colEditEditorList input[type=checkbox]:checked")]
-            .map(cb => String(cb.value).trim().toLowerCase()).filter(Boolean)
-        )]
+    // Collect editors + co-owners from the pickers — but only when this account
+    // may manage the collection. For anyone else pass undefined so saveCollection
+    // preserves the existing grants instead of wiping them.
+    const canManage = canManageCollectionSettings(existing);
+    const editors = canManage
+      ? [...new Set([...overlay.querySelectorAll('[data-picker-list="editors"] input:checked')].map(cb => String(cb.value).trim().toLowerCase()).filter(Boolean))]
       : undefined;
-    // Record the owner on create so only they (and their chosen editors) manage it.
+    const coOwners = canManage
+      ? [...new Set([...overlay.querySelectorAll('[data-picker-list="coOwners"] input:checked')].map(cb => String(cb.value).trim().toLowerCase()).filter(Boolean))]
+      : undefined;
+    // New collection -> the creator becomes the owner. Existing -> keep its owner
+    // (transfer is a separate button).
     const ownerUid = existing?.ownerUid || (window.ccAccount?.uid?.() || "");
     close();
-    await saveCollection({ slug: targetSlug, name, image, editors, ownerUid });
+    await saveCollection({ slug: targetSlug, name, image, editors, coOwners, ownerUid });
     toast(existing ? "Collection updated" : `Created "${name}"`);
     // Jump straight into a brand-new collection so it's obvious it worked.
     if (!existing) openCollection(targetSlug);
@@ -4992,15 +5036,39 @@ function getCollectionRecord(slug) {
     || customCollections.find(c => c.slug === slug) || null;
 }
 
+function ownAccountUid() {
+  return (window.ccAccount && window.ccAccount.uid && window.ccAccount.uid()) || "";
+}
+function ownAccountUsername() {
+  return String((window.ccAccount && window.ccAccount.username) || "").trim().toLowerCase();
+}
+
+// The signed-in account is the collection's OWNER.
+function isCollectionOwner(slug) {
+  const rec = getCollectionRecord(slug);
+  const uid = ownAccountUid();
+  return !!(rec && uid && rec.ownerUid && rec.ownerUid === uid);
+}
+
+// The account may edit the collection's CARDS: owner (uid), a co-owner, or a
+// listed editor (both matched by username).
 function isCollectionEditor(slug) {
   const rec = getCollectionRecord(slug);
   if (!rec) return false;
-  const uid = (window.ccAccount && window.ccAccount.uid && window.ccAccount.uid()) || "";
-  if (uid && rec.ownerUid && uid === rec.ownerUid) return true;
-  const uname = String((window.ccAccount && window.ccAccount.username) || "").trim().toLowerCase();
+  if (isCollectionOwner(slug)) return true;
+  const uname = ownAccountUsername();
   if (!uname) return false;
   const editors = Array.isArray(rec.editors) ? rec.editors.map(e => String(e).toLowerCase()) : [];
-  return editors.includes(uname);
+  const coOwners = Array.isArray(rec.coOwners) ? rec.coOwners.map(e => String(e).toLowerCase()) : [];
+  return editors.includes(uname) || coOwners.includes(uname);
+}
+
+// Who may open the Edit-collection dialog and change its owner/editors/co-owners:
+// the owner and the admin. (Creating a brand-new collection is always allowed —
+// the creator becomes the owner.)
+function canManageCollectionSettings(existing) {
+  if (!existing) return true;
+  return isAdminAccount() || isCollectionOwner(existing.slug);
 }
 
 // Whether the signed-in account may EDIT or DELETE a given card, honoring
@@ -5012,12 +5080,13 @@ function isCollectionEditor(slug) {
 function canManageCollectionCard(card) {
   if (isAdminAccount()) return true;
   const rec = getCollectionRecord(card?.collection);
-  const restricted = rec && (rec.ownerUid || (Array.isArray(rec.editors) && rec.editors.length));
+  const restricted = rec && (rec.ownerUid
+    || (Array.isArray(rec.editors) && rec.editors.length)
+    || (Array.isArray(rec.coOwners) && rec.coOwners.length));
   if (restricted) return isCollectionEditor(card?.collection);
   const owner = card?.ownerUid || "";
   if (!owner) return true; // legacy/ownerless card in an unrestricted collection
-  const uid = (window.ccAccount && window.ccAccount.uid && window.ccAccount.uid()) || "";
-  return owner === uid;
+  return owner === ownAccountUid();
 }
 
 function deckMainCount() {
@@ -5880,7 +5949,12 @@ function renderCardGrid() {
   if (el.collectionPicker) el.collectionPicker.style.display = browsing ? "none" : "grid";
   if (el.cardGrid) el.cardGrid.style.display = browsing ? "" : "none";
   if (el.collectionBack) el.collectionBack.hidden = !browsing;
-  if (el.collectionEdit) el.collectionEdit.hidden = !browsing;
+  // The Edit-collection button only shows to the collection's owner and the
+  // admin (me). Legacy collections with no owner show it to the admin only.
+  if (el.collectionEdit) {
+    el.collectionEdit.hidden = !browsing
+      || !(isAdminAccount() || isCollectionOwner(state.activeCollection));
+  }
   if (el.viewAllToggle) {
     el.viewAllToggle.hidden = !browsing;
     el.viewAllToggle.classList.toggle("active", Boolean(state.viewAll));

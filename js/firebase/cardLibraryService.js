@@ -447,7 +447,10 @@ export async function loadSharedCollections() {
                 ownerUid: entry.ownerUid || "",
                 editors: Array.isArray(entry.editors)
                     ? entry.editors
-                    : (entry.editors && typeof entry.editors === "object" ? Object.values(entry.editors) : [])
+                    : (entry.editors && typeof entry.editors === "object" ? Object.values(entry.editors) : []),
+                coOwners: Array.isArray(entry.coOwners)
+                    ? entry.coOwners
+                    : (entry.coOwners && typeof entry.coOwners === "object" ? Object.values(entry.coOwners) : [])
             }));
     } catch (error) {
         console.warn("Shared collections not loaded:", error);
@@ -463,16 +466,20 @@ export async function saveSharedCollection(collection) {
     const editors = Array.isArray(collection.editors)
         ? collection.editors.map(e => String(e).trim().toLowerCase()).filter(Boolean)
         : [];
+    const coOwners = Array.isArray(collection.coOwners)
+        ? collection.coOwners.map(e => String(e).trim().toLowerCase()).filter(Boolean)
+        : [];
     await update(ref(database), {
         [`${COLLECTIONS_PATH}/${slug}`]: {
             name: String(collection.name || slug),
             image: String(collection.image || ""),
             ownerUid: String(collection.ownerUid || ""),
             editors,
+            coOwners,
             updatedAt: serverTimestamp()
         }
     });
-    return { slug, name: collection.name || slug, image: collection.image || "", ownerUid: collection.ownerUid || "", editors };
+    return { slug, name: collection.name || slug, image: collection.image || "", ownerUid: collection.ownerUid || "", editors, coOwners };
 }
 
 export async function deleteSharedCollection(slug) {
@@ -494,6 +501,23 @@ export async function listAllUsernames() {
         return Object.keys(val).map(u => String(u).toLowerCase()).sort();
     } catch (error) {
         console.warn("Could not list usernames:", error);
+        return [];
+    }
+}
+
+// Registered accounts as { username, uid } pairs, for transfer-ownership (which
+// needs the target's uid, not just their username). Same source as above.
+export async function listAllAccounts() {
+    try {
+        await waitForUser();
+        const snap = await get(ref(database, "usernames"));
+        const val = snap.val() || {};
+        return Object.entries(val)
+            .map(([username, uid]) => ({ username: String(username).toLowerCase(), uid: String(uid || "") }))
+            .filter(a => a.username && a.uid)
+            .sort((a, b) => a.username.localeCompare(b.username));
+    } catch (error) {
+        console.warn("Could not list accounts:", error);
         return [];
     }
 }
