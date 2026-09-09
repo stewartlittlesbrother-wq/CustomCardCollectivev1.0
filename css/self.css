@@ -2065,13 +2065,16 @@ body {
     width: 100vw;
     height: 100vh;
 
-    background: rgba(0, 0, 0, 0.75);
+    background: rgba(0, 0, 0, 0.85);
 
     display: flex;
     align-items: center;
     justify-content: center;
 
-    z-index: 9999;
+    /* Sit above EVERYTHING on the board — context menus (10001), the chat box,
+       player-name labels, the sidebar — so none of that pokes through the
+       game-over / "I lose" screen. */
+    z-index: 2147483000;
 }
 
 .game-over-popup {
@@ -5338,6 +5341,22 @@ html.touch-device .play-area .life-card img {
     width: 100% !important;
     height: 100% !important;
     object-fit: contain !important;
+}
+
+/* Life-actions hamburger (Shuffle / Reveal All / Hide All) on touch. The desktop
+   rule anchors it bottom:6px, which floats it to the bottom of the tall,
+   overflowing life stack and off the visible cell on mobile — so it looked
+   "missing". Pin it to the TOP-right corner of the life column, above the pile,
+   where it's always visible and tappable. */
+html.touch-device .play-area .life-menu-btn {
+    top: 2px !important;
+    right: 2px !important;
+    bottom: auto !important;
+    left: auto !important;
+    width: 24px !important;
+    height: 24px !important;
+    z-index: 400 !important;
+    background: rgba(0, 0, 0, 0.9) !important;
 }
 
 /* hands: a centered row of card-sized cards, clipped to the board width */

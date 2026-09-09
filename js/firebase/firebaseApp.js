@@ -51,12 +51,26 @@ let authReadyPromise = null;
 
 function ensureAuth() {
     if (!authReadyPromise) {
-        authReadyPromise = setPersistence(auth, browserSessionPersistence)
-            // Fall back to in-memory only if sessionStorage is unavailable
-            // (e.g. hardened privacy settings); the uid is then per page load.
-            .catch(() => setPersistence(auth, inMemoryPersistence).catch(() => {}))
-            .then(() => auth.currentUser || signInAnonymously(auth).then(c => c.user))
-            .then(user => user || auth.currentUser);
+        // Wait for Firebase to restore any persisted session BEFORE deciding what
+        // to do — otherwise currentUser is briefly null on load and we'd sign in
+        // anonymously (and downgrade persistence) even though a real account is
+        // about to be restored.
+        const ready = auth.authStateReady ? auth.authStateReady() : Promise.resolve();
+        authReadyPromise = ready.then(() => {
+            // A real, persisted account is already signed in: use it and DON'T
+            // touch persistence. The account system signs in with LOCAL
+            // persistence so it survives closing the site; the old unconditional
+            // switch to session persistence here is what logged people out on
+            // every close.
+            if (auth.currentUser) return auth.currentUser;
+
+            // No one is signed in — sign in anonymously for multiplayer. Use
+            // session persistence so two tabs on one machine are two players;
+            // fall back to in-memory if sessionStorage is blocked.
+            return setPersistence(auth, browserSessionPersistence)
+                .catch(() => setPersistence(auth, inMemoryPersistence).catch(() => {}))
+                .then(() => signInAnonymously(auth).then(c => c.user));
+        }).then(user => user || auth.currentUser);
     }
     return authReadyPromise;
 }

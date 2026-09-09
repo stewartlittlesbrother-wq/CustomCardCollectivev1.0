@@ -54,12 +54,13 @@ export function stripCardForSync(card) {
 
     const slim = { ...card };
 
-    // Carry the OWNER'S chosen art so the opponent sees the art you picked, just
-    // like playing an alt-art card in real life. Only sent when it's not the
-    // default (0), to keep the payload tiny; the opponent's cardArtSrc uses it.
-    const artIndex = ownAltArtIndex(card.cardNumber || card.id);
-    if (artIndex > 0) slim.artIndex = artIndex;
-    else delete slim.artIndex;
+    // Carry the OWNER'S chosen art so BOTH players see the art the owner picked,
+    // just like playing an alt-art card in real life. Send it ALWAYS (even the
+    // default 0). Previously 0 was omitted, which made the viewing client fall
+    // back to ITS OWN local alt-art preference for this card - so if you had alts
+    // on, every opponent card looked like YOUR alt. An explicit 0 means "owner
+    // chose the default art", so the viewer never substitutes their own pick.
+    slim.artIndex = ownAltArtIndex(card.cardNumber || card.id);
     // Only base64 data URLs are too large to transmit (~88KB each). A plain
     // image URL is a few dozen bytes, so keep it - that way a custom card still
     // renders for an opponent whose local card pool doesn't contain it.

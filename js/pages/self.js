@@ -122,9 +122,10 @@ function applyAllCosmetics() {
 // standard 10 DON!! with the default image above.
 const DON_DECKS_KEY = "custom-don-decks-v1";
 const DON_ACTIVE_DECK_KEY = "custom-don-active-deck-v1";
-function getActiveDonDeck() {
+// Resolve a saved DON!! deck by id into { count, arts, nums }. Empty id (or a
+// missing/empty deck) means the standard 10-card DON!! deck.
+function resolveDonDeck(id) {
     try {
-        const id = localStorage.getItem(DON_ACTIVE_DECK_KEY) || "";
         if (!id) return { count: 10, arts: null, nums: null };
         const list = JSON.parse(localStorage.getItem(DON_DECKS_KEY) || "[]");
         const deck = Array.isArray(list) ? list.find(d => d && d.id === id) : null;
@@ -136,6 +137,10 @@ function getActiveDonDeck() {
         const nums = cards.map(c => (c && c.n) ? String(c.n) : "");
         return { count: arts.length, arts, nums };
     } catch { return { count: 10, arts: null, nums: null }; }
+}
+function getActiveDonDeck() {
+    try { return resolveDonDeck(localStorage.getItem(DON_ACTIVE_DECK_KEY) || ""); }
+    catch { return { count: 10, arts: null, nums: null }; }
 }
 // Per-player DON!! limit with a sane fallback for older player objects.
 function donMaxFor(player) {
@@ -586,8 +591,20 @@ function renderOnlineGameState() {
 
     // Draw whatever the opponent has drawn. Must come after the zone renders,
     // since annotations anchor to card elements those renders rebuild.
-    const foeKey = getOwnOnlinePlayerKey() === "player1" ? "player2" : "player1";
-    window.manualPlay?.setRemoteAnnotations?.(gameState[foeKey]?.annotations || null);
+    if (isSpectator) {
+        // A spectator has no "own" side, so show BOTH players' notes/arrows
+        // (merged) as remote annotations. Notes are keyed by card instance id, so
+        // merging the two note maps is safe; arrows just concatenate.
+        const a1 = gameState.player1?.annotations || null;
+        const a2 = gameState.player2?.annotations || null;
+        window.manualPlay?.setRemoteAnnotations?.({
+            notes: { ...(a1?.notes || {}), ...(a2?.notes || {}) },
+            arrows: [ ...(a1?.arrows || []), ...(a2?.arrows || []) ]
+        });
+    } else {
+        const foeKey = getOwnOnlinePlayerKey() === "player1" ? "player2" : "player1";
+        window.manualPlay?.setRemoteAnnotations?.(gameState[foeKey]?.annotations || null);
+    }
 }
 
 function applyOnlineStateToGame() {
@@ -936,6 +953,7 @@ function renderMulliganStep(heading, body, actions) {
     const ownDone = Boolean(mulligan[playerSlot]?.done);
 
     heading.textContent = "Mulligan";
+    hideMulliganSidePreview(); // clear any stale hover preview on re-render
 
     const status = document.createElement("p");
     status.className = "setup-overlay-status";
@@ -963,7 +981,7 @@ function renderMulliganStep(heading, body, actions) {
             img.src = cardArtSrc(card);
             img.alt = String(card && card.name || "");
             img.style.cssText = "height:130px;width:auto;border-radius:7px;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.55);";
-            img.addEventListener("click", (e) => { e.stopPropagation(); window.showBigCardImage?.(img.src); });
+            attachMulliganCardPreview(img); // hover = big preview on the right; tap = full-screen
             handRow.appendChild(img);
         });
         body.appendChild(handRow);
@@ -1180,6 +1198,13 @@ function openDonMenu(anchor, player) {
         setDonSlots(player, slots);
         updateDonDisplay();
         addGameLog(`${player.name} rested all DON!!.`);
+        window.scheduleOnlineBoardSync?.();
+    });
+    addItem("Set all DON!! active", () => {
+        const slots = getDonSlots(player).map(() => "active");
+        setDonSlots(player, slots);
+        updateDonDisplay();
+        addGameLog(`${player.name} set all DON!! active.`);
         window.scheduleOnlineBoardSync?.();
     });
 
@@ -1837,7 +1862,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-11");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-12");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1884,7 +1909,11 @@ async function initializeOnlineMultiplayer() {
 // card handler runs. The sidebar log/chat and the preview panel stay usable.
 function installSpectatorInteractionGuard() {
     if (!isSpectator) return;
-    const allow = ".game-log, .card-preview-panel, .manual-sidebar, .btn-back, #onlineMatchInfo, .spectator-banner";
+    // Spectators may also open + browse the trash piles (public info) and use the
+    // pop-up viewers, so those are allowed through the action guard too.
+    const allow = ".game-log, .card-preview-panel, .manual-sidebar, .btn-back, " +
+        "#onlineMatchInfo, .spectator-banner, .trash-area, " +
+        "#deckViewerOverlay, #trashViewerOverlay, .look-top-overlay, .look-top-popup";
     const block = (event) => {
         if (event.target.closest && event.target.closest(allow)) return;
         event.stopPropagation();
@@ -1900,7 +1929,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-11");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=reveal-12");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1992,6 +2021,14 @@ function setupOnlinePresence() {
     window.addEventListener("pagehide", () => onlinePresenceTeardown?.(), { once: true });
 }
 
+// Grace period before trusting an "offline" reading. Firebase flips presence to
+// online:false for a moment on any blip - a phone locking, a tab switch, a brief
+// network stutter - which used to pop the "opponent left" banner (and sometimes
+// leave it stuck). We only warn if they STAY offline across this whole window,
+// and any online update in between cancels it. Re-checked on every presence tick.
+const OPPONENT_OFFLINE_GRACE_MS = 6000;
+let opponentOfflineTimer = null;
+
 function applyOpponentPresence(presence) {
     const opponentSlot = playerSlot === "p1" ? "p2" : "p1";
     const entry = presence[opponentSlot];
@@ -2004,8 +2041,19 @@ function applyOpponentPresence(presence) {
     const opponentOffline = entry && entry.online === false;
 
     if (opponentOffline && inProgress) {
-        showOpponentDisconnectBanner();
+        // Debounce: start the grace timer once. If the opponent comes back (any
+        // presence update where they're online), the else-branch clears it, so a
+        // transient blip never shows the banner. Only a sustained absence does.
+        if (!opponentOfflineTimer && !document.getElementById("opponentDisconnectBanner")) {
+            opponentOfflineTimer = setTimeout(() => {
+                opponentOfflineTimer = null;
+                showOpponentDisconnectBanner();
+            }, OPPONENT_OFFLINE_GRACE_MS);
+        }
     } else {
+        // Back online (or not in progress): cancel any pending warning and clear
+        // the banner immediately so it never sticks while the opponent is present.
+        if (opponentOfflineTimer) { clearTimeout(opponentOfflineTimer); opponentOfflineTimer = null; }
         hideOpponentDisconnectBanner();
     }
 }
@@ -2026,8 +2074,10 @@ function showOpponentDisconnectBanner() {
 }
 
 function hideOpponentDisconnectBanner() {
+    // Remove (not just hide) so a later disconnect can re-arm the grace timer and
+    // show it again - a lingering hidden element would block the re-show guard.
     const banner = document.getElementById("opponentDisconnectBanner");
-    if (banner) banner.classList.add("hidden");
+    if (banner) banner.remove();
 }
 
 async function handleOnlineDiceRoll() {
@@ -2261,7 +2311,12 @@ function getPracticeSnapshotDecks() {
 
         return {
             player1Deck: snapshotToDeckDefinition(payload.player, "practice-player-1"),
-            player2Deck: snapshotToDeckDefinition(payload.opponent, "practice-player-2")
+            player2Deck: snapshotToDeckDefinition(payload.opponent, "practice-player-2"),
+            // Each board's own DON!! deck id (player -> p1 seat, opponent -> p2).
+            donDeckIds: {
+                player1: (payload.donDecks && payload.donDecks.player) || "",
+                player2: (payload.donDecks && payload.donDecks.opponent) || ""
+            }
         };
     } catch (error) {
         console.warn("Could not load selected practice decks.", error);
@@ -2838,12 +2893,27 @@ async function initializeGamePage() {
         // practice you control both sides, so both use it; online, only your own
         // side does and the opponent's DON!! count comes through the synced board.
         if (!isSpectator) {
-            const activeDon = getActiveDonDeck();
-            [gameState.player1, gameState.player2].forEach(player => {
-                player.donMax = activeDon.count;
-                player.donArts = activeDon.arts;
-                player.donNums = activeDon.nums;
-            });
+            if (!isOnlineMatch) {
+                // Practice: each board uses its own chosen DON!! deck.
+                const ids = (getPracticeSnapshotDecks() || {}).donDeckIds || {};
+                const d1 = resolveDonDeck(ids.player1 || "");
+                const d2 = resolveDonDeck(ids.player2 || "");
+                gameState.player1.donMax = d1.count;
+                gameState.player1.donArts = d1.arts;
+                gameState.player1.donNums = d1.nums;
+                gameState.player2.donMax = d2.count;
+                gameState.player2.donArts = d2.arts;
+                gameState.player2.donNums = d2.nums;
+            } else {
+                // Online: apply your active DON!! deck to both; the opponent's real
+                // DON!! deck arrives through the synced board.
+                const activeDon = getActiveDonDeck();
+                [gameState.player1, gameState.player2].forEach(player => {
+                    player.donMax = activeDon.count;
+                    player.donArts = activeDon.arts;
+                    player.donNums = activeDon.nums;
+                });
+            }
 
             // Seed each seat's extra character row from the saved preference. In
             // solo you control both; online, just your own (the opponent's comes
@@ -3802,12 +3872,10 @@ function showMulliganChoice(player, playerName, callback) {
     modal.appendChild(dialog);
     document.body.appendChild(modal);
 
-    // Tap a card in the hand preview to zoom it full-screen (over this modal).
+    // Hover a card to show it big on the right (past the box); tap to zoom
+    // full-screen (for touch, which can't hover).
     dialog.querySelectorAll(".mull-card").forEach((imgEl) => {
-        imgEl.addEventListener("click", (e) => {
-            e.stopPropagation();
-            window.showBigCardImage?.(imgEl.src);
-        });
+        attachMulliganCardPreview(imgEl);
     });
     
     document.getElementById("mulliganYes").addEventListener("click", () => {
@@ -3829,15 +3897,17 @@ function showMulliganChoice(player, playerName, callback) {
         addGameLog(`${playerName} took a mulligan.`);
         renderHands();
         renderDecks();
-        
+
+        hideMulliganSidePreview();
         modal.remove();
         callback();
     });
-    
+
     document.getElementById("mulliganNo").addEventListener("click", () => {
         player.hasMulliganed = true;
         addGameLog(`${playerName} kept their hand.`);
-        
+
+        hideMulliganSidePreview();
         modal.remove();
         callback();
     });
@@ -7466,6 +7536,37 @@ function showBigCardImage(src) {
 }
 window.showBigCardImage = showBigCardImage;
 
+// Big card preview pinned to the RIGHT side of the screen (past the mulligan
+// box), shown while HOVERING a mulligan card. Non-blocking (pointer-events:none)
+// and above the setup overlay so it reads clearly without covering the buttons.
+function showMulliganSidePreview(src) {
+    if (!src) return;
+    let el = document.getElementById("mulliganSidePreview");
+    if (!el) {
+        el = document.createElement("img");
+        el.id = "mulliganSidePreview";
+        el.alt = "Card preview";
+        el.style.cssText =
+            "position:fixed;right:20px;top:50%;transform:translateY(-50%);" +
+            "height:min(80vh,660px);width:auto;max-width:40vw;object-fit:contain;" +
+            "border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.7);" +
+            "z-index:2147483001;pointer-events:none;";
+        document.body.appendChild(el);
+    }
+    el.src = src;
+    el.style.display = "block";
+}
+function hideMulliganSidePreview() {
+    const el = document.getElementById("mulliganSidePreview");
+    if (el) el.style.display = "none";
+}
+// Wire hover-to-preview (plus keep tap-to-zoom for touch) on a mulligan card img.
+function attachMulliganCardPreview(img) {
+    img.addEventListener("mouseenter", () => showMulliganSidePreview(img.src));
+    img.addEventListener("mouseleave", hideMulliganSidePreview);
+    img.addEventListener("click", (e) => { e.stopPropagation(); window.showBigCardImage?.(img.src); });
+}
+
 function clearCardPreview() {
     const previewImage = document.getElementById("previewImage");
     const previewPlaceholder = document.getElementById("previewPlaceholder");
@@ -8166,11 +8267,14 @@ function setupBoardContextMenus() {
                 });
             }
 
-            // For characters: add movement and trash options
+            // For characters: add movement and trash options. A character that
+            // leaves play must first return any attached DON!! to the active area,
+            // otherwise the DON!! rode along with the card and vanished from play.
             if (cardType === "character") {
                 options.push({
                     label: "Send to Bottom Deck",
                     action: () => confirmDeckMove("bottom", card.name, () => {
+                        detachDonToRested(player, card);
                         player.characters.splice(slotIndex, 1);
                         player.deck.unshift(card);
                         renderCharacters();
@@ -8180,6 +8284,7 @@ function setupBoardContextMenus() {
                 options.push({
                     label: "Send to Top Deck",
                     action: () => confirmDeckMove("top", card.name, () => {
+                        detachDonToRested(player, card);
                         player.characters.splice(slotIndex, 1);
                         player.deck.push(card);
                         renderCharacters();
@@ -8189,6 +8294,7 @@ function setupBoardContextMenus() {
                 options.push({
                     label: "Send to Trash",
                     action: () => {
+                        detachDonToRested(player, card);
                         player.characters.splice(slotIndex, 1);
                         player.trash.push(card);
                         renderCharacters();
@@ -10540,11 +10646,15 @@ function updateOnlinePhaseButton() {
 // clicked, then run the matching hotkey's action on that card when its key is
 // pressed. Each hotkey: { id, key, trigger:"click"|"hold", action, noteText }.
 //   action: "arrow" (start an arrow from the card), "notes" (open note dialog),
-//           "write" (write the preset noteText), "delete" (remove the note).
+//           "write" (write the preset noteText), "delete" (remove the note),
+//           "sorthand" (sort your hand — no card needed),
+//           "declare" (announce "<you> declared the effect of <card>" in chat).
 (function setupBoardHotkeys() {
     const HOTKEYS_KEY = "cc_hotkeys_v1";
     const CARD_SELECTOR = ".character-slot, .board-leader-card, .board-stage-card, .hand-card[data-card-instance-id]";
     const HOLD_MS = 300; // a "hold" hotkey fires only after the key is held this long
+    // Actions that run without a clicked card (they don't act ON a card).
+    const CARDLESS_ACTIONS = { sorthand: true };
 
     let selectedCard = null;
     const holdStarts = {}; // key -> timestamp of keydown (for hold hotkeys)
@@ -10563,20 +10673,71 @@ function updateOnlinePhaseButton() {
         if (selectedCard) selectedCard.classList.add("hotkey-target-card");
     }
 
-    function runAction(hotkey) {
-        if (!selectedCard || !document.body.contains(selectedCard)) {
-            // The board re-rendered and dropped the element; keep the reference for
-            // key computation (its data attributes still resolve) but only if it
-            // still carries an id. Otherwise nothing to act on.
-            if (!selectedCard) return;
+    // Which player is "me": my own side online, player1 in solo practice.
+    function ownPlayer() {
+        try {
+            if (isOnlineMatch && !isSpectator && typeof getOwnOnlinePlayerKey === "function") {
+                return gameState[getOwnOnlinePlayerKey()] || gameState.player1;
+            }
+        } catch (e) {}
+        return gameState.player1;
+    }
+
+    // Resolve the card object behind a clicked board/hand element, so "declare"
+    // can name it. Mirrors the zones in CARD_SELECTOR.
+    function cardFromElement(el) {
+        if (!el || typeof gameState === "undefined" || !gameState) return null;
+        const hand = el.closest?.(".hand-card[data-card-instance-id]");
+        if (hand) {
+            const id = hand.getAttribute("data-card-instance-id");
+            for (const pk of ["player1", "player2"]) {
+                const c = gameState[pk]?.hand?.find(x => x && x.instanceId === id);
+                if (c) return c;
+            }
+            return null;
         }
+        const slot = el.closest?.(".character-slot");
+        if (slot) {
+            const p = gameState[slot.getAttribute("data-player")];
+            const idx = Number(slot.getAttribute("data-slot"));
+            return p?.characters?.[idx] || null;
+        }
+        const leader = el.closest?.(".board-leader-card");
+        if (leader) return gameState[leader.getAttribute("data-player")]?.leader || null;
+        const stage = el.closest?.(".board-stage-card");
+        if (stage) return gameState[stage.getAttribute("data-player")]?.stage || null;
+        return null;
+    }
+
+    // Announce a declared effect to both players (chat online, game log solo).
+    function declareEffect(el) {
+        const card = cardFromElement(el);
+        const cardName = (card && card.name) ? card.name : "a card";
+        const who = (typeof getOwnChatName === "function") ? getOwnChatName() : (ownPlayer()?.name || "Player");
+        if (isOnlineMatch && onlineMultiplayerService && roomCode) {
+            const role = isSpectator ? "spectator" : playerSlot;
+            onlineMultiplayerService.sendChatMessage(
+                roomCode, who, `declared the effect of ${cardName}`, role
+            ).catch(() => {});
+        } else {
+            addGameLog(`${who} declared the effect of ${cardName}.`);
+        }
+    }
+
+    function runAction(hotkey) {
+        // Card-less actions run regardless of whether a card is selected.
+        if (CARDLESS_ACTIONS[hotkey.action]) {
+            if (hotkey.action === "sorthand") { sortPlayerHand(ownPlayer()); }
+            return;
+        }
+        if (!selectedCard) return;
         const mp = window.manualPlay;
-        if (!mp) return;
         switch (hotkey.action) {
-            case "arrow": mp.startArrowFromElement?.(selectedCard); break;
-            case "notes": mp.openNoteDialogForElement?.(selectedCard); break;
-            case "write": mp.writeNoteOnElement?.(selectedCard, hotkey.noteText || ""); break;
-            case "delete": mp.deleteNoteOnElement?.(selectedCard); break;
+            case "arrow": mp?.startArrowFromElement?.(selectedCard); break;
+            case "notes": mp?.openNoteDialogForElement?.(selectedCard); break;
+            case "write": mp?.writeNoteOnElement?.(selectedCard, hotkey.noteText || ""); break;
+            case "delete": mp?.deleteNoteOnElement?.(selectedCard); break;
+            case "declare": declareEffect(selectedCard); break;
         }
     }
 
@@ -10608,7 +10769,7 @@ function updateOnlinePhaseButton() {
                 handled = true;
             }
         });
-        if (handled && selectedCard) e.preventDefault();
+        if (handled) e.preventDefault();
     });
 
     document.addEventListener("keyup", (e) => {

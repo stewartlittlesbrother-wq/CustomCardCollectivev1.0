@@ -90,7 +90,12 @@ function applyCustomCollections(customList) {
     bySlug.set(slug, {
       slug,
       name: entry.name || existing.name || slug,
-      image: entry.image ?? existing.image ?? ""
+      image: entry.image ?? existing.image ?? "",
+      // Who owns this collection and which usernames may edit its cards even
+      // though they didn't create them (see isCollectionEditor).
+      ownerUid: entry.ownerUid ?? existing.ownerUid ?? "",
+      editors: Array.isArray(entry.editors) ? entry.editors
+        : (Array.isArray(existing.editors) ? existing.editors : [])
     });
   });
 
@@ -148,11 +153,18 @@ let customCollections = [];
 // Create or update a collection (name + optional cover image), then refresh the
 // picker and the collection dropdowns. Writes to the shared library so everyone
 // gets it, with a local fallback when the library is unreachable.
-async function saveCollection({ slug, name, image }) {
+async function saveCollection({ slug, name, image, editors, ownerUid }) {
+  const prior = customCollections.find(c => c.slug === String(slug || "").trim())
+    || CARD_COLLECTIONS.find(c => c.slug === String(slug || "").trim());
   const entry = {
     slug: String(slug || "").trim(),
     name: String(name || slug || "").trim(),
-    image: String(image || "")
+    image: String(image || ""),
+    // Owner is set once (on create) and preserved thereafter.
+    ownerUid: ownerUid !== undefined ? ownerUid : (prior?.ownerUid || ""),
+    // Usernames (lowercased) allowed to edit this collection's cards.
+    editors: Array.isArray(editors) ? editors
+      : (Array.isArray(prior?.editors) ? prior.editors : [])
   };
   if (!entry.slug) return;
 
@@ -1056,7 +1068,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-5")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-6")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -1564,6 +1576,24 @@ function setActiveDonDeckId(id) {
   } catch {}
 }
 
+// Per-board DON!! deck choices on the Practice board, so each of the two decks
+// can use a different DON!! deck. Keyed "player"/"opponent"; empty = fall back
+// to the globally-active DON!! deck (which keeps old behaviour for anyone who
+// hasn't picked per-board).
+const PRACTICE_DON_KEY = "custom-practice-don-decks-v1";
+function getPracticeDonDeckIds() {
+  try {
+    const o = JSON.parse(localStorage.getItem(PRACTICE_DON_KEY) || "{}") || {};
+    return { player: o.player || "", opponent: o.opponent || "" };
+  } catch { return { player: "", opponent: "" }; }
+}
+function setPracticeDonDeckId(key, id) {
+  if (key !== "player" && key !== "opponent") return;
+  const o = getPracticeDonDeckIds();
+  o[key] = id || "";
+  try { localStorage.setItem(PRACTICE_DON_KEY, JSON.stringify(o)); } catch {}
+}
+
 // ---- Hotkeys ----------------------------------------------------------
 // User-defined keyboard shortcuts for the game board. Each hotkey:
 //   { id, key, trigger:"click"|"hold", action:"arrow"|"notes"|"write"|"delete", noteText }
@@ -1575,6 +1605,8 @@ const HOTKEY_ACTIONS = [
   { value: "notes", label: "Open the notes menu" },
   { value: "write", label: "Write a note" },
   { value: "delete", label: "Delete note" },
+  { value: "sorthand", label: "Sort hand (no card needed)" },
+  { value: "declare", label: "Declare effect (announce in chat)" },
 ];
 
 function getHotkeys() {
@@ -4317,6 +4349,12 @@ function openCollectionEditor(slug = null) {
       <label>…or upload an image
         <input type="file" id="colEditImageFile" accept="image/png,image/jpeg,image/webp">
       </label>
+      <label>Allowed editors <small style="opacity:.6">(usernames, comma-separated)</small>
+        <input type="text" id="colEditEditors" placeholder="e.g. Body_Chewer, SomeoneElse" value="${escapeAttr((existing?.editors || []).join(", "))}">
+      </label>
+      <p class="collection-editor-note" style="opacity:.7;font-size:.8rem;margin:2px 0 0">
+        These users can edit the cards in this collection even if they didn't make them.
+      </p>
       <div class="collection-editor-preview" id="colEditPreview">${
         existing?.image ? `<img src="${escapeAttr(existing.image)}" alt="">` : `<span>No image</span>`
       }</div>
@@ -4362,8 +4400,16 @@ function openCollectionEditor(slug = null) {
     if (!name) { toast("Give the collection a name"); return; }
     const image = uploadedDataUrl || urlInput.value.trim() || existing?.image || "";
     const targetSlug = existing?.slug || collectionSlugFromName(name);
+    // Parse the editor usernames (lowercased, de-duped) so the owner can grant
+    // edit access to specific players.
+    const editors = [...new Set(
+      String(overlay.querySelector("#colEditEditors")?.value || "")
+        .split(",").map(s => s.trim().toLowerCase()).filter(Boolean)
+    )];
+    // Record the owner on create so only they (and their chosen editors) manage it.
+    const ownerUid = existing?.ownerUid || (window.ccAccount?.uid?.() || "");
     close();
-    await saveCollection({ slug: targetSlug, name, image });
+    await saveCollection({ slug: targetSlug, name, image, editors, ownerUid });
     toast(existing ? "Collection updated" : `Created "${name}"`);
     // Jump straight into a brand-new collection so it's obvious it worked.
     if (!existing) openCollection(targetSlug);
@@ -4385,9 +4431,10 @@ function openCardForEditing(card) {
 
   // Ownership: cards made after the accounts update can only be edited by the
   // account that made them. Cards with no owner (made before the update) stay
-  // editable by anyone so nobody is stuck with an old card they can't fix.
+  // editable by anyone so nobody is stuck with an old card they can't fix. An
+  // owner can also grant edit access to a whole collection (isCollectionEditor).
   const owner = card.ownerUid || "";
-  if (owner && owner !== window.ccAccount.uid()) {
+  if (owner && owner !== window.ccAccount.uid() && !isCollectionEditor(card.collection)) {
     toast("This card belongs to another account, so only they can edit it.");
     return;
   }
@@ -4860,6 +4907,33 @@ function cardsByCategory(category) {
 
 function getCard(id) {
   return state.cards.find(card => card.id === id);
+}
+
+// Resolve a card by its UNIQUE key (number + collection, via projectCardKey).
+// The same cardNumber can exist in several collections, so plain getCard(id)
+// (which matches on number alone) can return a DIFFERENT card than the one you
+// meant - that's what made the deck builder show the wrong card on hover/zoom.
+// Falls back to a bare-id match so old callers/data still resolve.
+function getCardByKey(key) {
+  if (!key) return undefined;
+  return state.cards.find(card => projectCardKey(card) === key)
+      || state.cards.find(card => card.id === key);
+}
+
+// Whether the signed-in account may edit cards in a collection even when it
+// doesn't own them: they're the collection's owner, or their username is in the
+// collection's editors list (set by the owner in the collection editor). Used to
+// let, e.g., Body_Chewer edit the cards inside Doomedtoxic's collections.
+function isCollectionEditor(slug) {
+  const rec = CARD_COLLECTIONS.find(c => c.slug === slug)
+    || customCollections.find(c => c.slug === slug);
+  if (!rec) return false;
+  const uid = (window.ccAccount && window.ccAccount.uid && window.ccAccount.uid()) || "";
+  if (uid && rec.ownerUid && uid === rec.ownerUid) return true;
+  const uname = String((window.ccAccount && window.ccAccount.username) || "").trim().toLowerCase();
+  if (!uname) return false;
+  const editors = Array.isArray(rec.editors) ? rec.editors.map(e => String(e).toLowerCase()) : [];
+  return editors.includes(uname);
 }
 
 function deckMainCount() {
@@ -5782,6 +5856,9 @@ function renderCardGrid() {
     const editButton = node.querySelector('[data-action="edit"]');
 
     article.dataset.id = card.id;
+    // Unique key (number + collection) so hover/preview/edit resolve to THIS
+    // exact card, not another collection's card that shares the number.
+    article.dataset.cardKey = projectCardKey(card);
     image.innerHTML = cardVisual(card);
     name.textContent = card.name;
     meta.textContent = cardMeta(card);
@@ -5907,9 +5984,17 @@ function startPractice() {
     return;
   }
 
+  // Each board can use its own DON!! deck; fall back to the globally-active one
+  // for any board the player didn't pick separately.
+  const donSel = getPracticeDonDeckIds();
+  const activeDon = getActiveDonDeckId();
   sessionStorage.setItem("custom-cards-sim-practice-decks", JSON.stringify({
     player: playerDeck,
-    opponent: opponentDeck
+    opponent: opponentDeck,
+    donDecks: {
+      player: donSel.player || activeDon,
+      opponent: donSel.opponent || activeDon
+    }
   }));
   window.location.href = "html/self.html";
   return;
@@ -6081,12 +6166,6 @@ function renderPracticeSetup() {
         ${renderPracticeDeckPicker("player", "Player 1 Board")}
         ${renderPracticeDeckPicker("opponent", "Player 2 Board")}
       </div>
-      <div class="practice-don-picker">
-        <label>
-          <span>DON!! deck</span>
-          <select data-don-deck>${renderDonDeckOptions()}</select>
-        </label>
-      </div>
       <div class="practice-setup-actions">
         <button type="button" data-start-practice ${canStart ? "" : "disabled"}>Start Game</button>
         <button class="ghost" type="button" data-open-builder>Open Deck Builder</button>
@@ -6098,8 +6177,8 @@ function renderPracticeSetup() {
 // DON!! deck <option>s for the lobby dropdowns — Standard plus every saved DON!!
 // deck, with the currently-active one selected. Selecting one sets the active
 // DON!! deck the game reads at start (no more in-game pop-up).
-function renderDonDeckOptions() {
-  const active = getActiveDonDeckId();
+function renderDonDeckOptions(selectedId) {
+  const active = selectedId !== undefined ? selectedId : getActiveDonDeckId();
   const opts = [`<option value="" ${active ? "" : "selected"}>Standard DON!! (10)</option>`];
   getDonDecks().filter(d => d && Array.isArray(d.cards) && d.cards.length).forEach(d => {
     opts.push(`<option value="${escapeAttr(d.id)}" ${d.id === active ? "selected" : ""}>${escapeHtml(d.name || "DON!! deck")} (${d.cards.length})</option>`);
@@ -6125,6 +6204,10 @@ function renderPracticeDeckPicker(key, label) {
             </option>
           `).join("")}
         </select>
+      </label>
+      <label class="practice-don-label">
+        <span>DON!! deck</span>
+        <select data-practice-don-deck="${escapeAttr(key)}">${renderDonDeckOptions(getPracticeDonDeckIds()[key] || getActiveDonDeckId())}</select>
       </label>
       <div class="practice-deck-summary">
         <div class="practice-leader-preview">${leader ? cardVisual(leader) : `<div class="empty">No leader</div>`}</div>
@@ -6610,7 +6693,9 @@ function bindEvents() {
       return;
     }
     if (!action) return;
-    const card = getCard(article.dataset.id);
+    // Prefer the tile's unique key so the RIGHT card is previewed/edited/deleted
+    // even when another collection shares this card's number.
+    const card = getCardByKey(article.dataset.cardKey) || getCard(article.dataset.id);
     if (!card) return;
     if (action === "preview" || action === "inspect") previewCard(card);
     if (action === "add") addToDeck(card.id);
@@ -6630,8 +6715,11 @@ function bindEvents() {
   // every tile without per-card listeners.
   const showHoverPreview = (article, pointerX) => {
     if (!el.builderHoverPreview || !article) return;
-    // Library tiles use data-id; deck-list rows use data-card-id.
-    const card = getCard(article.dataset.id || article.dataset.cardId);
+    // Library tiles carry a unique data-card-key (number + collection); resolve
+    // by that first so hovering shows the exact card, not a same-numbered one in
+    // another collection. Deck-list rows fall back to data-id / data-card-id.
+    const card = getCardByKey(article.dataset.cardKey)
+      || getCard(article.dataset.id || article.dataset.cardId);
     const hoverSrc = card ? preferredCardImageUrl(card) : "";
     if (!hoverSrc) { hideHoverPreview(); return; }
     el.builderHoverPreviewImg.src = hoverSrc;
@@ -6926,8 +7014,9 @@ function bindEvents() {
   });
 
   el.gameBoard.addEventListener("change", event => {
-    const donSelect = event.target.closest("[data-don-deck]");
-    if (donSelect) { setActiveDonDeckId(donSelect.value); return; }
+    // Per-board DON!! deck picker (one per deck on the practice setup).
+    const donSelect = event.target.closest("[data-practice-don-deck]");
+    if (donSelect) { setPracticeDonDeckId(donSelect.dataset.practiceDonDeck, donSelect.value); return; }
     const select = event.target.closest("[data-practice-deck]");
     if (!select) return;
     state.practiceDecks[select.dataset.practiceDeck] = select.value;

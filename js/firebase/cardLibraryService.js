@@ -441,7 +441,13 @@ export async function loadSharedCollections() {
             .map(([slug, entry]) => ({
                 slug,
                 name: entry.name || slug,
-                image: entry.image || ""
+                image: entry.image || "",
+                // Owner + per-collection editor allowlist (usernames). Firebase
+                // may return the list as an object; normalise back to an array.
+                ownerUid: entry.ownerUid || "",
+                editors: Array.isArray(entry.editors)
+                    ? entry.editors
+                    : (entry.editors && typeof entry.editors === "object" ? Object.values(entry.editors) : [])
             }));
     } catch (error) {
         console.warn("Shared collections not loaded:", error);
@@ -454,14 +460,19 @@ export async function saveSharedCollection(collection) {
     const slug = String(collection?.slug || "").trim();
     if (!slug) throw new Error("A collection needs a slug.");
 
+    const editors = Array.isArray(collection.editors)
+        ? collection.editors.map(e => String(e).trim().toLowerCase()).filter(Boolean)
+        : [];
     await update(ref(database), {
         [`${COLLECTIONS_PATH}/${slug}`]: {
             name: String(collection.name || slug),
             image: String(collection.image || ""),
+            ownerUid: String(collection.ownerUid || ""),
+            editors,
             updatedAt: serverTimestamp()
         }
     });
-    return { slug, name: collection.name || slug, image: collection.image || "" };
+    return { slug, name: collection.name || slug, image: collection.image || "", ownerUid: collection.ownerUid || "", editors };
 }
 
 export async function deleteSharedCollection(slug) {

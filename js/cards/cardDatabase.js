@@ -31,7 +31,7 @@ async function loadJson(path) {
 // dynamically. Any failure here is non-fatal: the bundled files still load.
 async function loadSharedCardsForGame(onlyNumbers) {
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-5");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-6");
         // onlyNumbers restricts the download to just the decks' cards - huge speed
         // win on mobile where the full custom library is many MB of base64 art.
         const { cards, deleted } = await library.loadSharedCards(

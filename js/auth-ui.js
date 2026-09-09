@@ -21,6 +21,7 @@
     const ccAccount = {
         user: null,
         ready: false,
+        username: "", // login username (may differ from display name); set on account change
         isSignedIn() { return Boolean(this.user); },
         uid() { return this.user ? this.user.uid : ""; },
         // Gate a "create new content" action. Returns true if allowed; otherwise
@@ -329,6 +330,12 @@
             svc.onAccountChange((account) => {
                 ccAccount.user = account;
                 ccAccount.ready = true;
+                // Fetch the login username (separate from display name) so features
+                // like collection editor-permissions can match on it synchronously.
+                ccAccount.username = "";
+                if (account) {
+                    svc.getAccountDetails().then(d => { ccAccount.username = (d && d.username) || ""; }).catch(() => {});
+                }
                 renderChip();
                 renderAccountSettings();
                 // Let app.js refresh gated UI (e.g. card edit buttons) on change.
