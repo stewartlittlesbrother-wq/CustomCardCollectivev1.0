@@ -168,16 +168,26 @@ const manualPlay = {
                 zone.style.boxShadow = "";
             });
             // Also clear top/bottom split indicators (life + deck)
-            document.querySelectorAll(".split-drop-zone").forEach(z => z.remove());
+            clearSplitDropZones();
         };
 
+        // Which pile the split indicators currently belong to. Guards against
+        // rebuilding them on every single dragover frame.
+        let splitZoneOwner = null;
+        const clearSplitDropZones = () => {
+            document.querySelectorAll(".split-drop-zone").forEach(z => z.remove());
+            splitZoneOwner = null;
+        };
         // Helper to show TOP/BOTTOM split drop indicators over a pile (life or deck)
         const showSplitDropZone = (zone) => {
-            // The two indicators are appended to <body>, so checking the ZONE for
-            // them never matched — every dragover frame appended two more, piling
-            // up thousands of fixed full-screen divs during a drag and freezing
-            // the whole board. Clear any existing ones first so at most two exist.
-            document.querySelectorAll(".split-drop-zone").forEach(z => z.remove());
+            // Only (re)build when the hovered pile changes. The indicators are
+            // appended to <body>, and the old code checked the ZONE for them — which
+            // never matched — so every dragover frame appended two MORE, piling up
+            // thousands of fixed full-screen divs and freezing the board. Now it's
+            // a no-op once shown for the current pile.
+            if (splitZoneOwner === zone && document.querySelector(".split-drop-zone")) return;
+            clearSplitDropZones();
+            splitZoneOwner = zone;
             const rect = zone.getBoundingClientRect();
 
             const topZone = document.createElement("div");
@@ -636,7 +646,7 @@ const manualPlay = {
                     showSplitDropZone(zone);
                 } else {
                     // Left a pile for another zone — clear the split indicators.
-                    document.querySelectorAll(".split-drop-zone").forEach(z => z.remove());
+                    clearSplitDropZones();
                 }
             }
         }, false);
