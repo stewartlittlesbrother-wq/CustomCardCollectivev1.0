@@ -6508,3 +6508,84 @@ html.touch-device .builder-hover-preview {
     cursor: pointer;
     accent-color: #d33;
 }
+
+/* ── Collections: hide button + Hidden strip ─────────────────────────────────
+   A little "hide" control tucks a collection into a compact Hidden strip below
+   the grid, out of the way; it can be opened from there or put back. */
+.collection-tile { position: relative; }
+.collection-hide-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, .55);
+    border: 1px solid rgba(255, 255, 255, .18);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .12s ease, background .12s ease;
+    z-index: 2;
+}
+.collection-tile:hover .collection-hide-btn,
+.collection-hide-btn:focus-visible { opacity: 1; }
+.collection-hide-btn:hover { background: rgba(0, 0, 0, .8); }
+/* Touch devices have no hover — always show it there. */
+html.touch-device .collection-hide-btn { opacity: .9; }
+
+.hidden-collections {
+    grid-column: 1 / -1;
+    margin-top: 6px;
+    padding-top: 12px;
+    border-top: 1px dashed rgba(255, 255, 255, .18);
+}
+.hidden-collections-title {
+    font-size: .78rem;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--muted, #9aa3b2);
+    margin-bottom: 8px;
+}
+.hidden-collections-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.hidden-collection-chip {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, .05);
+}
+.hidden-collection-chip .hc-open {
+    padding: 6px 10px;
+    background: transparent;
+    border: none;
+    color: #dfe4ec;
+    font-weight: 700;
+    font-size: .82rem;
+    cursor: pointer;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.hidden-collection-chip .hc-open:hover { background: rgba(255, 255, 255, .08); }
+.hidden-collection-chip .hc-show {
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, .06);
+    border: none;
+    border-left: 1px solid rgba(255, 255, 255, .14);
+    color: #9fd0ff;
+    font-weight: 800;
+    cursor: pointer;
+}
+.hidden-collection-chip .hc-show:hover { background: rgba(90, 162, 255, .25); }

@@ -5872,9 +5872,25 @@ function collectionCounts() {
 }
 
 // The collection picker: one tile per group. Shown until a collection is opened.
+// Collections the user has hidden (tucked into the "Hidden" strip, out of the
+// main grid). Per-device.
+const HIDDEN_COLLECTIONS_KEY = "cc_hidden_collections";
+function getHiddenCollectionSlugs() {
+  try {
+    const a = JSON.parse(localStorage.getItem(HIDDEN_COLLECTIONS_KEY) || "[]");
+    return Array.isArray(a) ? a : [];
+  } catch { return []; }
+}
+function setCollectionHidden(slug, hidden) {
+  const set = new Set(getHiddenCollectionSlugs());
+  if (hidden) set.add(slug); else set.delete(slug);
+  try { localStorage.setItem(HIDDEN_COLLECTIONS_KEY, JSON.stringify([...set])); } catch {}
+}
+
 function renderCollectionPicker() {
   if (!el.collectionPicker) return;
   const counts = collectionCounts();
+  const hiddenSet = new Set(getHiddenCollectionSlugs());
   el.collectionPicker.innerHTML = "";
 
   // While the shared library is still downloading in the background, uploaded
@@ -5902,7 +5918,10 @@ function renderCollectionPicker() {
   omniTile.addEventListener("click", () => openCollection(ALL_ACCESS_COLLECTION));
   el.collectionPicker.appendChild(omniTile);
 
+  const hidden = [];
   CARD_COLLECTIONS.forEach(entry => {
+    if (hiddenSet.has(entry.slug)) { hidden.push(entry); return; } // tucked away below
+
     const tile = document.createElement("button");
     tile.type = "button";
     tile.className = "collection-tile" + (entry.image ? " has-art" : "");
@@ -5919,6 +5938,23 @@ function renderCollectionPicker() {
       <span class="collection-tile-count">${counts[entry.slug] || 0} cards</span>
     `;
     tile.addEventListener("click", () => openCollection(entry.slug));
+
+    // Small "hide" control in the corner — tucks this collection into the Hidden
+    // strip. It's a span (not a nested button) so it's valid inside the tile
+    // button; stopPropagation keeps the tile from opening when you hide it.
+    const hideBtn = document.createElement("span");
+    hideBtn.className = "collection-hide-btn";
+    hideBtn.title = "Hide this collection";
+    hideBtn.setAttribute("role", "button");
+    hideBtn.setAttribute("aria-label", "Hide collection");
+    hideBtn.textContent = "🙈";
+    hideBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setCollectionHidden(entry.slug, true);
+      renderCollectionPicker();
+    });
+    tile.appendChild(hideBtn);
+
     el.collectionPicker.appendChild(tile);
   });
 
@@ -5929,6 +5965,44 @@ function renderCollectionPicker() {
   addTile.innerHTML = `<span class="collection-add-plus">+</span><span class="collection-tile-name">New collection</span>`;
   addTile.addEventListener("click", () => openCollectionEditor(null));
   el.collectionPicker.appendChild(addTile);
+
+  // Hidden collections, tucked into a compact strip out of the way. Each shows a
+  // chip you can still open, plus a button to bring it back to the grid.
+  if (hidden.length) {
+    const strip = document.createElement("div");
+    strip.className = "hidden-collections";
+    const title = document.createElement("div");
+    title.className = "hidden-collections-title";
+    title.textContent = `Hidden (${hidden.length})`;
+    strip.appendChild(title);
+    const list = document.createElement("div");
+    list.className = "hidden-collections-list";
+    hidden.forEach(entry => {
+      const chip = document.createElement("div");
+      chip.className = "hidden-collection-chip";
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "hc-open";
+      open.textContent = `${entry.name} (${counts[entry.slug] || 0})`;
+      open.title = "Open this collection";
+      open.addEventListener("click", () => openCollection(entry.slug));
+      const show = document.createElement("button");
+      show.type = "button";
+      show.className = "hc-show";
+      show.title = "Unhide — put back in the grid";
+      show.setAttribute("aria-label", "Unhide collection");
+      show.textContent = "↩";
+      show.addEventListener("click", () => {
+        setCollectionHidden(entry.slug, false);
+        renderCollectionPicker();
+      });
+      chip.appendChild(open);
+      chip.appendChild(show);
+      list.appendChild(chip);
+    });
+    strip.appendChild(list);
+    el.collectionPicker.appendChild(strip);
+  }
 }
 
 function openCollection(slug) {
