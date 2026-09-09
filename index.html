@@ -25,7 +25,7 @@
   </script>
   <title>Golds Customs</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=creation-39">
+  <link rel="stylesheet" href="styles.css?v=creation-42">
 </head>
 <body>
   <div class="app-shell">
@@ -337,11 +337,12 @@
               <select id="blockFilter" aria-label="Block"><option value="">Block</option></select>
             </div>
 
-            <!-- Resize the two panes: bigger deck view, smaller card search. -->
-            <label class="builder-size-toggle" title="Give the deck more room and shrink the card search">
-              <input type="checkbox" id="deckLargeToggle">
+            <!-- Drag the bar at the top of the deck to resize it; this switch
+                 keeps that size locked in. -->
+            <label class="builder-size-toggle" title="Keep the deck-builder size you dragged to, instead of the automatic layout">
+              <input type="checkbox" id="lockDeckSizeToggle">
               <span class="builder-size-track"><span class="builder-size-thumb"></span></span>
-              <span class="builder-size-label">Bigger deck view</span>
+              <span class="builder-size-label">Lock deck size</span>
             </label>
           </aside>
 
@@ -370,6 +371,8 @@
             </section>
 
             <section class="deck-table">
+              <!-- Drag this bar up/down to resize the deck-building area. -->
+              <div class="builder-resizer" id="builderResizer" role="separator" aria-orientation="horizontal" title="Drag to resize the deck area"></div>
               <div class="deck-tabs">
                 <span class="active">Deck Builder</span>
                 <button type="button" id="savedDecksTab">Saved Decks</button>
@@ -871,12 +874,12 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=177"></script>
+  <script src="js/version.js?v=181"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=177"></script>
+  <script src="js/auth-ui.js?v=181"></script>
   <script src="js/cards/decks.js?v=creation-9"></script>
   <script src="js/manual-play.js?v=manual-20"></script>
-  <script src="app.js?v=creation-73"></script>
+  <script src="app.js?v=creation-76"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).

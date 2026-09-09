@@ -7056,21 +7056,93 @@ function bindEvents() {
     renderAll();
   });
 
-  // "Bigger deck view" switch: grows the deck pane and shrinks the card search
-  // by toggling `.deck-large` on the builder window. Remembered per device.
-  (function setupDeckLargeToggle() {
-    const box = document.getElementById("deckLargeToggle");
+  // Drag the bar at the top of the deck area to resize it; the "Lock deck size"
+  // switch keeps that size (otherwise the automatic per-width layout is used).
+  // Both the height and the locked flag are remembered per device.
+  (function setupDeckResizer() {
     const win = document.querySelector(".builder-window");
-    if (!box || !win) return;
-    let on = false;
-    try { on = localStorage.getItem("cc_builder_deck_large") === "1"; } catch (e) {}
-    box.checked = on;
-    win.classList.toggle("deck-large", on);
-    box.addEventListener("change", () => {
-      win.classList.toggle("deck-large", box.checked);
-      try { localStorage.setItem("cc_builder_deck_large", box.checked ? "1" : "0"); } catch (e) {}
-      queueDeckTableResize?.();
+    const main = document.querySelector(".builder-main");
+    const deckTable = document.querySelector(".deck-table");
+    const resizer = document.getElementById("builderResizer");
+    const lockBox = document.getElementById("lockDeckSizeToggle");
+    if (!win || !main || !deckTable || !resizer || !lockBox) return;
+
+    const H_KEY = "cc_builder_deck_h";
+    const LOCK_KEY = "cc_builder_deck_locked";
+    const SET_KEY = "cc_builder_deck_set"; // a custom size has been chosen at least once
+    let locked = false;
+    let hasSize = false;
+    let deckH = 320;
+    try { locked = localStorage.getItem(LOCK_KEY) === "1"; } catch (e) {}
+    try { hasSize = localStorage.getItem(SET_KEY) === "1"; } catch (e) {}
+    try { deckH = Number(localStorage.getItem(H_KEY)) || 320; } catch (e) {}
+
+    // `deck-sized` = a custom size has been set, so apply it (and keep it — it's
+    // saved). `size-locked` = the switch is on: the drag handle is disabled so the
+    // size can't be changed until you unlock. Everything persists across sessions.
+    const applyVar = () => win.style.setProperty("--builder-deck-h", `${deckH}px`);
+    const refresh = () => {
+      win.classList.toggle("deck-sized", hasSize);
+      win.classList.toggle("size-locked", locked);
+      lockBox.checked = locked;
+    };
+    applyVar();
+    refresh();
+
+    const save = () => {
+      try {
+        localStorage.setItem(H_KEY, String(deckH));
+        localStorage.setItem(LOCK_KEY, locked ? "1" : "0");
+        localStorage.setItem(SET_KEY, hasSize ? "1" : "0");
+      } catch (e) {}
+    };
+
+    // The Lock switch only enables/disables dragging — it never changes the size.
+    lockBox.addEventListener("change", () => {
+      locked = lockBox.checked;
+      refresh();
+      save();
     });
+
+    // Drag the resizer to set the deck height. Disabled entirely while locked
+    // (the handle also has pointer-events:none, but guard here too). Once you drag,
+    // the size is applied and saved.
+    let dragging = false;
+    const clampH = (h) => {
+      const mainH = main.getBoundingClientRect().height || 600;
+      return Math.max(90, Math.min(mainH - 90, h));
+    };
+    const onMove = (e) => {
+      if (!dragging) return;
+      if (e.cancelable) e.preventDefault();
+      const y = e.touches ? e.touches[0].clientY : e.clientY;
+      deckH = Math.round(clampH(main.getBoundingClientRect().bottom - y));
+      applyVar();
+    };
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      win.classList.remove("resizing");
+      hasSize = true;
+      save(); // remember the size across sessions
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onUp);
+      queueDeckTableResize?.();
+    };
+    const onDown = (e) => {
+      if (locked) return; // can't resize while locked
+      if (e.cancelable) e.preventDefault();
+      dragging = true;
+      win.classList.add("deck-sized", "resizing");
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      window.addEventListener("touchmove", onMove, { passive: false });
+      window.addEventListener("touchend", onUp);
+    };
+    resizer.addEventListener("mousedown", onDown);
+    resizer.addEventListener("touchstart", onDown, { passive: false });
   })();
 
   el.clearDeck.addEventListener("click", clearDeck);

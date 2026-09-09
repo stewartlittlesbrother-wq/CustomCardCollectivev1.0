@@ -6425,28 +6425,55 @@ html.touch-device .builder-hover-preview {
 .collection-panel .card-grid { overflow-y: auto; }
 #cardGrid { padding-bottom: 24px; }
 
-/* ── Deck builder: "Bigger deck view" toggle ─────────────────────────────────
-   A small switch in the filter sidebar (under the search options) that shrinks
-   the card-search pane and grows the deck-building pane. When on, the builder
-   window carries `.deck-large`, which caps the collection panel short and lets
-   the deck table take the rest. !important so it wins over the many per-width
-   `.builder-main` grid rules. */
-.builder-window.deck-large .builder-main {
-    /* Moderate: shrink the search a bit (was way too small at 22vh) and give the
-       deck the rest. */
-    grid-template-rows: minmax(150px, 32vh) minmax(0, 1fr) !important;
+/* ── Deck builder: drag-to-resize + "Lock deck size" ─────────────────────────
+   Drag the bar at the top of the deck area (.builder-resizer) to set the deck's
+   height; the card-search pane fills the rest. `.deck-sized` = a custom size has
+   been set, so use it (wins over the automatic per-width rules, hence !important).
+   `.size-locked` = the Lock switch is on: the drag handle is disabled so the size
+   can't be changed until you unlock. */
+.builder-window.deck-sized .builder-main {
+    grid-template-rows: minmax(0, 1fr) var(--builder-deck-h, 320px) !important;
 }
-/* Bump the deck cards up a size too, so the extra room shows bigger cards. */
-.builder-window.deck-large .deck-table .deck-list {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)) !important;
+/* Grab handle at the top edge of the deck area. */
+.deck-table { position: relative; }
+.builder-resizer {
+    position: absolute;
+    top: -5px;
+    left: 0;
+    right: 0;
+    height: 11px;
+    z-index: 40;
+    cursor: ns-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: none;
 }
-.builder-window.deck-large .mini-card-art { width: 106px !important; }
-.builder-window.deck-large .deck-table .deck-row { min-height: 188px !important; }
-.builder-window.deck-large .deck-table .leader-slot {
-    min-width: 142px !important;
-    min-height: 188px !important;
+.builder-resizer::before {
+    content: "";
+    width: 48px;
+    height: 4px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, .35);
+    transition: background .12s ease, width .12s ease;
 }
-.builder-window.deck-large .deck-table .qty { left: 88px !important; }
+.builder-resizer:hover::before,
+.builder-window.resizing .builder-resizer::before {
+    background: var(--accent, #e2b451);
+    width: 70px;
+}
+.builder-window.resizing { cursor: ns-resize; }
+.builder-window.resizing * { user-select: none; }
+/* Locked: the handle can't be grabbed and reads as disabled. */
+.builder-window.size-locked .builder-resizer {
+    pointer-events: none;
+    cursor: default;
+}
+.builder-window.size-locked .builder-resizer::before {
+    background: rgba(255, 255, 255, .12);
+    width: 30px;
+}
+
 .builder-size-toggle {
     display: flex;
     align-items: center;
@@ -6589,3 +6616,51 @@ html.touch-device .collection-hide-btn { opacity: .9; }
     cursor: pointer;
 }
 .hidden-collection-chip .hc-show:hover { background: rgba(90, 162, 255, .25); }
+
+/* ── Deck builder header: tighter, more room for cards ───────────────────────
+   A global `input,select{width:100%}` was stretching the "Any size" checkbox to
+   ~44px and forcing its label to wrap onto two lines, ballooning the toolbar.
+   Make the toggle a compact inline control and trim the header padding so two+
+   rows of deck cards fit on screen. */
+.deck-size-toggle {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+    font-size: .72rem;
+    font-weight: 800;
+    color: #ffdd9c;
+    cursor: pointer;
+}
+.deck-size-toggle input[type="checkbox"] {
+    width: 15px !important;
+    height: 15px !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    flex: 0 0 auto;
+    accent-color: var(--accent, #e2b451);
+    cursor: pointer;
+}
+.deck-toolbar {
+    padding: 5px 9px !important;
+    gap: 10px !important;
+}
+.deck-tabs {
+    padding: 3px 6px 0 !important;
+}
+.deck-tabs > * {
+    padding-top: 5px !important;
+    padding-bottom: 5px !important;
+}
+.deck-name-field span {
+    min-width: 0 !important;
+}
+/* Trim the big top gap above the deck rows so the first row sits higher. */
+.deck-board-scroll {
+    padding-top: 8px !important;
+}
+.deck-table .warnings:empty {
+    display: none !important;
+    margin: 0 !important;
+}
