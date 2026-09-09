@@ -1902,7 +1902,7 @@ async function deleteDonCard(cardNumber) {
   if (!card) return;
   // Reuse the standard imported-card delete (confirm + shared-library removal +
   // pool reload), then refresh the DON!! screen.
-  await deleteImportedCard(card.id);
+  await deleteImportedCard(card);
   donBuild.cards = donBuild.cards.filter(c => c.n !== cardNumber);
   renderDonCardPool();
   renderDonDeckCurrent();
@@ -4098,11 +4098,21 @@ async function importCardFromForm(event) {
   await loadCardPool();
 }
 
-async function deleteImportedCard(cardId) {
-  const card = getCard(cardId);
+async function deleteImportedCard(cardOrId) {
+  // Accept either a resolved card object (preferred — unambiguous) or an id.
+  const card = (cardOrId && typeof cardOrId === "object") ? cardOrId : getCard(cardOrId);
+  const cardId = card?.id || cardOrId;
 
   if (!card?.imported) {
     toast("Only imported cards can be deleted from here");
+    return;
+  }
+
+  // Deleting also publishes to the shared library, so it needs an account and
+  // must obey the same collection/ownership permissions as editing.
+  if (!window.ccAccount || !window.ccAccount.requireAccount("Sign in to delete cards.")) return;
+  if (!canManageCollectionCard(card)) {
+    toast("You don't have permission to delete cards in this collection.");
     return;
   }
 
@@ -4485,13 +4495,10 @@ function openCardForEditing(card) {
     return;
   }
 
-  // Ownership: cards made after the accounts update can only be edited by the
-  // account that made them. Cards with no owner (made before the update) stay
-  // editable by anyone so nobody is stuck with an old card they can't fix. An
-  // owner can also grant edit access to a whole collection (isCollectionEditor).
-  const owner = card.ownerUid || "";
-  if (owner && owner !== window.ccAccount.uid() && !isCollectionEditor(card.collection)) {
-    toast("This card belongs to another account, so only they can edit it.");
+  // Permission: honor collection-level restrictions (owner + allowed editors +
+  // admin) as well as per-card ownership. See canManageCollectionCard.
+  if (!canManageCollectionCard(card)) {
+    toast("You don't have permission to edit cards in this collection.");
     return;
   }
 
@@ -4980,9 +4987,13 @@ function getCardByKey(key) {
 // doesn't own them: they're the collection's owner, or their username is in the
 // collection's editors list (set by the owner in the collection editor). Used to
 // let, e.g., Body_Chewer edit the cards inside Doomedtoxic's collections.
+function getCollectionRecord(slug) {
+  return CARD_COLLECTIONS.find(c => c.slug === slug)
+    || customCollections.find(c => c.slug === slug) || null;
+}
+
 function isCollectionEditor(slug) {
-  const rec = CARD_COLLECTIONS.find(c => c.slug === slug)
-    || customCollections.find(c => c.slug === slug);
+  const rec = getCollectionRecord(slug);
   if (!rec) return false;
   const uid = (window.ccAccount && window.ccAccount.uid && window.ccAccount.uid()) || "";
   if (uid && rec.ownerUid && uid === rec.ownerUid) return true;
@@ -4990,6 +5001,23 @@ function isCollectionEditor(slug) {
   if (!uname) return false;
   const editors = Array.isArray(rec.editors) ? rec.editors.map(e => String(e).toLowerCase()) : [];
   return editors.includes(uname);
+}
+
+// Whether the signed-in account may EDIT or DELETE a given card, honoring
+// collection-level permissions. A collection becomes "restricted" once it has an
+// owner or a non-empty editors list; then ONLY the admin, the collection owner,
+// or a listed editor may touch ANY card in it — even ownerless/legacy cards.
+// Unrestricted collections keep the card-level rule: your own cards, or an
+// ownerless (pre-accounts) card that anyone may still fix.
+function canManageCollectionCard(card) {
+  if (isAdminAccount()) return true;
+  const rec = getCollectionRecord(card?.collection);
+  const restricted = rec && (rec.ownerUid || (Array.isArray(rec.editors) && rec.editors.length));
+  if (restricted) return isCollectionEditor(card?.collection);
+  const owner = card?.ownerUid || "";
+  if (!owner) return true; // legacy/ownerless card in an unrestricted collection
+  const uid = (window.ccAccount && window.ccAccount.uid && window.ccAccount.uid()) || "";
+  return owner === uid;
 }
 
 function deckMainCount() {
@@ -6756,7 +6784,7 @@ function bindEvents() {
     if (action === "preview" || action === "inspect") previewCard(card);
     if (action === "add") addToDeck(card.id);
     if (action === "edit") openCardForEditing(card);
-    if (action === "delete") deleteImportedCard(card.id);
+    if (action === "delete") deleteImportedCard(card);
   });
 
   el.cardGrid.addEventListener("contextmenu", event => {
