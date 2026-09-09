@@ -4319,6 +4319,10 @@ function restDonSlots(player, indices) {
 window.toggleDonSlot = toggleDonSlot;
 window.removeDonSlot = removeDonSlot;
 window.restDonSlots = restDonSlots;
+// Exposed so manual-play's DON attach flow can pull specific DON slots (active
+// OR rested) out of the pool while preserving the order of the rest.
+window.getDonSlots = getDonSlots;
+window.setDonSlots = setDonSlots;
 
 // When a card with DON!! attached leaves the field, the DON returns to the
 // player's cost area RESTED (it was already tapped to attach). Adds the freed
@@ -4949,7 +4953,11 @@ function renderDonDeck(player, areaId) {
     const handleClick = (event) => {
         event.stopPropagation();
         if (remaining > 0) {
-            player.don++;
+            // Append the new DON as active at the END of the existing order so the
+            // DON already on the field keep their current left-to-right positions
+            // (active/rested). Bumping player.don alone would make getDonSlots fall
+            // back to "all active, then all rested" and visibly regroup them.
+            setDonSlots(player, [...getDonSlots(player), "active"]);
             window.updateDonDisplay?.();
             window.renderDonDecks?.();
             window.addGameLog?.(`Added DON to field`);

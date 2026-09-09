@@ -153,7 +153,7 @@ const manualPlay = {
         // where it stalled (which zone, how many overlays / body nodes) even
         // though the console is unusable. Read it with:
         //   localStorage.getItem("cc_drag_debug")
-        window.__ccMPVer = 20; // manual-play build marker (paste window.__ccMPVer to check)
+        window.__ccMPVer = 21; // manual-play build marker (paste window.__ccMPVer to check)
         document.addEventListener("dragstart", (e) => {
             window.__ccDragActive = true;
             window.__ccDragOvers = 0;
@@ -593,11 +593,35 @@ const manualPlay = {
             }
 
             if (targetCard) {
-                // Never attach more DON than the player actually has active.
-                const amount = Math.min(selectedDonCards.length, player.don || 0);
+                // Attach EXACTLY the DON!! the player highlighted - active OR
+                // rested. Read each selected DON's slot index and pull those
+                // specific slots out of the pool (keeping the order of the rest),
+                // so rested DON can be attached too. They come back rested when the
+                // card later leaves the field, matching how attaching works on
+                // paper (a rested DON stays rested).
+                const getSlots = window.getDonSlots;
+                const setSlots = window.setDonSlots;
+                let amount = 0;
+
+                if (getSlots && setSlots) {
+                    const slots = getSlots(player);
+                    const removeSet = new Set(
+                        selectedDonCards
+                            .map(el => Number(el.dataset.donSlot))
+                            .filter(i => Number.isInteger(i) && i >= 0 && i < slots.length)
+                    );
+                    if (removeSet.size) {
+                        setSlots(player, slots.filter((_, i) => !removeSet.has(i)));
+                        amount = removeSet.size;
+                    }
+                } else {
+                    // Fallback: active-only attach if the slot helpers are missing.
+                    amount = Math.min(selectedDonCards.length, player.don || 0);
+                    if (amount > 0) player.don -= amount;
+                }
+
                 if (amount > 0) {
                     targetCard.attachedDon = (targetCard.attachedDon || 0) + amount;
-                    player.don -= amount;
                     window.updateDonDisplay?.();
                     rerender?.();
                     console.log(`✓ Attached ${amount} DON`);
