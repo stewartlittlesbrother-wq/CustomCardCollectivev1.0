@@ -6424,3 +6424,48 @@ html.touch-device .builder-hover-preview {
 .deck-table .deck-list { padding-bottom: 28px; }
 .collection-panel .card-grid { overflow-y: auto; }
 #cardGrid { padding-bottom: 24px; }
+
+/* ── Deck builder: "Bigger deck view" toggle ─────────────────────────────────
+   A small switch in the filter sidebar (under the search options) that shrinks
+   the card-search pane and grows the deck-building pane. When on, the builder
+   window carries `.deck-large`, which caps the collection panel short and lets
+   the deck table take the rest. !important so it wins over the many per-width
+   `.builder-main` grid rules. */
+.builder-window.deck-large .builder-main {
+    grid-template-rows: minmax(96px, 22vh) minmax(0, 1fr) !important;
+}
+.builder-size-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    padding: 4px 2px;
+    cursor: pointer;
+    user-select: none;
+    font-size: .78rem;
+    font-weight: 700;
+    color: var(--muted, #9aa3b2);
+}
+.builder-size-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.builder-size-track {
+    position: relative;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 18px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .18);
+    transition: background .15s ease;
+}
+.builder-size-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform .15s ease;
+}
+.builder-size-toggle input:checked + .builder-size-track { background: #d33; }
+.builder-size-toggle input:checked + .builder-size-track .builder-size-thumb { transform: translateX(16px); }
+.builder-size-toggle input:focus-visible + .builder-size-track { outline: 2px solid #5aa2ff; outline-offset: 2px; }

@@ -6953,6 +6953,23 @@ function bindEvents() {
     renderAll();
   });
 
+  // "Bigger deck view" switch: grows the deck pane and shrinks the card search
+  // by toggling `.deck-large` on the builder window. Remembered per device.
+  (function setupDeckLargeToggle() {
+    const box = document.getElementById("deckLargeToggle");
+    const win = document.querySelector(".builder-window");
+    if (!box || !win) return;
+    let on = false;
+    try { on = localStorage.getItem("cc_builder_deck_large") === "1"; } catch (e) {}
+    box.checked = on;
+    win.classList.toggle("deck-large", on);
+    box.addEventListener("change", () => {
+      win.classList.toggle("deck-large", box.checked);
+      try { localStorage.setItem("cc_builder_deck_large", box.checked ? "1" : "0"); } catch (e) {}
+      queueDeckTableResize?.();
+    });
+  })();
+
   el.clearDeck.addEventListener("click", clearDeck);
   el.clearDeckHome.addEventListener("click", clearDeck);
   el.restoreCards?.addEventListener("click", restoreCardsFromCache);
