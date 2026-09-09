@@ -166,12 +166,31 @@ const manualPlay = {
             if (window.__ccDragOvers % 15 !== 1) return;
             try {
                 const z = (e.target && e.target.closest) ? e.target.closest("[class]") : null;
+                const all = document.getElementsByTagName("*");
+                const total = all.length;
+                let top = [];
+                // Group elements by their first class name and report the biggest
+                // groups — if any is exploding during a drag, the last saved
+                // breadcrumb names it. Skip the histogram if the DOM is already huge
+                // (that count alone is the diagnosis) so we don't add load.
+                if (total < 15000) {
+                    const counts = {};
+                    for (let i = 0; i < total; i++) {
+                        const el = all[i];
+                        const cn = (el.className && el.className.baseVal !== undefined) ? el.className.baseVal : el.className;
+                        const key = (typeof cn === "string" && cn.trim()) ? cn.trim().split(/\s+/)[0] : el.tagName.toLowerCase();
+                        counts[key] = (counts[key] || 0) + 1;
+                    }
+                    top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+                }
                 localStorage.setItem("cc_drag_debug", JSON.stringify({
                     t: Date.now(),
                     dragovers: window.__ccDragOvers,
                     zone: z ? z.className : "",
-                    splitZones: document.querySelectorAll(".split-drop-zone").length,
+                    totalElements: total,
                     bodyChildren: document.body.children.length,
+                    splitZones: document.querySelectorAll(".split-drop-zone").length,
+                    topClasses: top,
                     ver: window.APP_VERSION || "?"
                 }));
             } catch (_) {}
