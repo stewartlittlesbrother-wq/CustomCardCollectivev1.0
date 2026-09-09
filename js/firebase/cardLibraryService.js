@@ -102,7 +102,56 @@ async function writeCachedCards(cards, removedKeys = []) {
     }
 }
 
+// The set of tombstoned (deleted) storage keys from the last successful sync.
+// Kept in localStorage - it's just a small list of strings - so the offline-first
+// paint (getCachedLibrary / the fast path in loadSharedCards) can hide cards that
+// were deleted on a previous visit WITHOUT first waiting on the server index.
+const LS_DELETED_KEYS = "cc-shared-deleted-keys-v1";
+
+function readCachedDeletedSet() {
+    try {
+        const arr = JSON.parse(localStorage.getItem(LS_DELETED_KEYS) || "[]");
+        return new Set(Array.isArray(arr) ? arr : []);
+    } catch {
+        return new Set();
+    }
+}
+
+function writeCachedDeletedSet(deleted) {
+    try {
+        localStorage.setItem(LS_DELETED_KEYS, JSON.stringify([...deleted]));
+    } catch (_) { /* private mode / quota - the paint just falls back to none */ }
+}
+
 // ── Public API ───────────────────────────────────────────
+
+// Instant, offline-first snapshot of the library straight from the on-device
+// IndexedDB cache - NO Firebase auth, NO network, NO waiting. Callers (the game
+// board especially) build from this first so a repeat visitor opens with zero
+// delay, then call loadSharedCards() in the BACKGROUND to reconcile any changes.
+// Shape matches loadSharedCards()'s return: { cards, deleted }.
+export async function getCachedLibrary(options = {}) {
+    const { onlyNumbers } = options;
+    const wantNums = (onlyNumbers && (onlyNumbers.size || onlyNumbers.length))
+        ? new Set([...onlyNumbers].map(n => sanitizeKeyPart(n)))
+        : null;
+    const keyNumber = key => String(key).split("__")[0];
+
+    const cached = await readCachedCards();
+    const deleted = readCachedDeletedSet();
+    const cards = cached
+        .map(card => {
+            const key = card[CACHE_KEY_PATH] || cardLibraryKey(card);
+            card.__storageKey = key;
+            return card;
+        })
+        .filter(card => {
+            const key = card.__storageKey;
+            if (deleted.has(key)) return false;
+            return !wantNums || wantNums.has(keyNumber(key));
+        });
+    return { cards, deleted };
+}
 
 // Firebase keys may not contain . # $ [ ] / (or control chars). Card numbers are
 // usually clean but not guaranteed; collection slugs are already kebab-case.
@@ -160,7 +209,6 @@ function keyInCollection(key, sanitizedCollection) {
 //                    instead of waiting for the whole download to finish.
 export async function loadSharedCards(options = {}) {
     const { getPriority, onProgress, onlyNumbers } = options;
-    await waitForUser();
 
     // onlyNumbers (a Set/array of card NUMBERS): restrict the whole operation to
     // just those cards. The game board only needs the cards in the two decks, so
@@ -173,6 +221,33 @@ export async function loadSharedCards(options = {}) {
     const keyNumber = key => String(key).split("__")[0];
     const keyWanted = key => !wantNums || wantNums.has(keyNumber(key));
 
+    // ── Instant, offline-first paint ─────────────────────────────────────────
+    // Read the on-device IndexedDB cache and hand it to the caller BEFORE we
+    // touch Firebase auth or the network. A repeat visitor sees the whole
+    // library with zero wait; the reconcile below then quietly patches whatever
+    // changed. Auth (a network round-trip) used to sit at the very top of this
+    // function and blocked even this cache read - that was the wait on every
+    // page load.
+    const cached = await readCachedCards();
+    // Key by the EXACT storage key each card was cached under (its keyPath), not
+    // a key recomputed from content - a legacy card stored at "JJK1" whose body
+    // now carries a collection would otherwise recompute to "JJK1__collection",
+    // miss its own index entry, and re-download on every single load.
+    const cachedByKey = new Map(cached.map(card => [card[CACHE_KEY_PATH] || cardLibraryKey(card), card]));
+
+    if (onProgress && cachedByKey.size) {
+        // Use the LAST-KNOWN tombstone set (persisted locally) so this first
+        // paint doesn't resurrect a card that was already deleted.
+        const knownDeleted = readCachedDeletedSet();
+        const fast = [...cachedByKey.entries()]
+            .filter(([key]) => keyWanted(key) && !knownDeleted.has(key))
+            .map(([key, card]) => { card.__storageKey = key; return card; });
+        try { onProgress({ cards: fast, deleted: knownDeleted }); } catch (_) {}
+    }
+
+    // ── Reconcile with the server (now we need auth + the tiny index) ─────────
+    await waitForUser();
+
     const indexSnapshot = await get(ref(database, INDEX_PATH));
     const index = indexSnapshot.val() || {};
     const wantedKeys = Object.keys(index);
@@ -180,14 +255,9 @@ export async function loadSharedCards(options = {}) {
     // Tombstoned entries carry `deleted: true` in the index itself, so they cost
     // no extra request and can't fail independently of the index read.
     const deleted = new Set(wantedKeys.filter(key => index[key]?.deleted === true));
+    // Persist the fresh tombstone set so the NEXT visit's instant paint is right.
+    writeCachedDeletedSet(deleted);
     const liveKeys = wantedKeys.filter(key => !deleted.has(key));
-
-    const cached = await readCachedCards();
-    // Key by the EXACT storage key each card was cached under (its keyPath), not
-    // a key recomputed from content - a legacy card stored at "JJK1" whose body
-    // now carries a collection would otherwise recompute to "JJK1__collection",
-    // miss its own index entry, and re-download on every single load.
-    const cachedByKey = new Map(cached.map(card => [card[CACHE_KEY_PATH] || cardLibraryKey(card), card]));
 
     // A card needs downloading if we've never seen it, or the server copy is
     // newer than ours. Tombstoned keys have no body to fetch.

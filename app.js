@@ -948,11 +948,18 @@ async function loadCardPool() {
       return state.cards.filter(c => (c.collection || COLLECTION_DEFAULT) === active).length;
     };
     let lastStreamCount = -1;
+    // The most recent batch painted by onProgress. The FIRST batch now comes
+    // straight from the on-device cache (offline-first), before any network - so
+    // if the server reconcile later fails, we fall back to THIS instead of
+    // wiping the pool down to the bundled cards (which would flash the cached
+    // library away on a flaky/offline connection).
+    let lastPainted = null;
     const fresh = await loadSharedCardsForPool({
       getPriority: streamPriority,
       onProgress: partial => {
         // A newer reload has superseded this one - don't paint stale batches.
         if (token !== poolLoadToken) return;
+        lastPainted = partial;
         state.cards = assembleCardPool(loadedCards, partial.cards, partial.deleted);
         const count = visibleCardCount();
         if (count === lastStreamCount) return;   // nothing new on this screen
@@ -961,10 +968,15 @@ async function loadCardPool() {
       }
     });
 
-    // If the read FAILED (offline, rules hiccup, dropped index read), keep the
-    // last good snapshot instead of wiping every shared/DON!! card. A successful
-    // read always wins - even an empty one, so real deletions still take effect.
-    const useShared = fresh.ok ? fresh : lastSharedPool;
+    // If the read FAILED (offline, rules hiccup, dropped index read), keep what
+    // we already have instead of wiping every shared/DON!! card: prefer the
+    // cache-painted batch from this load, then the last good snapshot. A
+    // successful read always wins - even an empty one, so real deletions still
+    // take effect.
+    const fallbackShared = (lastPainted && lastPainted.cards && lastPainted.cards.length)
+      ? { cards: lastPainted.cards, deleted: lastPainted.deleted || new Set(), ok: true }
+      : lastSharedPool;
+    const useShared = fresh.ok ? fresh : fallbackShared;
     lastSharedPool = useShared;
 
     // Only the most recent load writes state, so overlapping reloads can't clobber
@@ -1073,7 +1085,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-8")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-9")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
