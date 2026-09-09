@@ -428,6 +428,7 @@
                 <div class="saved-decks-header">
                   <strong>Card Creation</strong>
                   <div class="creation-header-actions">
+                    <button type="submit" form="cardCreationForm">Save Card</button>
                     <button class="red-button" type="button" id="openUntapImport">Import JSON</button>
                     <button class="ghost" type="button" id="closeCardCreation">Close</button>
                   </div>
@@ -608,7 +609,6 @@
                     <div class="import-actions">
                       <span id="creationStatus">Ready</span>
                       <button class="ghost" id="clearCreationForm" type="button">Clear</button>
-                      <button type="submit">Save Card</button>
                     </div>
                   </form>
 
@@ -616,10 +616,6 @@
                     <strong>Image Preview</strong>
                     <div id="creationImagePreview" class="creation-image-preview">
                       <span>No image yet</span>
-                    </div>
-                    <div class="creation-ai-note">
-                      <strong>Recipe filters</strong>
-                      <p>Search filters can use name, card type, color, type/subtype, cost, power, counter, life, attribute, rarity, set, and keyword. Example: <code>Where type includes "Bizarre"</code> or <code>Where cost &lt;= 3</code>.</p>
                     </div>
                   </aside>
                 </div>
@@ -874,7 +870,7 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=182"></script>
+  <script src="js/version.js?v=183"></script>
   <script src="js/rotate-prompt.js"></script>
   <script src="js/auth-ui.js?v=181"></script>
   <script src="js/cards/decks.js?v=creation-9"></script>
