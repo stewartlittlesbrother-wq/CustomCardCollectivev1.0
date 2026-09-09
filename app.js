@@ -4226,6 +4226,14 @@ async function removeCollectionEntirely(slug) {
 // ── Code-locked collection management (Settings) ─────────
 const COLLECTION_MANAGE_CODE = "5433";
 
+// The single admin account allowed to change a collection's "Allowed editors"
+// list. Matched on the signed-in account's email (case-insensitive).
+const ADMIN_EMAIL = "goldrush071710@gmail.com";
+function isAdminAccount() {
+  const email = String(window.ccAccount?.user?.email || "").trim().toLowerCase();
+  return !!email && email === ADMIN_EMAIL;
+}
+
 function populateCollectionManageSelect() {
   const select = document.getElementById("collectionManageSelect");
   if (!select) return;
@@ -4349,12 +4357,13 @@ function openCollectionEditor(slug = null) {
       <label>…or upload an image
         <input type="file" id="colEditImageFile" accept="image/png,image/jpeg,image/webp">
       </label>
+      ${isAdminAccount() ? `
       <label>Allowed editors <small style="opacity:.6">(usernames, comma-separated)</small>
         <input type="text" id="colEditEditors" placeholder="e.g. Body_Chewer, SomeoneElse" value="${escapeAttr((existing?.editors || []).join(", "))}">
       </label>
       <p class="collection-editor-note" style="opacity:.7;font-size:.8rem;margin:2px 0 0">
-        These users can edit the cards in this collection even if they didn't make them.
-      </p>
+        Admin only: these users can edit the cards in this collection even if they didn't make them.
+      </p>` : ""}
       <div class="collection-editor-preview" id="colEditPreview">${
         existing?.image ? `<img src="${escapeAttr(existing.image)}" alt="">` : `<span>No image</span>`
       }</div>
@@ -4400,12 +4409,15 @@ function openCollectionEditor(slug = null) {
     if (!name) { toast("Give the collection a name"); return; }
     const image = uploadedDataUrl || urlInput.value.trim() || existing?.image || "";
     const targetSlug = existing?.slug || collectionSlugFromName(name);
-    // Parse the editor usernames (lowercased, de-duped) so the owner can grant
-    // edit access to specific players.
-    const editors = [...new Set(
-      String(overlay.querySelector("#colEditEditors")?.value || "")
-        .split(",").map(s => s.trim().toLowerCase()).filter(Boolean)
-    )];
+    // Only the admin account may set the editors list. For everyone else, pass
+    // undefined so saveCollection preserves whatever is already there (a
+    // non-admin editing the name must never wipe the admin's editor grants).
+    const editors = isAdminAccount()
+      ? [...new Set(
+          String(overlay.querySelector("#colEditEditors")?.value || "")
+            .split(",").map(s => s.trim().toLowerCase()).filter(Boolean)
+        )]
+      : undefined;
     // Record the owner on create so only they (and their chosen editors) manage it.
     const ownerUid = existing?.ownerUid || (window.ccAccount?.uid?.() || "");
     close();
