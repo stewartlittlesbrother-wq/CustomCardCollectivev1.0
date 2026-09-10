@@ -696,6 +696,14 @@ h2 {
   padding-right: 4px;
 }
 
+/* "Bigger cards" switch (in the builder controls): widen the collection grid's
+   columns so every card renders larger. The high specificity + !important wins
+   over the many per-width `.collection-panel .card-grid` rules scattered through
+   this file, so it takes effect regardless of which layout is active. */
+.builder-window.cards-big .collection-panel .card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)) !important;
+}
+
 .card-tile {
   overflow: hidden;
   border: 1px solid var(--line);

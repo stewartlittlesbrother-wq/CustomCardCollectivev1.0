@@ -7176,6 +7176,28 @@ function bindEvents() {
     resizer.addEventListener("touchstart", onDown, { passive: false });
   })();
 
+  // "Bigger cards" switch: enlarge every card in the collection grid. Toggles a
+  // class on the builder window (the CSS widens the grid columns) and remembers
+  // the choice per device.
+  (function setupBiggerCards() {
+    const win = document.querySelector(".builder-window");
+    const box = document.getElementById("biggerCardsToggle");
+    if (!win || !box) return;
+    const KEY = "cc_builder_cards_big";
+    let big = false;
+    try { big = localStorage.getItem(KEY) === "1"; } catch (e) {}
+    const apply = () => {
+      win.classList.toggle("cards-big", big);
+      box.checked = big;
+    };
+    apply();
+    box.addEventListener("change", () => {
+      big = box.checked;
+      apply();
+      try { localStorage.setItem(KEY, big ? "1" : "0"); } catch (e) {}
+    });
+  })();
+
   el.clearDeck.addEventListener("click", clearDeck);
   el.clearDeckHome.addEventListener("click", clearDeck);
   el.restoreCards?.addEventListener("click", restoreCardsFromCache);
