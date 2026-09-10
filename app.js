@@ -1624,6 +1624,10 @@ const HOTKEY_ACTIONS = [
   { value: "delete", label: "Delete note" },
   { value: "sorthand", label: "Sort hand (no card needed)" },
   { value: "declare", label: "Declare effect (announce in chat)" },
+  // Stackable power counters: each press adjusts the selected leader/character's
+  // manual power modifier by ±1000 (press +1000 twice for +2000, etc.).
+  { value: "powerplus", label: "+1000 power (stacks)" },
+  { value: "powerminus", label: "-1000 power (stacks)" },
 ];
 
 function getHotkeys() {
@@ -4691,7 +4695,9 @@ function saveDeckToLibrary() {
   }
 
   const existed = savedDecks().some(deck => deck.name === name);
-  saveNamedDeck();
+  // saveNamedDeck() returns false only if localStorage is genuinely full - it
+  // shows its own message then, so don't also claim the save succeeded.
+  if (saveNamedDeck() === false) return;
   toast(existed ? `Overwrote "${name}"` : `Saved "${name}"`);
   renderSavedDecks();
 }
@@ -4802,7 +4808,20 @@ function saveNamedDeck() {
     startingCards: state.startingCards,
     savedAt: new Date().toISOString()
   });
-  localStorage.setItem(SAVED_DECKS_KEY, JSON.stringify(decks.slice(0, 24)));
+  // NO arbitrary cap. A saved deck is a tiny {cardId: qty} map (plus a name and
+  // two small arrays), so hundreds of them fit comfortably in localStorage. The
+  // old `slice(0, N)` silently DELETED the oldest saved deck every time you saved
+  // past the limit - that's the "making a new deck deletes an old one" bug. Keep
+  // every deck; only a real storage-quota overflow (localStorage is ~5MB) can
+  // stop a save, and a failed setItem leaves the existing list untouched, so we
+  // just tell the user instead of losing anything.
+  try {
+    localStorage.setItem(SAVED_DECKS_KEY, JSON.stringify(decks));
+    return true;
+  } catch (e) {
+    toast("Storage is full - couldn't save. Delete a deck you no longer need, then try again.");
+    return false;
+  }
 }
 
 // ── Share a deck as text ─────────────────────────────────

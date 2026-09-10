@@ -530,7 +530,13 @@ btnReady.addEventListener("click", async () => {
             id: selectedDeck.id,
             name: selectedDeck.name,
             leaderKey: selectedDeck.leaderKey,
-            deckText: selectedDeck.deckText
+            deckText: selectedDeck.deckText,
+            // Carry the deck's "start in play" placements and token types into the
+            // match, or multiplayer silently ignores them (createInitialPrivateState
+            // reads selectedDeck.startingCards/tokens). Without these two lines,
+            // cards set to start on the board only worked on the practice board.
+            startingCards: Array.isArray(selectedDeck.startingCards) ? selectedDeck.startingCards : [],
+            tokens: Array.isArray(selectedDeck.tokens) ? selectedDeck.tokens : []
         });
         await setPlayerReady(currentRoomCode, playerSlot, true);
         btnReady.textContent = "Ready ✓";

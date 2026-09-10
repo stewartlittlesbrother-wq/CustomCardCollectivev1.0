@@ -41,6 +41,24 @@ import {
 
 const auth = getAuth(app);
 
+// The name a player SET (updateDisplayName writes it to users/<uid>/profile/
+// displayName). Firebase Auth's own `displayName` is NOT reliable as the source
+// of truth: a Google sign-in re-syncs the provider profile on each login (which
+// can wipe a custom name back to the Google/email one), and the Auth profile
+// write doesn't always propagate cross-device. So we cache the DB value on auth
+// change and PREFER it in getAccount() - otherwise a saved name would keep
+// reverting to the email prefix for those users.
+let cachedProfileName = null;   // { uid, displayName } | null
+
+async function loadProfileName(uid) {
+    try {
+        const snap = await get(ref(database, `users/${uid}/profile/displayName`));
+        return snap.exists() ? String(snap.val() || "").trim() : "";
+    } catch (_) {
+        return "";
+    }
+}
+
 // Username/password accounts map a username onto a synthetic email, because
 // Firebase Email/Password auth keys on email. The user never sees this address.
 const USERNAME_EMAIL_DOMAIN = "cc-users.web.app";
@@ -73,9 +91,15 @@ export function getAccount() {
         [u.email, ...((u.providerData || []).map(p => p && p.email))]
             .filter(Boolean).map(e => String(e).toLowerCase())
     )];
+    // Prefer the name the player actually SET (DB profile), then Auth's own
+    // displayName, then a last-resort email prefix. Without the DB value first,
+    // a saved name reverts to the email name whenever Auth's displayName is stale.
+    const savedName = (cachedProfileName && cachedProfileName.uid === u.uid)
+        ? cachedProfileName.displayName
+        : "";
     return {
         uid: u.uid,
-        displayName: u.displayName || (u.email ? u.email.split("@")[0] : "Player"),
+        displayName: savedName || u.displayName || (u.email ? u.email.split("@")[0] : "Player"),
         email: u.email || "",
         emails,
         photoURL: u.photoURL || "",
@@ -83,9 +107,24 @@ export function getAccount() {
     };
 }
 
-// Fire `cb(account|null)` now and whenever sign-in state changes.
+// Fire `cb(account|null)` now and whenever sign-in state changes. When signed
+// in, the player's SAVED name lives in the DB profile, so fetch it and - if it
+// differs from what Auth reported - fire once more with the corrected account.
 export function onAccountChange(cb) {
-    return onAuthStateChanged(auth, () => cb(getAccount()));
+    return onAuthStateChanged(auth, async () => {
+        const account = getAccount();
+        cb(account);
+        if (!account) {
+            cachedProfileName = null;
+            return;
+        }
+        const dbName = await loadProfileName(account.uid);
+        if (dbName) {
+            const changed = dbName !== account.displayName;
+            cachedProfileName = { uid: account.uid, displayName: dbName };
+            if (changed) cb(getAccount());
+        }
+    });
 }
 
 export async function signInWithGoogle() {
@@ -154,9 +193,13 @@ export async function getAccountDetails() {
         const snap = await get(ref(database, `users/${u.uid}/profile/username`));
         if (snap.exists()) username = snap.val();
     } catch (_) {}
+    // The saved name (DB) is authoritative over Auth's own displayName, so the
+    // Settings input shows what the player actually set - not the email prefix.
+    const savedName = await loadProfileName(u.uid);
+    if (savedName) cachedProfileName = { uid: u.uid, displayName: savedName };
     return {
         uid: u.uid,
-        displayName: u.displayName || "Player",
+        displayName: savedName || u.displayName || (u.email ? u.email.split("@")[0] : "Player"),
         providers,
         hasPassword: providers.includes("password"),
         hasGoogle: providers.includes("google.com"),
@@ -173,6 +216,10 @@ export async function updateDisplayName(name) {
     if (clean.length < 1 || clean.length > 30) throw new Error("Name must be 1–30 characters.");
     await updateProfile(u, { displayName: clean });
     try { await set(ref(database, `users/${u.uid}/profile/displayName`), clean); } catch (_) {}
+    // Cache it right away so getAccount() reflects the new name immediately, even
+    // before the next auth-change fetch (and even if Auth's own displayName is
+    // later re-synced away by a provider).
+    cachedProfileName = { uid: u.uid, displayName: clean };
     return clean;
 }
 
