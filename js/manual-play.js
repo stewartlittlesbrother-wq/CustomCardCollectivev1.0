@@ -153,7 +153,7 @@ const manualPlay = {
         // where it stalled (which zone, how many overlays / body nodes) even
         // though the console is unusable. Read it with:
         //   localStorage.getItem("cc_drag_debug")
-        window.__ccMPVer = 21; // manual-play build marker (paste window.__ccMPVer to check)
+        window.__ccMPVer = 22; // manual-play build marker (paste window.__ccMPVer to check)
         document.addEventListener("dragstart", (e) => {
             window.__ccDragActive = true;
             window.__ccDragOvers = 0;
@@ -1868,6 +1868,16 @@ const manualPlay = {
             this.reapplyAnnotations();
             this.pushAnnotations();
         });
+    },
+
+    // Read the current note text on a specific card ("" if none). Lets the power
+    // hotkeys (self.js) treat the note as a running counter they can add to.
+    noteTextForElement(el) {
+        if (!el) return "";
+        const key = getAnnotationTargetKey(el);
+        if (!key) return "";
+        const note = this.state.notes[key];
+        return note ? String(note.text || "") : "";
     },
 
     // Write a preset note straight onto a specific card (no dialog).

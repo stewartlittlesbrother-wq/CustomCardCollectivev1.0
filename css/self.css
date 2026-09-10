@@ -889,48 +889,6 @@ body {
         inset 0 0 0 1px rgba(255, 214, 102, 0.4);
 }
 
-/* Stackable manual power modifier set with the +1000 / -1000 hotkeys. A pill in
-   the top-right of the leader/character. Green for a bonus, red for a penalty.
-   Non-interactive so it never blocks clicking the card. */
-.manual-power-badge {
-    position: absolute;
-    top: -12px;
-    right: -8px;
-
-    min-width: 40px;
-    padding: 4px 8px;
-
-    border: 2px solid rgba(255, 255, 255, 0.95);
-    border-radius: 999px;
-
-    color: #fff;
-    font-size: 0.72rem;
-    font-weight: 900;
-    line-height: 1;
-    text-align: center;
-
-    z-index: 30;
-    pointer-events: none;
-}
-
-.manual-power-positive {
-    background:
-        radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.30), transparent 36%),
-        linear-gradient(135deg, #14b45c 0%, #0b7a3b 100%);
-    box-shadow:
-        0 3px 10px rgba(0, 0, 0, 0.5),
-        inset 0 0 0 1px rgba(180, 255, 200, 0.5);
-}
-
-.manual-power-negative {
-    background:
-        radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.28), transparent 36%),
-        linear-gradient(135deg, #d84a49 0%, #9c1f1f 100%);
-    box-shadow:
-        0 3px 10px rgba(0, 0, 0, 0.5),
-        inset 0 0 0 1px rgba(255, 190, 190, 0.5);
-}
-
 .attached-don-empty {
     opacity: 0.58;
     background:

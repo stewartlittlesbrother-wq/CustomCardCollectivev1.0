@@ -6833,7 +6833,6 @@ function renderLeader(player, areaId) {
      leaderArea.appendChild(img);
     renderKeywordTags(player.leader, leaderArea);
     renderAttachedDonBadge(player.leader, leaderArea);
-    renderManualPowerBadge(player.leader, leaderArea);
 
     setupCardPreview();
     setupBoardLeaderSelection();
@@ -6903,7 +6902,6 @@ function renderPlayerCharacters(player, playerKey) {
         slot.appendChild(img);
         renderKeywordTags(card, slot);
         renderAttachedDonBadge(card, slot);
-        renderManualPowerBadge(card, slot);
     });
 
     setupCardPreview();
@@ -10361,28 +10359,6 @@ function renderAttachedDonBadge(card, container) {
     container.appendChild(badge);
 }
 
-// The running manual power modifier set with the +1000 / -1000 hotkeys. A small
-// coloured pill on the leader/character showing the current total (e.g. "+2000"
-// or "-3000"). Non-interactive so it never blocks selecting the card; the value
-// is changed with the hotkeys and syncs to the opponent (manualPower rides on the
-// card object through stripCardForSync). Hidden at 0.
-function renderManualPowerBadge(card, container) {
-    if (!card || !container) return;
-
-    const mod = Number(card.manualPower || 0);
-    if (!mod) return;
-
-    const sign = mod > 0 ? "+" : "";
-    const badge = document.createElement("div");
-    badge.className = mod > 0
-        ? "manual-power-badge manual-power-positive"
-        : "manual-power-badge manual-power-negative";
-    badge.textContent = `${sign}${mod}`;
-    badge.title = `Manual power modifier: ${sign}${mod}. Change it with your +1000 / -1000 hotkeys.`;
-
-    container.appendChild(badge);
-}
-
 function getCurrentAttackTargetPowerBonus(boardCardData) {
     if (!currentAttack || !boardCardData) {
         return 0;
@@ -10768,45 +10744,35 @@ function updateOnlinePhaseButton() {
         }
     }
 
-    // Resolve the leader/character behind the selected element AND a way to find
-    // its freshly-rendered element again. The +1000/-1000 hotkeys re-render the
-    // board (which replaces the card's <img>), so to STACK on repeated presses we
-    // must re-select the new element each time - otherwise the second press would
-    // be acting on a detached, unresolvable element.
-    function locatePowerTarget(el) {
-        if (!el || typeof el.closest !== "function" || typeof gameState === "undefined" || !gameState) return null;
-        const slot = el.closest(".character-slot");
-        if (slot) {
-            const pk = slot.getAttribute("data-player");
-            const idx = Number(slot.getAttribute("data-slot"));
-            const card = gameState[pk]?.characters?.[idx];
-            if (!card) return null;
-            return { card, requery: () => document.querySelector(`.board-character-card[data-player="${pk}"][data-character-slot="${idx}"]`) };
-        }
-        const leader = el.closest(".board-leader-card");
-        if (leader) {
-            const pk = leader.getAttribute("data-player");
-            const card = gameState[pk]?.leader;
-            if (!card) return null;
-            return { card, requery: () => document.querySelector(`.board-leader-card[data-player="${pk}"]`) };
-        }
-        return null;  // stage / hand carry no power - ignore
+    // Is this a power-bearing board card (leader or character)? The +1000/-1000
+    // hotkeys only make sense there, not on the stage or a hand card.
+    function isPowerCard(el) {
+        return Boolean(el && typeof el.closest === "function" &&
+            (el.closest(".character-slot") || el.closest(".board-leader-card")));
     }
 
-    // Nudge the selected leader/character's manual power modifier by ±1000. Presses
-    // stack (+1000, +2000, …). A value of 0 drops the property so no badge shows.
+    // Pull the current running total out of the card's note text (a leading signed
+    // number, e.g. "+2000" -> 2000). The note IS the counter, so clearing the note
+    // resets it - exactly like the other note hotkeys.
+    function powerFromNote(text) {
+        const m = String(text || "").match(/-?\d+/);
+        return m ? Number(m[0]) : 0;
+    }
+
+    // Adjust the selected leader/character's power by ±1000 and show it as a NOTE
+    // (the same colored note the other hotkeys write), stacking on repeated
+    // presses: +1000, +2000, … / -1000, -2000, … A total of 0 clears the note.
     function adjustManualPower(delta) {
-        const target = locatePowerTarget(selectedCard);
-        if (!target) return;
-        const next = (Number(target.card.manualPower) || 0) + delta;
-        if (next === 0) delete target.card.manualPower;
-        else target.card.manualPower = next;
-        renderLeaders();
-        renderCharacters();
-        // Re-select the newly rendered element so the NEXT press stacks on it.
-        const fresh = target.requery();
-        if (fresh) setSelectedCard(fresh);
-        window.scheduleOnlineBoardSync?.();
+        if (!isPowerCard(selectedCard)) return;
+        const mp = window.manualPlay;
+        if (!mp) return;
+        const current = powerFromNote(mp.noteTextForElement?.(selectedCard));
+        const next = current + delta;
+        if (next === 0) {
+            mp.deleteNoteOnElement?.(selectedCard);
+        } else {
+            mp.writeNoteOnElement?.(selectedCard, `${next > 0 ? "+" : ""}${next}`);
+        }
     }
 
     function runAction(hotkey) {
