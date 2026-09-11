@@ -696,13 +696,6 @@ h2 {
   padding-right: 4px;
 }
 
-/* "Bigger cards" switch (in the builder controls): widen the collection grid's
-   columns so every card renders larger. The high specificity + !important wins
-   over the many per-width `.collection-panel .card-grid` rules scattered through
-   this file, so it takes effect regardless of which layout is active. */
-.builder-window.cards-big .collection-panel .card-grid {
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)) !important;
-}
 
 .card-tile {
   overflow: hidden;
@@ -2814,6 +2807,17 @@ main {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* "Bigger cards" switch (builder controls): enlarge the cards in YOUR DECK (the
+   deck list + leader slot), a modest step up - not the collection/search grid.
+   High specificity + !important so it wins over the many per-width deck-list /
+   mini-card-art rules scattered through this file, in every layout. */
+.builder-window.cards-big .deck-table .deck-list {
+  grid-template-columns: repeat(auto-fill, minmax(122px, 1fr)) !important;
+}
+.builder-window.cards-big .deck-table .mini-card-art {
+  width: 100px !important;
 }
 
 .deck-table .qty {
