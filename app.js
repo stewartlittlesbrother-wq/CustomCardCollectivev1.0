@@ -1816,6 +1816,9 @@ const HOTKEY_ACTIONS = [
   // manual power modifier by ±1000 (press +1000 twice for +2000, etc.).
   { value: "powerplus", label: "+1000 power (stacks)" },
   { value: "powerminus", label: "-1000 power (stacks)" },
+  // Stackable cost counters, in increments of 1.
+  { value: "costplus", label: "+1 cost (stacks)" },
+  { value: "costminus", label: "-1 cost (stacks)" },
   { value: "endturn", label: "End turn (no card needed)" },
 ];
 

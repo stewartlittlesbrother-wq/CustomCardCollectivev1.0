@@ -10787,28 +10787,40 @@ function updateOnlinePhaseButton() {
             (el.closest(".character-slot") || el.closest(".board-leader-card")));
     }
 
-    // Pull the current running total out of the card's note text (a leading signed
-    // number, e.g. "+2000" -> 2000). The note IS the counter, so clearing the note
-    // resets it - exactly like the other note hotkeys.
-    function powerFromNote(text) {
-        const m = String(text || "").match(/-?\d+/);
-        return m ? Number(m[0]) : 0;
+    // The card's NOTE doubles as the running counter for BOTH the power (±1000)
+    // and cost (±1) hotkeys, so the two stack independently on the same card. The
+    // note holds a power line ("+2000") and/or a cost line ("Cost -1"); clearing
+    // the note resets both - exactly like the other note hotkeys.
+    function parseNoteMods(text) {
+        let power = 0, cost = 0;
+        String(text || "").split(/\n+/).forEach(line => {
+            const t = line.trim();
+            const costM = t.match(/cost\s*([+-]?\d+)/i);
+            if (costM) { cost = Number(costM[1]) || 0; return; }
+            const powM = t.match(/^([+-]?\d+)$/);
+            if (powM) power = Number(powM[1]) || 0;
+        });
+        return { power, cost };
+    }
+    function formatNoteMods(power, cost) {
+        const parts = [];
+        if (power) parts.push(`${power > 0 ? "+" : ""}${power}`);
+        if (cost) parts.push(`Cost ${cost > 0 ? "+" : ""}${cost}`);
+        return parts.join("\n");
     }
 
-    // Adjust the selected leader/character's power by ±1000 and show it as a NOTE
-    // (the same colored note the other hotkeys write), stacking on repeated
-    // presses: +1000, +2000, … / -1000, -2000, … A total of 0 clears the note.
-    function adjustManualPower(delta) {
+    // Adjust the selected leader/character's power (kind "power", ±1000) or cost
+    // (kind "cost", ±1) and show it as a NOTE that stacks on repeated presses:
+    // +1000, +2000, … / Cost -1, Cost -2, … Both at 0 clears the note.
+    function adjustManualMod(kind, delta) {
         if (!isPowerCard(selectedCard)) return;
         const mp = window.manualPlay;
         if (!mp) return;
-        const current = powerFromNote(mp.noteTextForElement?.(selectedCard));
-        const next = current + delta;
-        if (next === 0) {
-            mp.deleteNoteOnElement?.(selectedCard);
-        } else {
-            mp.writeNoteOnElement?.(selectedCard, `${next > 0 ? "+" : ""}${next}`);
-        }
+        const mods = parseNoteMods(mp.noteTextForElement?.(selectedCard));
+        mods[kind] = (Number(mods[kind]) || 0) + delta;
+        const text = formatNoteMods(mods.power, mods.cost);
+        if (!text) mp.deleteNoteOnElement?.(selectedCard);
+        else mp.writeNoteOnElement?.(selectedCard, text);
     }
 
     function runAction(hotkey) {
@@ -10831,8 +10843,10 @@ function updateOnlinePhaseButton() {
             case "write": mp?.writeNoteOnElement?.(selectedCard, hotkey.noteText || ""); break;
             case "delete": mp?.deleteNoteOnElement?.(selectedCard); break;
             case "declare": declareEffect(selectedCard); break;
-            case "powerplus": adjustManualPower(1000); break;
-            case "powerminus": adjustManualPower(-1000); break;
+            case "powerplus": adjustManualMod("power", 1000); break;
+            case "powerminus": adjustManualMod("power", -1000); break;
+            case "costplus": adjustManualMod("cost", 1); break;
+            case "costminus": adjustManualMod("cost", -1); break;
         }
     }
 
