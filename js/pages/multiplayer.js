@@ -9,7 +9,7 @@ import {
     setPlayerReady,
     getMatch,
     clearMatchStartError
-} from "../firebase/multiplayerService.js?v=reveal-12";
+} from "../firebase/multiplayerService.js?v=draft-1";
 
 // ── State ────────────────────────────────────────────
 let currentUser = null;
@@ -66,6 +66,14 @@ const lobbyNameInput    = $("lobbyNameInput");
 const createDeckSelect  = $("createDeckSelect");
 const createDonDeckSelect = $("createDonDeckSelect");
 const btnConfirmCreate  = $("btnConfirmCreate");
+// Draft-mode create controls
+const mpModeToggle      = $("mpModeToggle");
+const regularOptions    = $("regularOptions");
+const draftOptions      = $("draftOptions");
+const draftCollectionSearch   = $("draftCollectionSearch");
+const draftCollectionSelectMp = $("draftCollectionSelectMp");
+let createMode = "regular";           // "regular" | "draft"
+let draftCollectionList = [];         // [{slug, name}] for the searchable dropdown
 const btnBackFromCreate = $("btnBackFromCreate");
 const mpCreateError     = $("mpCreateError");
 
@@ -471,6 +479,71 @@ codeInput.addEventListener("keydown", e => {
     if (e.key === "Enter") btnJoinCode.click();
 });
 
+// ── Draft create options: match-type toggle + searchable collection pool ─────
+// Prefer the shared catalog's display name (js/cards/cardCollections.js); fall
+// back to a prettified slug for collections not in the built-in catalog.
+function prettyCollectionName(slug) {
+    if (!slug) return "All cards";
+    const hit = (window.BUILTIN_COLLECTIONS || []).find(c => c.slug === slug);
+    if (hit && hit.name) return hit.name;
+    return String(slug).replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+function renderDraftCollectionOptions(query) {
+    if (!draftCollectionSelectMp) return;
+    const q = String(query || "").toLowerCase();
+    const items = [{ slug: "", name: "All cards" },
+        ...draftCollectionList.filter(o => o.name.toLowerCase().includes(q) || o.slug.includes(q))];
+    draftCollectionSelectMp.innerHTML = items
+        .map((o, i) => `<option value="${o.slug}"${i === 0 ? " selected" : ""}>${o.name}</option>`).join("");
+}
+async function ensureDraftCollections() {
+    if (draftCollectionList.length || !draftCollectionSelectMp) return;
+    try {
+        if (window.loadCardDatabase && (!window.cardDatabase || !Object.keys(window.cardDatabase).length)) {
+            await window.loadCardDatabase();
+        }
+    } catch (e) {}
+    const packable = (c) => c && !c.donCard && !c.omniLeader
+        && String(c.category || c.cardType).toLowerCase() !== "leader";
+    const slugs = new Set();
+    // Seed with the built-in catalog so the known sets always appear (the static
+    // cardDatabase cards carry no collection field — they belong to the default).
+    (window.BUILTIN_COLLECTIONS || []).forEach(c => { if (c.slug) slugs.add(c.slug); });
+    if (window.COLLECTION_DEFAULT) slugs.add(window.COLLECTION_DEFAULT);
+    Object.values(window.cardDatabase || {}).forEach(c => {
+        if (packable(c) && c.collection) slugs.add(c.collection);
+    });
+    // Also include collections from the shared card library cache, so custom
+    // collections show up in the draft pool list (not just the built-in DB).
+    try {
+        const mod = await import("../firebase/cardLibraryService.js?v=draft-1");
+        const lib = mod.getCachedLibrary ? await mod.getCachedLibrary() : null;
+        const arr = Array.isArray(lib) ? lib : (lib ? Object.values(lib) : []);
+        arr.forEach(c => { if (packable(c) && c.collection) slugs.add(c.collection); });
+    } catch (e) {}
+    // Keep the "everything-else" bucket last; sort the rest by display name.
+    draftCollectionList = [...slugs]
+        .map(s => ({ slug: s, name: prettyCollectionName(s) }))
+        .sort((a, b) => (a.slug === "everything-else") - (b.slug === "everything-else")
+            || a.name.localeCompare(b.name));
+    renderDraftCollectionOptions("");
+}
+if (mpModeToggle) {
+    mpModeToggle.addEventListener("click", (e) => {
+        const btn = e.target.closest(".mp-mode-btn");
+        if (!btn) return;
+        createMode = btn.dataset.mode === "draft" ? "draft" : "regular";
+        [...mpModeToggle.querySelectorAll(".mp-mode-btn")].forEach(b => b.classList.toggle("active", b === btn));
+        const draft = createMode === "draft";
+        if (regularOptions) regularOptions.hidden = draft;
+        if (draftOptions) draftOptions.hidden = !draft;
+        if (draft) ensureDraftCollections();
+    });
+}
+if (draftCollectionSearch) {
+    draftCollectionSearch.addEventListener("input", () => renderDraftCollectionOptions(draftCollectionSearch.value));
+}
+
 // Create room
 btnConfirmCreate.addEventListener("click", async () => {
     clearError(mpCreateError);
@@ -479,12 +552,14 @@ btnConfirmCreate.addEventListener("click", async () => {
     const nickname = getNickname() || "Player 1";
     const lobbyName = lobbyNameInput.value.trim() || nickname + "'s Game";
     const isPublic  = false; // rooms are always private, joined by code
+    const mode = createMode;
+    const draftCollection = mode === "draft" ? (draftCollectionSelectMp?.value || "") : "";
 
     btnConfirmCreate.disabled = true;
     btnConfirmCreate.textContent = "Creating…";
 
     try {
-        const created = await createRoom(currentUser, { isPublic, lobbyName, nickname });
+        const created = await createRoom(currentUser, { isPublic, lobbyName, nickname, mode, draftCollection });
         currentRoomCode = created.roomCode;
         playerSlot = "p1";
 

@@ -23,7 +23,10 @@ const CARD_FILES = [
 // Goldrush717's Bleach - see COLLECTION_DEFAULT and normalizeCard.
 // The shipped defaults. Users can add more (and override these) at runtime - see
 // loadCollections / saveCollection. The live list is CARD_COLLECTIONS below.
-const BUILTIN_COLLECTIONS = [
+// The built-in collection catalog now lives in js/cards/cardCollections.js
+// (loaded before this file) so the multiplayer draft-pool picker can share the
+// exact same list. Fall back to an inline copy if that script didn't load.
+const BUILTIN_COLLECTIONS = (typeof window !== "undefined" && window.BUILTIN_COLLECTIONS) || [
   // The full official One Piece TCG card list, pulled live from a public API and
   // hotlinked (no Firebase storage used). Read-only: not editable/deletable.
   { slug: "official-op", name: "Official One Piece TCG", official: true },
@@ -37,7 +40,7 @@ const BUILTIN_COLLECTIONS = [
   { slug: "midevilgmers-cards", name: "Midevilgmer's Cards" },
   { slug: "everything-else", name: "Everything else" }
 ];
-const COLLECTION_DEFAULT = "golds-bleach";
+const COLLECTION_DEFAULT = (typeof window !== "undefined" && window.COLLECTION_DEFAULT) || "golds-bleach";
 const CUSTOM_COLLECTIONS_KEY = "custom-card-collections-v1";
 
 // ── All-Access omni leader ───────────────────────────────
@@ -6525,6 +6528,484 @@ function observeLazyImages(root) {
   });
 }
 
+// ── Pack opener ─────────────────────────────────────────────────────────────
+// A first "open a booster" feature: 12 random cards from your pool, revealed with
+// a tap-to-open animation. Original code (not copied from any other site) so it
+// uses the sim's real cards + the lazy-image cache. A seed for the future draft
+// mode. Built entirely in JS so index.html only needs the button.
+const PACK_SIZE = 12;
+
+// Rough rarity tier from a card's rarity text, for the reveal glow.
+function packRarityClass(card) {
+  const r = String(card && card.rarity || "").toLowerCase();
+  if (/sec|secret/.test(r)) return "pack-rarity-sec";
+  if (/sr|super|special|leader/.test(r)) return "pack-rarity-sr";
+  if (/\brare\b|(^|[^a-z])r([^a-z]|$)/.test(r)) return "pack-rarity-r";
+  return "";
+}
+
+// A card that shouldn't appear in a pack: DON!! cards and LEADERS (you get a set
+// leader in draft, and leaders aren't pack pulls).
+function isPackableCard(c) {
+  return c && !c.donCard && !c.omniLeader && String(c.category || c.cardType).toLowerCase() !== "leader";
+}
+
+// Which collection packs draw from ("" = all collections). Set for draft; the
+// plain "Open a Pack" always uses all.
+let packCollectionFilter = "";
+
+// Pick N cards from the pool. Draws without repeats when the pool is big enough,
+// skips DON!! cards + leaders, and honors the chosen collection.
+function pickPackCards(n) {
+  let pool = (state.cards || []).filter(isPackableCard);
+  if (packCollectionFilter) {
+    pool = pool.filter(c => (c.collection || COLLECTION_DEFAULT) === packCollectionFilter);
+  }
+  if (!pool.length) return [];
+  const picks = [];
+  const used = new Set();
+  let guard = 0;
+  while (picks.length < n && guard++ < n * 50) {
+    const c = pool[Math.floor(Math.random() * pool.length)];
+    if (pool.length >= n && used.has(c.id)) continue;
+    used.add(c.id);
+    picks.push(c);
+  }
+  return picks;
+}
+
+let packOverlayEl = null;
+function ensurePackOverlay() {
+  if (packOverlayEl) return packOverlayEl;
+  const overlay = document.createElement("div");
+  overlay.className = "pack-overlay";
+  overlay.id = "packOverlay";
+  overlay.hidden = true;
+  overlay.innerHTML = `
+    <div class="pack-stage">
+      <button type="button" class="pack-booster" id="packBooster" aria-label="Open the pack">
+        <span class="pack-booster-foil"></span>
+        <span class="pack-booster-logo">GOLDS<br>CUSTOMS</span>
+        <span class="pack-booster-hint">Tap to open</span>
+      </button>
+      <div class="pack-reveal" hidden>
+        <div class="pack-cards" id="packCards"></div>
+        <div class="pack-actions">
+          <button type="button" class="red-button" id="packAgain">Open another</button>
+          <button type="button" class="ghost" id="packClose">Close</button>
+        </div>
+      </div>
+      <img class="pack-zoom" id="packZoom" alt="" hidden>
+    </div>`;
+  document.body.appendChild(overlay);
+  packOverlayEl = overlay;
+
+  // Close on backdrop click or the Close button; Esc too.
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closePack(); });
+  overlay.querySelector("#packClose").addEventListener("click", closePack);
+  // #packAgain uses .onclick (set by restoreNormalPackButtons / onDraftPackRevealed)
+  // so its action can switch between "open another" and the draft steps.
+  overlay.querySelector("#packAgain").onclick = () => startPackOpen();
+  overlay.querySelector("#packBooster").addEventListener("click", revealPack);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !overlay.hidden) closePack(); });
+
+  // Hover a revealed card to zoom it big (like the deck builder). Resolves the
+  // art from the cache the same way, and a token guards fast hovering.
+  const zoom = overlay.querySelector("#packZoom");
+  const cardsWrap = overlay.querySelector("#packCards");
+  let zoomToken = 0;
+  cardsWrap.addEventListener("mouseover", (e) => {
+    const tile = e.target.closest && e.target.closest(".pack-card");
+    if (!tile) return;
+    const card = currentPack[Number(tile.dataset.packIdx)];
+    if (!card) return;
+    const token = ++zoomToken;
+    resolveCardImageUrl(card).then(url => {
+      if (token !== zoomToken) return;
+      if (url) { zoom.src = url; zoom.hidden = false; }
+    });
+  });
+  cardsWrap.addEventListener("mouseout", (e) => {
+    const to = e.relatedTarget;
+    if (!to || !cardsWrap.contains(to)) { zoomToken++; zoom.hidden = true; }
+  });
+  return overlay;
+}
+
+function closePack() {
+  if (packOverlayEl) packOverlayEl.hidden = true;
+  packDraftMode = false;
+  restoreNormalPackButtons();
+}
+
+// Put the pack overlay's buttons back to the plain "Open another / Close" mode
+// after a draft used them for "Open next pack / Cancel draft".
+function restoreNormalPackButtons() {
+  if (!packOverlayEl) return;
+  const again = packOverlayEl.querySelector("#packAgain");
+  const close = packOverlayEl.querySelector("#packClose");
+  if (again) { again.hidden = false; again.textContent = "Open another"; again.onclick = () => startPackOpen(); }
+  if (close) close.textContent = "Close";
+}
+
+let currentPack = [];
+// Show the overlay with a fresh, unopened booster (plain pack opener).
+function openPack() {
+  if (!state.cards || !state.cards.length) { toast("Cards are still loading — try again in a moment."); return; }
+  packDraftMode = false;
+  packCollectionFilter = "";   // plain pack: any collection
+  const overlay = ensurePackOverlay();
+  restoreNormalPackButtons();
+  startPackOpen();
+  overlay.hidden = false;
+}
+
+// Reset to the unopened-booster state and draw a new pack.
+function startPackOpen() {
+  const overlay = ensurePackOverlay();
+  currentPack = pickPackCards(PACK_SIZE);
+  const booster = overlay.querySelector("#packBooster");
+  const reveal = overlay.querySelector(".pack-reveal");
+  const cards = overlay.querySelector("#packCards");
+  cards.innerHTML = "";
+  reveal.hidden = true;
+  booster.hidden = false;
+  booster.classList.remove("pack-booster-opening");
+}
+
+// Rip the booster open and flip the cards up, staggered.
+function revealPack() {
+  const overlay = ensurePackOverlay();
+  const booster = overlay.querySelector("#packBooster");
+  const reveal = overlay.querySelector(".pack-reveal");
+  const cards = overlay.querySelector("#packCards");
+  if (booster.classList.contains("pack-booster-opening")) return;
+  booster.classList.add("pack-booster-opening");
+
+  cards.innerHTML = currentPack.map((card, i) => `
+    <div class="pack-card ${packRarityClass(card)}" style="--pack-i:${i}" data-pack-idx="${i}" title="${escapeAttr(card.name)}">
+      <div class="pack-card-inner">
+        <div class="pack-card-face pack-card-back"></div>
+        <div class="pack-card-face pack-card-front">${cardVisual(card)}</div>
+      </div>
+    </div>`).join("");
+
+  // After the tear, show the cards and flip them in one by one.
+  setTimeout(() => {
+    booster.hidden = true;
+    reveal.hidden = false;
+    observeLazyImages(cards);   // load the revealed art from the cache
+    const tiles = [...cards.querySelectorAll(".pack-card")];
+    tiles.forEach((tile, i) => setTimeout(() => tile.classList.add("revealed"), 90 * i));
+    if (packDraftMode) onDraftPackRevealed();
+  }, 520);
+}
+
+// ── Solo Draft ──────────────────────────────────────────────────────────────
+// Open 10 packs, keep everything you pull, then build a deck from ONLY those
+// cards with the all-colour "Ichigo & Luffy & Naruto" leader locked in, on a
+// 15-minute timer, and play it on the practice board. (Multiplayer draft - shared
+// packs/chat/ready with a real opponent - is the next stage, built on this.)
+const DRAFT_PACKS = 10;
+const DRAFT_MINUTES = 15;
+const DRAFT_DECK_SIZE = 50;   // draft decks must be exactly 50, like a normal deck
+const OMNI_LEADER_ID = "OMNI-999";
+let packDraftMode = false;
+let draftPool = [];          // every card pulled across the 10 packs (with dupes)
+let draftPacksOpened = 0;
+let draftDeck = {};          // { cardId: qty } chosen for the deck
+let draftTimer = null;
+
+// Collections that actually have packable cards, for the pre-draft pool chooser.
+function draftCollectionOptions() {
+  const slugs = new Set();
+  (state.cards || []).forEach(c => { if (isPackableCard(c)) slugs.add(c.collection || COLLECTION_DEFAULT); });
+  return [...slugs].sort().map(slug => ({ slug, name: collectionName(slug) }));
+}
+
+// Step 1 of a draft: pick the card pool (all cards, or one collection).
+function startSoloDraft() {
+  if (!state.cards || !state.cards.length) { toast("Cards are still loading — try again in a moment."); return; }
+  const opts = draftCollectionOptions();
+  const options = `<option value="">All cards</option>` +
+    opts.map(o => `<option value="${escapeAttr(o.slug)}">${escapeHtml(o.name)}</option>`).join("");
+  let dlg = document.getElementById("draftSetup");
+  if (!dlg) {
+    dlg = document.createElement("div");
+    dlg.className = "pack-overlay";
+    dlg.id = "draftSetup";
+    document.body.appendChild(dlg);
+  }
+  dlg.innerHTML = `
+    <div class="draft-setup-box">
+      <h2>Draft — choose your pool</h2>
+      <p>You'll open ${DRAFT_PACKS} packs, then build a ${DRAFT_DECK_SIZE}-card deck.</p>
+      <label class="draft-setup-field">Card pool
+        <select id="draftCollectionSelect">${options}</select>
+      </label>
+      <div class="pack-actions">
+        <button type="button" class="red-button" id="draftSetupStart">Start draft</button>
+        <button type="button" class="ghost" id="draftSetupCancel">Cancel</button>
+      </div>
+    </div>`;
+  dlg.hidden = false;
+  dlg.querySelector("#draftSetupCancel").onclick = () => { dlg.hidden = true; };
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.hidden = true; }, { once: true });
+  dlg.querySelector("#draftSetupStart").onclick = () => {
+    const slug = dlg.querySelector("#draftCollectionSelect").value || "";
+    dlg.hidden = true;
+    beginDraft(slug);
+  };
+}
+
+// Step 2: actually start opening the 10 packs from the chosen pool.
+function beginDraft(collectionSlug) {
+  packCollectionFilter = collectionSlug || "";
+  packDraftMode = true;
+  draftPool = [];
+  draftPacksOpened = 0;
+  draftDeck = {};
+  const overlay = ensurePackOverlay();
+  startPackOpen();
+  overlay.hidden = false;
+  const again = overlay.querySelector("#packAgain");
+  const close = overlay.querySelector("#packClose");
+  again.hidden = true;                 // shown only after a pack is revealed
+  close.textContent = "Cancel draft";
+}
+
+// Called after each draft pack is revealed: bank the pulls and set up the next
+// step ("Open next pack" until 10, then "Build your deck").
+function onDraftPackRevealed() {
+  const overlay = ensurePackOverlay();
+  draftPool.push(...currentPack);
+  draftPacksOpened += 1;
+  const again = overlay.querySelector("#packAgain");
+  again.hidden = false;
+  if (draftPacksOpened >= DRAFT_PACKS) {
+    again.textContent = `Build your deck → (${draftPool.length} cards)`;
+    again.onclick = () => openDraftBuilder();
+  } else {
+    again.textContent = `Open next pack (${draftPacksOpened}/${DRAFT_PACKS})`;
+    again.onclick = () => startPackOpen();
+  }
+}
+
+// Aggregate the pool into { cardId: {card, count} } so the builder can cap copies
+// at how many you actually pulled.
+function draftPoolCounts() {
+  const map = new Map();
+  draftPool.forEach(card => {
+    const entry = map.get(card.id);
+    if (entry) entry.count += 1;
+    else map.set(card.id, { card, count: 1 });
+  });
+  return [...map.values()];
+}
+
+let draftBuilderEl = null;
+function ensureDraftBuilder() {
+  if (draftBuilderEl) return draftBuilderEl;
+  const el2 = document.createElement("div");
+  el2.className = "draft-builder";
+  el2.id = "draftBuilder";
+  el2.hidden = true;
+  el2.innerHTML = `
+    <div class="draft-top">
+      <div class="draft-leader" id="draftLeader"></div>
+      <div class="draft-info">
+        <strong>Draft — build your deck</strong>
+        <span id="draftCount">0 cards</span>
+      </div>
+      <div class="draft-timer" id="draftTimer">15:00</div>
+      <button type="button" class="red-button" id="draftReady">Ready</button>
+    </div>
+    <div class="draft-main">
+      <div class="draft-pool" id="draftPoolGrid"></div>
+      <div class="draft-decklist" id="draftDeckList"></div>
+    </div>`;
+  document.body.appendChild(el2);
+  draftBuilderEl = el2;
+  el2.querySelector("#draftReady").addEventListener("click", finishDraft);
+  // Hover-zoom in the draft builder, reusing the pack zoom preview.
+  const zoom = document.createElement("img");
+  zoom.className = "pack-zoom"; zoom.hidden = true; el2.appendChild(zoom);
+  let zt = 0;
+  el2.addEventListener("mouseover", (e) => {
+    const t = e.target.closest && e.target.closest("[data-draft-card]");
+    if (!t) return;
+    const card = getCard(t.getAttribute("data-draft-card"));
+    if (!card) return;
+    const token = ++zt;
+    resolveCardImageUrl(card).then(url => { if (token === zt && url) { zoom.src = url; zoom.hidden = false; } });
+  });
+  el2.addEventListener("mouseout", (e) => {
+    const to = e.relatedTarget;
+    if (!to || !el2.contains(to)) { zt++; zoom.hidden = true; }
+  });
+  return el2;
+}
+
+function openDraftBuilder() {
+  closePack();
+  packDraftMode = false;
+  const el2 = ensureDraftBuilder();
+  const leader = getCard(OMNI_LEADER_ID);
+  el2.querySelector("#draftLeader").innerHTML =
+    `<div class="draft-leader-art">${leader ? cardVisual(leader) : ""}</div><span>Leader: ${leader ? escapeHtml(leader.name) : "Rainbow Leader"}</span>`;
+  observeLazyImages(el2.querySelector("#draftLeader"));
+  el2.hidden = false;
+  renderDraftBuilder();
+  // 15-minute countdown; auto-finish at 0.
+  const end = Date.now() + DRAFT_MINUTES * 60 * 1000;
+  clearInterval(draftTimer);
+  draftTimer = setInterval(() => {
+    const left = Math.max(0, end - Date.now());
+    const m = Math.floor(left / 60000), s = Math.floor((left % 60000) / 1000);
+    const t = el2.querySelector("#draftTimer");
+    if (t) t.textContent = `${m}:${String(s).padStart(2, "0")}`;
+    if (left <= 0) { clearInterval(draftTimer); finishDraft(); }
+  }, 500);
+}
+
+function renderDraftBuilder() {
+  const el2 = ensureDraftBuilder();
+  const counts = draftPoolCounts();
+  const total = Object.values(draftDeck).reduce((a, b) => a + b, 0);
+  el2.querySelector("#draftCount").textContent = `${total}/${DRAFT_DECK_SIZE} cards`;
+
+  // Pool: each pulled card, with how many you've added / how many you pulled.
+  el2.querySelector("#draftPoolGrid").innerHTML = counts.map(({ card, count }) => {
+    const used = draftDeck[card.id] || 0;
+    return `<div class="draft-cell${used ? " in-deck" : ""}" data-draft-card="${escapeAttr(card.id)}" data-draft-add>
+      <div class="draft-cell-art">${cardVisual(card)}</div>
+      <span class="draft-cell-count">${used}/${count}</span>
+    </div>`;
+  }).join("") || `<div class="empty">No cards drafted.</div>`;
+
+  // Deck list: cards you've added, click to remove one.
+  const deckEntries = counts.filter(({ card }) => draftDeck[card.id]);
+  el2.querySelector("#draftDeckList").innerHTML =
+    `<div class="draft-decklist-head">Your deck (${total})</div>` +
+    (deckEntries.map(({ card }) => `
+      <div class="draft-deck-row" data-draft-card="${escapeAttr(card.id)}" data-draft-remove>
+        <div class="draft-deck-art">${cardVisual(card)}</div>
+        <span class="draft-deck-qty">x${draftDeck[card.id]}</span>
+        <span class="draft-deck-name">${escapeHtml(card.name)}</span>
+      </div>`).join("") || `<div class="empty">Click cards on the left to add them.</div>`);
+
+  observeLazyImages(el2);
+}
+
+// Update just the clicked pool cell's badge/highlight (not the whole grid, which
+// would re-fetch every image and flicker), plus the small deck list + count.
+function refreshDraftCell(id) {
+  if (!draftBuilderEl) return;
+  const cell = [...draftBuilderEl.querySelectorAll(".draft-cell")]
+    .find(c => c.getAttribute("data-draft-card") === id);
+  if (!cell) return;
+  const pulled = draftPool.filter(c => c.id === id).length;
+  const used = draftDeck[id] || 0;
+  cell.classList.toggle("in-deck", used > 0);
+  const badge = cell.querySelector(".draft-cell-count");
+  if (badge) badge.textContent = `${used}/${pulled}`;
+}
+function renderDraftDeckAndCount() {
+  if (!draftBuilderEl) return;
+  const total = Object.values(draftDeck).reduce((a, b) => a + b, 0);
+  draftBuilderEl.querySelector("#draftCount").textContent = `${total}/${DRAFT_DECK_SIZE} cards`;
+  const deckEntries = draftPoolCounts().filter(({ card }) => draftDeck[card.id]);
+  draftBuilderEl.querySelector("#draftDeckList").innerHTML =
+    `<div class="draft-decklist-head">Your deck (${total})</div>` +
+    (deckEntries.map(({ card }) => `
+      <div class="draft-deck-row" data-draft-card="${escapeAttr(card.id)}" data-draft-remove>
+        <div class="draft-deck-art">${cardVisual(card)}</div>
+        <span class="draft-deck-qty">x${draftDeck[card.id]}</span>
+        <span class="draft-deck-name">${escapeHtml(card.name)}</span>
+      </div>`).join("") || `<div class="empty">Click cards on the left to add them.</div>`);
+  observeLazyImages(draftBuilderEl.querySelector("#draftDeckList"));
+}
+
+// Delegated add/remove on the draft builder.
+document.addEventListener("click", (e) => {
+  if (!draftBuilderEl || draftBuilderEl.hidden) return;
+  const add = e.target.closest && e.target.closest("[data-draft-add]");
+  const remove = e.target.closest && e.target.closest("[data-draft-remove]");
+  if (add) {
+    const id = add.getAttribute("data-draft-card");
+    const pulled = draftPool.filter(c => c.id === id).length;
+    const total = Object.values(draftDeck).reduce((a, b) => a + b, 0);
+    if (total >= DRAFT_DECK_SIZE) { toast(`Deck is full (${DRAFT_DECK_SIZE} cards).`); return; }
+    if ((draftDeck[id] || 0) < pulled) {
+      draftDeck[id] = (draftDeck[id] || 0) + 1;
+      refreshDraftCell(id);
+      renderDraftDeckAndCount();
+    }
+    return;
+  }
+  if (remove) {
+    const id = remove.getAttribute("data-draft-card");
+    if (draftDeck[id]) {
+      draftDeck[id] -= 1;
+      if (!draftDeck[id]) delete draftDeck[id];
+      refreshDraftCell(id);
+      renderDraftDeckAndCount();
+    }
+  }
+});
+
+// A random deck map { cardId: qty } of `size` cards, max 4 of each. Draws from the
+// SAME pool the draft used (respects the chosen collection), skipping leaders/DON!!.
+function randomDeckMap(size) {
+  let pool = (state.cards || []).filter(isPackableCard);
+  if (packCollectionFilter) pool = pool.filter(c => (c.collection || COLLECTION_DEFAULT) === packCollectionFilter);
+  if (!pool.length) pool = (state.cards || []).filter(isPackableCard);
+  const map = {};
+  let total = 0, guard = 0;
+  while (total < size && guard++ < size * 80 && pool.length) {
+    const c = pool[Math.floor(Math.random() * pool.length)];
+    if ((map[c.id] || 0) >= 4) continue;
+    map[c.id] = (map[c.id] || 0) + 1;
+    total++;
+  }
+  return map;
+}
+
+// Lock in the drafted deck and drop into a practice game. Solo: the opponent you
+// also control uses the SAME leader as you (the rainbow leader) with a RANDOM
+// 50-card deck, so you don't have to build two decks.
+function finishDraft() {
+  clearInterval(draftTimer);
+  const total = Object.values(draftDeck).reduce((a, b) => a + b, 0);
+  if (total !== DRAFT_DECK_SIZE) {
+    toast(`Your deck must be exactly ${DRAFT_DECK_SIZE} cards (currently ${total}).`);
+    return;
+  }
+  const yourDeck = {
+    leaderId: OMNI_LEADER_ID,
+    name: "Draft Deck",
+    deck: { ...draftDeck },
+    tokens: [],
+    startingCards: []
+  };
+  const opponentDeck = {
+    leaderId: OMNI_LEADER_ID,
+    name: "Random Opponent",
+    deck: randomDeckMap(DRAFT_DECK_SIZE),
+    tokens: [],
+    startingCards: []
+  };
+  try {
+    sessionStorage.setItem("custom-cards-sim-practice-decks", JSON.stringify({
+      player: yourDeck,
+      opponent: opponentDeck,
+      donDecks: { player: "", opponent: "" }
+    }));
+  } catch (e) {}
+  if (draftBuilderEl) draftBuilderEl.hidden = true;
+  window.location.href = "html/self.html";
+}
+
 function tableCardVisual(card) {
   if (!card?.imageUrl) return proxyCardMarkup(card?.name || "Empty", card?.cardNumber || "", colorValue(card));
   return `
@@ -7228,6 +7709,9 @@ function bindEvents() {
   document.getElementById("multiplayerButton").addEventListener("click", () => {
     window.location.href = "html/multiplayer.html";
   });
+
+  document.getElementById("openPackBtn")?.addEventListener("click", openPack);
+  document.getElementById("draftSoloBtn")?.addEventListener("click", startSoloDraft);
 
   // Nav: Multiplayer tab -> lobby page
   document.getElementById("navMultiplayer")?.addEventListener("click", () => {

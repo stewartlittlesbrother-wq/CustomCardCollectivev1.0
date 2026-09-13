@@ -25,7 +25,7 @@
   </script>
   <title>Golds Customs</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=creation-46">
+  <link rel="stylesheet" href="styles.css?v=creation-51">
 </head>
 <body>
   <div class="app-shell">
@@ -62,6 +62,8 @@
             <button type="button" data-view="builder">Deck Builder</button>
             <button type="button" data-view="game">Practice VS Self</button>
             <button type="button" id="multiplayerButton">Multiplayer</button>
+            <button type="button" id="openPackBtn">Open a Pack</button>
+            <button type="button" id="draftSoloBtn">Draft (Solo)</button>
           </div>
 
           <div class="home-hidden-stats" aria-hidden="true">
@@ -877,12 +879,13 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=201"></script>
+  <script src="js/version.js?v=209"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=201"></script>
+  <script src="js/auth-ui.js?v=209"></script>
+  <script src="js/cards/cardCollections.js?v=draft-1"></script>
   <script src="js/cards/decks.js?v=creation-9"></script>
   <script src="js/manual-play.js?v=manual-23"></script>
-  <script src="app.js?v=creation-87"></script>
+  <script src="app.js?v=creation-93"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).

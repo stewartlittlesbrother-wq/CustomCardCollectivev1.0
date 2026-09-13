@@ -317,6 +317,42 @@
 .mp-toggle input:checked + .mp-toggle-slider::before { transform: translateX(18px); }
 .mp-toggle-hint { font-size: .75rem; color: rgba(255,255,255,.4); }
 
+/* ── Match-type toggle (Regular vs Draft) ──────────── */
+.mp-mode-toggle {
+    display: flex;
+    gap: .5rem;
+    margin-bottom: .4rem;
+}
+.mp-mode-btn {
+    flex: 1;
+    padding: .6rem .5rem;
+    border: 1px solid rgba(255,255,255,.15);
+    background: rgba(255,255,255,.05);
+    color: rgba(255,255,255,.7);
+    border-radius: 10px;
+    font-size: .85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+}
+.mp-mode-btn:hover { background: rgba(255,255,255,.1); }
+.mp-mode-btn.active {
+    background: #10b981;
+    border-color: #10b981;
+    color: #fff;
+}
+.mp-draft-collection {
+    width: 100%;
+    margin-bottom: .4rem;
+    background: rgba(0,0,0,.25);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 8px;
+    padding: .3rem;
+}
+.mp-draft-collection option { padding: .3rem .4rem; }
+#regularOptions[hidden], #draftOptions[hidden] { display: none !important; }
+
 /* ── Browser list ──────────────────────────────────── */
 .browser-list {
     display: flex;

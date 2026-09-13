@@ -8,7 +8,7 @@
     <title>Multiplayer – Golds Customs</title>
     <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
     <link rel="stylesheet" href="../css/style.css">
-    <link rel="stylesheet" href="../css/multiplayer.css?v=lobby-7">
+    <link rel="stylesheet" href="../css/multiplayer.css?v=lobby-8">
 </head>
 <body>
     <a href="../index.html" class="mp-back-link">← Back</a>
@@ -74,11 +74,28 @@
                         Rooms are private — share the room code with your opponent so they can join.
                     </p>
 
-                    <label for="createDeckSelect">Your deck</label>
-                    <select id="createDeckSelect"></select>
+                    <label>Match type</label>
+                    <div class="mp-mode-toggle" id="mpModeToggle">
+                        <button type="button" class="mp-mode-btn active" data-mode="regular">Regular Match</button>
+                        <button type="button" class="mp-mode-btn" data-mode="draft">Draft Battle</button>
+                    </div>
 
-                    <label for="createDonDeckSelect">DON!! deck</label>
-                    <select id="createDonDeckSelect" class="mp-don-select"></select>
+                    <!-- Regular-match deck pickers (hidden for a draft, which drafts a deck). -->
+                    <div id="regularOptions">
+                        <label for="createDeckSelect">Your deck</label>
+                        <select id="createDeckSelect"></select>
+
+                        <label for="createDonDeckSelect">DON!! deck</label>
+                        <select id="createDonDeckSelect" class="mp-don-select"></select>
+                    </div>
+
+                    <!-- Draft options: which card pool to draft from, with a search box. -->
+                    <div id="draftOptions" hidden>
+                        <label for="draftCollectionSearch">Draft pool</label>
+                        <input id="draftCollectionSearch" type="text" placeholder="Search collections…" autocomplete="off">
+                        <select id="draftCollectionSelectMp" size="6" class="mp-draft-collection"></select>
+                        <p class="mp-toggle-hint">Both players open 10 packs from this pool, then build a 50-card deck (15 min).</p>
+                    </div>
 
                     <button class="mp-btn-primary" id="btnConfirmCreate">Create Room</button>
                     <div id="mpCreateError" class="mp-error hidden"></div>
@@ -131,13 +148,14 @@
 
     </main>
 
+    <script src="../js/cards/cardCollections.js?v=draft-1"></script>
     <script src="../js/cards/cardDatabase.js?v=cardnum-16"></script>
     <script src="../js/cards/decks.js?v=ry-ichigo-2"></script>
     <script src="../js/core/deckParser.js?v=starting-1"></script>
-    <script type="module" src="../js/pages/multiplayer.js?v=lobby-12"></script>
+    <script type="module" src="../js/pages/multiplayer.js?v=lobby-13"></script>
   <script src="../js/rotate-prompt.js"></script>
 
-  <script src="../js/version.js?v=201"></script>
-  <script src="../js/auth-ui.js?v=201"></script>
+  <script src="../js/version.js?v=209"></script>
+  <script src="../js/auth-ui.js?v=209"></script>
 </body>
 </html>

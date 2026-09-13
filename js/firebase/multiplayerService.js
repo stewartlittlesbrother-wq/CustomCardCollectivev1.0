@@ -368,6 +368,10 @@ export async function createRoom(user, opts = {}) {
     const nickname = opts.nickname || "Player 1";
     const isPublic = Boolean(opts.isPublic);
     const lobbyName = opts.lobbyName || (nickname + "'s Game");
+    // Room mode: "regular" (default, unchanged) or "draft" (booster draft battle).
+    // draftCollection = "" for all cards, or a collection slug to draft from.
+    const mode = opts.mode === "draft" ? "draft" : "regular";
+    const draftCollection = mode === "draft" ? String(opts.draftCollection || "") : "";
 
     console.log("Generated room code:", roomCode);
 
@@ -379,6 +383,8 @@ export async function createRoom(user, opts = {}) {
         hostUid: user.uid,
         isPublic,
         lobbyName,
+        mode,
+        draftCollection,
 
         players: {
             p1: {
