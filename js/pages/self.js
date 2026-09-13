@@ -566,8 +566,17 @@ function applySpectatorPlayerState(player, playerKey, publicPlayer) {
     player.tokens = (player.tokens || []).map(face);
 }
 
+// Set while a card is mid-drag and an online state update wanted to re-render.
+// A full re-render during a drag rebuilds the hand/board and DESTROYS the element
+// being dragged - the browser then never fires `dragend`, so the page looks
+// frozen (you can't click) even though chat keeps updating. We defer the render
+// and flush it the moment the drag ends. THIS is the "freezes when I drag a card
+// in an online match" bug.
+let pendingOnlineRender = false;
 function renderOnlineGameState() {
     if (!gameState) return;
+
+    if (window.__ccDragActive) { pendingOnlineRender = true; return; }
 
     clearHandSelection();
     clearBoardSelection();
@@ -606,6 +615,21 @@ function renderOnlineGameState() {
         window.manualPlay?.setRemoteAnnotations?.(gameState[foeKey]?.annotations || null);
     }
 }
+
+// When a drag ends (dropped, or cancelled with Esc/dragend), flush any online
+// state render we deferred while it was in progress, so the board catches up with
+// whatever the opponent did during the drag. Runs on a microtask so manual-play's
+// own dragend handler has already cleared window.__ccDragActive.
+(function flushDeferredRenderOnDragEnd() {
+    const flush = () => setTimeout(() => {
+        if (pendingOnlineRender && !window.__ccDragActive) {
+            pendingOnlineRender = false;
+            renderOnlineGameState();
+        }
+    }, 0);
+    document.addEventListener("dragend", flush, true);
+    document.addEventListener("drop", flush, true);
+})();
 
 function applyOnlineStateToGame() {
     if (!isOnlineMatch || !gameState || !onlinePublicState?.player1 || !onlinePublicState?.player2) {

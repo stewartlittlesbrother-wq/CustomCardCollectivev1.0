@@ -242,13 +242,22 @@ function cardArtList(card) {
     : (card?.altArt ? [card.altArt] : []);
   return [...new Set([main, ...alts].filter(Boolean))];
 }
+// Total number of arts a card has (main + alts). Works for LIGHT pool cards too,
+// whose alt images aren't in memory - they carry `__altCount` so the alt-art
+// cycle button still appears and cycles the right number of arts.
+function cardArtCount(card) {
+  const listLen = cardArtList(card).length;
+  if (listLen > 0) return listLen;
+  const hasMain = card && (card.imageUrl || card.image || card.__cachedImg);
+  return (hasMain ? 1 : 0) + (Number(card && card.__altCount) || 0);
+}
 // The art index this player has selected for a card, clamped to what exists.
 function altArtIndexFor(card) {
   const key = card?.cardNumber || card?.id;
   if (!key) return 0;
   const raw = getAltArtPrefs()[key];
   let idx = raw === true ? 1 : (Number(raw) || 0);   // legacy boolean = first alt
-  const count = cardArtList(card).length;
+  const count = cardArtCount(card);
   if (!Number.isInteger(idx) || idx < 0 || idx >= count) idx = 0;
   return idx;
 }
@@ -259,7 +268,7 @@ function isAltArtPreferred(card) {
 function cycleAltArtPref(card) {
   const key = card?.cardNumber || card?.id;
   if (!key) return;
-  const count = cardArtList(card).length;
+  const count = cardArtCount(card);
   if (count <= 1) return;
   const prefs = getAltArtPrefs();
   const next = (altArtIndexFor(card) + 1) % count;
@@ -614,7 +623,10 @@ function normalizeCard(raw, category) {
     __storageKey: raw.__storageKey || "",
     // Set when the card's base64 art was left in the cache (not loaded into
     // memory) - the tile lazy-loads it from IndexedDB by __storageKey.
-    __cachedImg: Boolean(raw.__cachedImg)
+    __cachedImg: Boolean(raw.__cachedImg),
+    // How many alt arts the cached card has (the light pool drops the alt images
+    // themselves) - so the grid can still show the alt-art cycle button.
+    __altCount: Number(raw.__altCount) || 0
   };
 }
 
@@ -1094,7 +1106,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-10")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-11")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -4757,7 +4769,7 @@ function openCollectionEditor(slug = null) {
   overlay.querySelector("#colEditName").focus();
 }
 
-function openCardForEditing(card) {
+async function openCardForEditing(card) {
   if (!card?.imported) {
     toast("Only custom cards can be edited here");
     return;
@@ -4777,7 +4789,28 @@ function openCardForEditing(card) {
 
   initializeCardCreation();
   state.editingCardId = card.id;
-  state.creationImageData = card.imageUrl || "";
+
+  // The light pool drops base64 image + alt arts to save memory. Recover the FULL
+  // card from the cache first, so the edit form shows the real image and alts -
+  // and saving preserves them instead of writing back blanks (which would wipe the
+  // card's art). URL-image cards keep their image in the pool, so this is a no-op
+  // for them.
+  let full = card;
+  if (card.__storageKey && (card.__cachedImg || card.__altCount || !card.imageUrl)) {
+    try {
+      const library = await getCardLibrary();
+      const cached = library && library.getCachedCard ? await library.getCachedCard(card.__storageKey) : null;
+      if (cached) {
+        const alts = Array.isArray(cached.altArts) ? cached.altArts.filter(Boolean)
+          : (cached.altArts && typeof cached.altArts === "object") ? Object.values(cached.altArts).filter(Boolean)
+          : (cached.altArt ? [cached.altArt] : []);
+        full = { ...card, imageUrl: cached.image || card.imageUrl || "", altArts: alts, altArt: alts[0] || "" };
+      }
+    } catch (_) { /* fall back to the light card */ }
+  }
+
+  state.creationImageData = full.imageUrl || "";
+  card = full;   // populate the rest of the form from the recovered card
 
   if (el.creationImage) el.creationImage.value = "";
   // Rebuild the alt-art rows from this card's existing arts, each holding its
@@ -6360,13 +6393,13 @@ function renderCardGrid() {
 
     // Alt-art cycle - only shown for cards that actually have extra art.
     // Cycles which art THIS player sees/plays with (stored per device).
-    const artList = cardArtList(card);
-    if (artList.length > 1) {
+    const artCount = cardArtCount(card);
+    if (artCount > 1) {
       const idx = altArtIndexFor(card);
       const altBtn = document.createElement("button");
       altBtn.type = "button";
       altBtn.className = "card-alt-btn" + (idx > 0 ? " active" : "");
-      altBtn.textContent = `${idx > 0 ? "★" : "☆"} Art ${idx + 1}/${artList.length}`;
+      altBtn.textContent = `${idx > 0 ? "★" : "☆"} Art ${idx + 1}/${artCount}`;
       altBtn.title = "Cycle this card's artwork (default + alt arts)";
       altBtn.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -6413,6 +6446,7 @@ function cardVisual(card) {
         class="lazy-card-img"
         alt="${escapeAttr(card.name)}"
         data-lazy-key="${escapeAttr(card.__storageKey)}"
+        data-lazy-index="${altArtIndexFor(card)}"
         data-fallback-name="${escapeAttr(card.name)}"
         data-fallback-number="${escapeAttr(card.cardNumber)}"
         data-fallback-color="${escapeAttr(colorValue(card))}"
@@ -6449,7 +6483,7 @@ async function resolveCardImageUrl(card) {
   if (card && card.__storageKey) {
     try {
       const library = await getCardLibrary();
-      if (library && library.getCachedImage) return await library.getCachedImage(card.__storageKey);
+      if (library && library.getCachedArt) return await library.getCachedArt(card.__storageKey, altArtIndexFor(card));
     } catch (_) {}
   }
   return "";
@@ -6459,9 +6493,10 @@ async function loadLazyCardImage(img) {
   const key = img.getAttribute("data-lazy-key");
   if (!key || img.dataset.lazyLoaded) return;
   img.dataset.lazyLoaded = "1";
+  const index = Number(img.getAttribute("data-lazy-index")) || 0;
   try {
     const library = await getCardLibrary();
-    const url = library && library.getCachedImage ? await library.getCachedImage(key) : "";
+    const url = library && library.getCachedArt ? await library.getCachedArt(key, index) : "";
     if (url) img.src = url;
     else img.classList.add("lazy-card-img-empty");
   } catch (_) {

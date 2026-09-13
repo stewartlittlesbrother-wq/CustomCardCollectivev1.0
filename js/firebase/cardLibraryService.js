@@ -115,6 +115,10 @@ function keyNumberOf(key) {
 // base64 image lives in the cache under __storageKey, so the UI knows to lazy it.
 function lightCachedCard(card, key) {
     const dataImg = typeof card.image === "string" && card.image.startsWith("data:");
+    const rawAlts = Array.isArray(card.altArts) ? card.altArts
+        : (card.altArts && typeof card.altArts === "object") ? Object.values(card.altArts)
+        : (card.altArt ? [card.altArt] : []);
+    const altCount = rawAlts.filter(Boolean).length;   // how many alt arts (excl. main)
     const { altArts, altArt, ...rest } = card;
     return {
         ...rest,
@@ -122,7 +126,8 @@ function lightCachedCard(card, key) {
         image: dataImg ? "" : (card.image || ""),
         altArt: "",
         altArts: [],
-        __cachedImg: dataImg
+        __cachedImg: dataImg,
+        __altCount: altCount        // so the grid can still show the alt-art cycle button
     };
 }
 
@@ -153,23 +158,38 @@ function readCachedForLoad(wantNums) {
     });
 }
 
-// Fetch ONE card's artwork from the cache by its storage key. Used to lazy-load a
-// tile's image after the light pool has rendered.
-export async function getCachedImage(storageKey) {
-    if (!storageKey) return "";
+// Fetch ONE full card (with base64 art + altArts) from the cache by storage key.
+// Used to recover the heavy fields the light pool dropped - e.g. when EDITING a
+// card, so the form shows the real image + alt arts and saving preserves them.
+export async function getCachedCard(storageKey) {
+    if (!storageKey) return null;
     try {
         const db = await openCache();
         return await new Promise((resolve) => {
             const req = cacheTransaction(db, "readonly").get(storageKey);
-            req.onsuccess = () => {
-                const card = req.result;
-                resolve(card && typeof card.image === "string" ? card.image : "");
-            };
-            req.onerror = () => resolve("");
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => resolve(null);
         });
     } catch (_) {
-        return "";
+        return null;
     }
+}
+
+// Fetch ONE art of a cached card: index 0 = the main image, index N = the Nth alt
+// art. Used to lazy-load whichever art a tile is currently showing.
+export async function getCachedArt(storageKey, index = 0) {
+    const card = await getCachedCard(storageKey);
+    if (!card) return "";
+    if (!index) return typeof card.image === "string" ? card.image : "";
+    const alts = Array.isArray(card.altArts) ? card.altArts : [];
+    const art = alts[index - 1];
+    if (typeof art === "string" && art) return art;
+    return typeof card.image === "string" ? card.image : "";
+}
+
+// Fetch ONE card's MAIN artwork by storage key (lazy-load a tile's image).
+export async function getCachedImage(storageKey) {
+    return getCachedArt(storageKey, 0);
 }
 
 // The set of tombstoned (deleted) storage keys from the last successful sync.
