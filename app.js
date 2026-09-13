@@ -265,6 +265,7 @@ function cycleAltArtPref(card) {
   const next = (altArtIndexFor(card) + 1) % count;
   if (next === 0) delete prefs[key]; else prefs[key] = next;
   try { localStorage.setItem(ALT_ART_PREFS_KEY, JSON.stringify(prefs)); } catch {}
+  syncPush(ALT_ART_PREFS_KEY);
 }
 // The image a card should display for THIS player (their selected art).
 function preferredCardImageUrl(card) {
@@ -1059,6 +1060,7 @@ function dedupeImportedCards(cards) {
 function saveImportedCards(cards) {
   try {
     localStorage.setItem(CUSTOM_CARDS_KEY, JSON.stringify(cards));
+    syncPush(CUSTOM_CARDS_KEY);
     return true;
   } catch (error) {
     console.error(error);
@@ -1101,6 +1103,183 @@ function getCardLibrary() {
   }
   return cardLibraryPromise;
 }
+
+// ── Per-account cloud sync (decks / settings / local cards) ─────────────────
+// Saved decks etc. live in this device's localStorage; signing into an account
+// should carry them to your other devices. On sign-in we PULL the account's data,
+// MERGE it with what's local (lossless: union by name/key, newer wins - never
+// deletes a one-device deck), write the result back, and PUSH the merge up so all
+// devices converge. Afterwards each save pushes just that key. See userDataSync.js.
+let userSyncPromise = null;
+function getUserSync() {
+  if (!userSyncPromise) {
+    userSyncPromise = import("./js/firebase/userDataSync.js?v=sync-1")
+      .catch(error => { console.warn("Account sync unavailable:", error); return null; });
+  }
+  return userSyncPromise;
+}
+
+// Which localStorage keys follow the account, and how to reconcile each.
+//   decks  - array of { name, savedAt, ... }: union by name, newer savedAt wins.
+//   cards  - array of cards: union by number+collection (or id), newer edit wins.
+//   lww    - any value: last write wins, by a per-key timestamp.
+// NOTE: string literals (not the *_KEY consts) on purpose - this array is
+// evaluated at module load, before some of those `const`s are initialized, so
+// referencing them here would throw a temporal-dead-zone ReferenceError and
+// break the whole script. They must stay byte-identical to the consts.
+const SYNC_SPECS = [
+  { key: "custom-cards-sim-luffy-only-saved-decks-v1", mode: "decks" },  // SAVED_DECKS_KEY
+  { key: "custom-don-decks-v1",                        mode: "decks" },  // DON_DECKS_KEY
+  { key: "custom-cards-sim-luffy-only-v1",             mode: "lww"   },  // STORAGE_KEY (working draft)
+  { key: "custom-cards-allow-any-deck-size-v1",        mode: "lww"   },  // ALLOW_ANY_DECK_SIZE_KEY
+  { key: "gameSettings",                               mode: "lww"   },
+  { key: "manualPlaySettings",                         mode: "lww"   },
+  { key: "cc_hotkeys_v1",                              mode: "lww"   },  // HOTKEYS_KEY
+  { key: "custom-cards-alt-art-prefs-v1",              mode: "lww"   },  // ALT_ART_PREFS_KEY
+  { key: "custom-cards-sim-imported-cards-v1",         mode: "cards" },  // CUSTOM_CARDS_KEY
+  { key: "custom-cards-sim-local-project-cards-v1",    mode: "cards" },  // LOCAL_PROJECT_CARDS_KEY
+];
+const SYNC_META_KEY = "cc_sync_meta_v1";  // { key: lastPushedAtMs }
+let syncCurrentUid = null;
+const syncPushTimers = {};
+
+function readSyncMeta() {
+  try { return JSON.parse(localStorage.getItem(SYNC_META_KEY) || "{}") || {}; }
+  catch { return {}; }
+}
+function writeSyncMeta(meta) {
+  try { localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta)); } catch (e) {}
+}
+
+function parseArr(json) {
+  try { const v = JSON.parse(json); return Array.isArray(v) ? v : []; }
+  catch { return []; }
+}
+function deckTime(d) { return Date.parse(d && d.savedAt) || 0; }
+function cardKeyOf(c) {
+  const num = String(c?.cardNumber || c?.id || "").toLowerCase();
+  const col = String(c?.collection || "").toLowerCase();
+  return num ? `${num}__${col}` : "";
+}
+function cardTime(c) { return Date.parse(c?.lastEditedAt || c?.addedAt || c?.importedAt) || 0; }
+
+// Union two arrays keyed by `keyFn`, keeping the entry with the larger `timeFn`.
+function unionBy(localArr, cloudArr, keyFn, timeFn) {
+  const byKey = new Map();
+  const take = (arr) => arr.forEach(item => {
+    const k = keyFn(item);
+    if (!k) return;
+    const prev = byKey.get(k);
+    if (!prev || timeFn(item) >= timeFn(prev)) byKey.set(k, item);
+  });
+  take(localArr);            // seed with local
+  take(cloudArr);            // cloud overrides only when newer (>=)
+  return [...byKey.values()];
+}
+
+// Reconcile one key against its cloud blob. Returns { localValue, pushValue } —
+// either may be null when nothing needs writing on that side.
+function reconcileSyncKey(spec, cloudEntry, meta, now) {
+  const localRaw = (() => { try { return localStorage.getItem(spec.key); } catch { return null; } })();
+  const cloudJson = cloudEntry && typeof cloudEntry.json === "string" ? cloudEntry.json : null;
+
+  if (spec.mode === "decks" || spec.mode === "cards") {
+    if (cloudJson == null) {
+      // Nothing in the cloud yet: upload local if we have any.
+      return { localValue: null, pushValue: localRaw != null ? localRaw : null };
+    }
+    const isCards = spec.mode === "cards";
+    const merged = unionBy(
+      parseArr(localRaw), parseArr(cloudJson),
+      isCards ? cardKeyOf : (d => String(d?.name || "").toLowerCase()),
+      isCards ? cardTime : deckTime
+    );
+    const mergedJson = JSON.stringify(merged);
+    return {
+      localValue: mergedJson !== localRaw ? mergedJson : null,
+      pushValue: mergedJson !== cloudJson ? mergedJson : null
+    };
+  }
+
+  // lww: newer timestamp wins.
+  const localAt = Number(meta[spec.key] || 0);
+  const cloudAt = Number(cloudEntry && cloudEntry.at || 0);
+  if (cloudJson != null && cloudAt > localAt) {
+    return { localValue: cloudJson, pushValue: null, adoptedAt: cloudAt };
+  }
+  if (localRaw != null && (cloudJson == null || localAt >= cloudAt)) {
+    return { localValue: null, pushValue: localRaw };
+  }
+  return { localValue: null, pushValue: null };
+}
+
+async function syncPullMergePush(uid) {
+  if (!uid) return;
+  syncCurrentUid = uid;
+  const mod = await getUserSync();
+  if (!mod) return;
+
+  const cloud = await mod.pullUserData(uid);
+  const meta = readSyncMeta();
+  const now = Date.now();
+  const toPush = {};
+  let localChanged = false;
+
+  SYNC_SPECS.forEach(spec => {
+    const sk = mod.sanitizeSyncKey(spec.key);
+    const res = reconcileSyncKey(spec, cloud[sk], meta, now);
+    if (res.localValue != null) {
+      try { localStorage.setItem(spec.key, res.localValue); } catch (e) {}
+      localChanged = true;
+    }
+    if (res.adoptedAt) meta[spec.key] = res.adoptedAt;
+    if (res.pushValue != null) {
+      const at = Math.max(now, Number(meta[spec.key] || 0) + 1);
+      meta[spec.key] = at;
+      toPush[sk] = { at, json: res.pushValue };
+    }
+  });
+
+  writeSyncMeta(meta);
+  if (Object.keys(toPush).length) mod.pushUserData(uid, toPush);
+
+  if (localChanged) {
+    // New decks/cards/settings arrived - reflect them without a reload.
+    loadSavedDeck();       // re-read the working draft (leader/deck/tokens/starting)
+    loadCardPool();        // re-read local cards into the pool
+    renderSavedDecks?.();
+    renderAll?.();
+    toast?.("Synced your account decks & settings");
+  }
+}
+
+// Push one key's current value to the account (debounced). Called after saves.
+function syncPush(key) {
+  if (!syncCurrentUid) return;   // only when signed in
+  clearTimeout(syncPushTimers[key]);
+  syncPushTimers[key] = setTimeout(async () => {
+    const mod = await getUserSync();
+    if (!mod || !syncCurrentUid) return;
+    let json = null;
+    try { json = localStorage.getItem(key); } catch (e) {}
+    if (json == null) return;
+    const meta = readSyncMeta();
+    const at = Date.now();
+    meta[key] = at;
+    writeSyncMeta(meta);
+    mod.pushUserData(syncCurrentUid, { [mod.sanitizeSyncKey(key)]: { at, json } });
+  }, 800);
+}
+
+// React to sign-in / sign-out (auth-ui.js dispatches this on every change).
+document.addEventListener("cc-account-change", (event) => {
+  const account = event && event.detail;
+  if (account && account.uid) {
+    syncPullMergePush(account.uid);
+  } else {
+    syncCurrentUid = null;   // signed out: stop pushing (keep local data as-is)
+  }
+});
 
 // The shared-library STORAGE key. MUST stay byte-for-byte identical to
 // cardLibraryService.cardLibraryKey(), because tombstones (the `deleted` set)
@@ -1384,6 +1563,7 @@ async function saveProjectCardsLocally(cards) {
   try {
     localStorage.setItem(LOCAL_PROJECT_CARDS_KEY, JSON.stringify(cards));
     localStorage.setItem(LOCAL_PROJECT_DELETIONS_KEY, JSON.stringify(deletions));
+    syncPush(LOCAL_PROJECT_CARDS_KEY);
     return true;
   } catch (error) {
     console.error(error);
@@ -1587,6 +1767,7 @@ function getDonDecks() {
 
 function saveDonDecks(list) {
   try { localStorage.setItem(DON_DECKS_KEY, JSON.stringify(list || [])); } catch {}
+  syncPush(DON_DECKS_KEY);
 }
 
 function getActiveDonDeckId() {
@@ -1635,6 +1816,7 @@ const HOTKEY_ACTIONS = [
   // manual power modifier by ±1000 (press +1000 twice for +2000, etc.).
   { value: "powerplus", label: "+1000 power (stacks)" },
   { value: "powerminus", label: "-1000 power (stacks)" },
+  { value: "endturn", label: "End turn (no card needed)" },
 ];
 
 function getHotkeys() {
@@ -1646,6 +1828,7 @@ function getHotkeys() {
 
 function saveHotkeys(list) {
   try { localStorage.setItem(HOTKEYS_KEY, JSON.stringify(list || [])); } catch {}
+  syncPush(HOTKEYS_KEY);
 }
 
 function hotkeyKeyLabel(key) {
@@ -4684,6 +4867,7 @@ function saveDeck() {
     startingCards: state.startingCards,
     deckName: state.deckName
   }));
+  syncPush(STORAGE_KEY);
   renderAll();
   queueDeckTableResize();
 }
@@ -4824,6 +5008,7 @@ function saveNamedDeck() {
   // just tell the user instead of losing anything.
   try {
     localStorage.setItem(SAVED_DECKS_KEY, JSON.stringify(decks));
+    syncPush(SAVED_DECKS_KEY);
     return true;
   } catch (e) {
     toast("Storage is full - couldn't save. Delete a deck you no longer need, then try again.");
@@ -5054,6 +5239,7 @@ function deleteNamedDeck(index) {
   if (!window.confirm(`Delete saved deck "${name}"?`)) return;
   decks.splice(index, 1);
   localStorage.setItem(SAVED_DECKS_KEY, JSON.stringify(decks));
+  syncPush(SAVED_DECKS_KEY);
   renderSavedDecks();
   toast(`${name} deleted`);
 }
@@ -6252,6 +6438,20 @@ function ensureLazyImgObserver() {
   return __lazyImgObserver;
 }
 
+// Resolve a card's display image URL, fetching from the cache when the light
+// pool holds no in-memory art. Used by hover-zoom and the Inspect dialog.
+async function resolveCardImageUrl(card) {
+  const direct = card ? preferredCardImageUrl(card) : "";
+  if (direct) return direct;
+  if (card && card.__storageKey) {
+    try {
+      const library = await getCardLibrary();
+      if (library && library.getCachedImage) return await library.getCachedImage(card.__storageKey);
+    } catch (_) {}
+  }
+  return "";
+}
+
 async function loadLazyCardImage(img) {
   const key = img.getAttribute("data-lazy-key");
   if (!key || img.dataset.lazyLoaded) return;
@@ -6326,6 +6526,10 @@ function previewCard(card) {
       </div>
     </div>
   `;
+
+  // The card art may be a lazy tile (light pool holds no base64) - kick off its
+  // load from the cache so the inspected card actually shows its image.
+  observeLazyImages(el.cardPreview);
 
   if (typeof el.cardDialog.showModal === "function") {
     el.cardDialog.showModal();
@@ -7071,6 +7275,7 @@ function bindEvents() {
   // Hovering a card in the collection shows a large preview on the left,
   // so you don't have to click Inspect to read it. Delegated so it covers
   // every tile without per-card listeners.
+  let hoverToken = 0;
   const showHoverPreview = (article, pointerX) => {
     if (!el.builderHoverPreview || !article) return;
     // Library tiles carry a unique data-card-key (number + collection); resolve
@@ -7078,18 +7283,36 @@ function bindEvents() {
     // another collection. Deck-list rows fall back to data-id / data-card-id.
     const card = getCardByKey(article.dataset.cardKey)
       || getCard(article.dataset.id || article.dataset.cardId);
-    const hoverSrc = card ? preferredCardImageUrl(card) : "";
-    if (!hoverSrc) { hideHoverPreview(); return; }
-    el.builderHoverPreviewImg.src = hoverSrc;
-    el.builderHoverPreviewImg.alt = card.name || "";
-    // Show the big preview on the side AWAY from the card you're hovering, so it
-    // never sits on top of that card's Edit / + buttons. Left-side cards -> preview
-    // on the right; right-side cards -> preview on the left.
+    if (!card) { hideHoverPreview(); return; }
+
+    // Position the preview on the side AWAY from the hovered card, so it never
+    // covers that card's Edit / + buttons.
     const cardX = pointerX ?? article.getBoundingClientRect().left;
     const onLeftHalf = cardX < window.innerWidth / 2;
     el.builderHoverPreview.style.left = onLeftHalf ? "auto" : "16px";
     el.builderHoverPreview.style.right = onLeftHalf ? "16px" : "auto";
-    el.builderHoverPreview.hidden = false;
+    el.builderHoverPreviewImg.alt = card.name || "";
+
+    const direct = preferredCardImageUrl(card);
+    if (direct) {
+      el.builderHoverPreviewImg.src = direct;
+      el.builderHoverPreview.hidden = false;
+      return;
+    }
+    // Light pool card: its art lives in the cache. Show the panel now and fill
+    // the image in once it loads; a token guards against a fast hover landing on
+    // a different card before this resolves.
+    if (card.__storageKey) {
+      const token = ++hoverToken;
+      el.builderHoverPreview.hidden = false;
+      resolveCardImageUrl(card).then(url => {
+        if (token !== hoverToken) return;   // moved on to another card
+        if (url) el.builderHoverPreviewImg.src = url;
+        else hideHoverPreview();
+      });
+      return;
+    }
+    hideHoverPreview();
   };
   function hideHoverPreview() {
     if (el.builderHoverPreview) el.builderHoverPreview.hidden = true;
@@ -7159,6 +7382,7 @@ function bindEvents() {
 
   el.allowAnyDeckSize?.addEventListener("change", () => {
     try { localStorage.setItem(ALLOW_ANY_DECK_SIZE_KEY, el.allowAnyDeckSize.checked ? "1" : "0"); } catch (e) {}
+    syncPush(ALLOW_ANY_DECK_SIZE_KEY);
     renderAll();
   });
 

@@ -1096,6 +1096,13 @@ function playCardRestOnly() {
     try { return localStorage.getItem(PLAY_CARD_REST_ONLY_KEY) === "1"; } catch { return false; }
 }
 
+// The opposite of "rest DON only": play the card ONTO the field but DON'T rest
+// any DON!! for its cost (a free play). Mutually exclusive with rest-only.
+const PLAY_CARD_NO_COST_KEY = "optcgPlayCardNoCost";
+function playCardNoCost() {
+    try { return localStorage.getItem(PLAY_CARD_NO_COST_KEY) === "1"; } catch { return false; }
+}
+
 // Rest up to `cost` of a player's ACTIVE DON!!; returns how many were rested.
 function restDonForCost(player, cost) {
     const want = Math.max(0, Math.floor(Number(cost) || 0));
@@ -1123,13 +1130,17 @@ function playCardFromHand(player, card) {
     if (!player || !card) return;
     const cost = Number(getCardPlayCost(card)) || 0;
     const activeDon = Number(player.don) || 0;
+    const noCost = playCardNoCost();
     // Can't play what you can't pay for — need enough ACTIVE DON!! for the cost.
-    if (cost > activeDon) {
+    // Skipped entirely in "no DON!! rested" mode (a free play).
+    if (!noCost && cost > activeDon) {
         addGameLog(`Not enough active DON!! to play ${card.name} (needs ${cost}, has ${activeDon}).`);
         return;
     }
-    const rested = restDonForCost(player, cost);
-    const restNote = cost > 0 ? ` — rested ${rested}${rested < cost ? `/${cost}` : ""} DON!!` : "";
+    const rested = noCost ? 0 : restDonForCost(player, cost);
+    const restNote = noCost
+        ? (cost > 0 ? " — no DON!! rested" : "")
+        : (cost > 0 ? ` — rested ${rested}${rested < cost ? `/${cost}` : ""} DON!!` : "");
 
     // Announce + reveal the play in the log (shows the art). Online: reveal to foe.
     addGameLog(`${player.name} played ${card.name}${restNote}.`, [{ name: card.name, image: card.image }]);
@@ -3359,8 +3370,16 @@ function showGameOverPopup(winnerPlayer, reasonTitle = "Victory", reasonText = "
     popup.appendChild(reasonMessage);
 
     if (isSpectator) {
-        // Spectators can't rematch - just send them back to the spectate list.
-        mainMenuButton.textContent = "Back to Games";
+        // Spectators can't rematch - just send them back to the multiplayer lobby
+        // (which lists live games). Navigate explicitly on click so nothing on the
+        // game-over overlay can swallow the anchor's default (it was doing nothing).
+        mainMenuButton.textContent = "Back to Lobby";
+        mainMenuButton.href = "multiplayer.html";
+        mainMenuButton.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            window.location.href = "multiplayer.html";
+        });
         buttons.appendChild(mainMenuButton);
     } else if (isOnlineMatch) {
         // Online: ready up (optionally with a different deck) and rematch in
@@ -3950,11 +3969,28 @@ function setupSidebarTurnToggles() {
     // "Play Card: rest DON!! only" — when on, the hand's Play Card just rests DON!!
     // for the cost and reveals, without putting the card onto the field.
     const restOnlyEl = document.getElementById("sidebarPlayRestOnly");
+    const noCostEl = document.getElementById("sidebarPlayNoCost");
     if (restOnlyEl) {
         restOnlyEl.checked = playCardRestOnly();
         restOnlyEl.addEventListener("change", () => {
             try { localStorage.setItem(PLAY_CARD_REST_ONLY_KEY, restOnlyEl.checked ? "1" : "0"); } catch (e) {}
+            // The two Play Card modes are opposites - turning one on clears the other.
+            if (restOnlyEl.checked && noCostEl) {
+                noCostEl.checked = false;
+                try { localStorage.setItem(PLAY_CARD_NO_COST_KEY, "0"); } catch (e) {}
+            }
             addGameLog(`Play Card now ${restOnlyEl.checked ? "only rests DON!!" : "plays the card out"}.`);
+        });
+    }
+    if (noCostEl) {
+        noCostEl.checked = playCardNoCost();
+        noCostEl.addEventListener("change", () => {
+            try { localStorage.setItem(PLAY_CARD_NO_COST_KEY, noCostEl.checked ? "1" : "0"); } catch (e) {}
+            if (noCostEl.checked && restOnlyEl) {
+                restOnlyEl.checked = false;
+                try { localStorage.setItem(PLAY_CARD_REST_ONLY_KEY, "0"); } catch (e) {}
+            }
+            addGameLog(`Play Card now ${noCostEl.checked ? "plays the card out without resting DON!!" : "rests DON!! for the cost"}.`);
         });
     }
 
@@ -10674,7 +10710,7 @@ function updateOnlinePhaseButton() {
     const CARD_SELECTOR = ".character-slot, .board-leader-card, .board-stage-card, .hand-card[data-card-instance-id]";
     const HOLD_MS = 300; // a "hold" hotkey fires only after the key is held this long
     // Actions that run without a clicked card (they don't act ON a card).
-    const CARDLESS_ACTIONS = { sorthand: true };
+    const CARDLESS_ACTIONS = { sorthand: true, endturn: true };
 
     let selectedCard = null;
     const holdStarts = {}; // key -> timestamp of keydown (for hold hotkeys)
@@ -10779,6 +10815,12 @@ function updateOnlinePhaseButton() {
         // Card-less actions run regardless of whether a card is selected.
         if (CARDLESS_ACTIONS[hotkey.action]) {
             if (hotkey.action === "sorthand") { sortPlayerHand(ownPlayer()); }
+            else if (hotkey.action === "endturn") {
+                // Reuse the sidebar's Next Turn button so all the turn logic and
+                // the online "not your turn" lock (disabled state) still apply.
+                const btn = document.getElementById("nextTurnBtn");
+                if (btn && !btn.disabled) btn.click();
+            }
             return;
         }
         if (!selectedCard) return;
