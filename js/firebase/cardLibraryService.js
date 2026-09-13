@@ -102,6 +102,76 @@ async function writeCachedCards(cards, removedKeys = []) {
     }
 }
 
+// A card is unique by number+collection; the number part of a storage key.
+function keyNumberOf(key) {
+    return String(key).split("__")[0];
+}
+
+// A LIGHT copy of a cached card: everything EXCEPT the heavy base64 artwork
+// (a single card's image can be several MB; the whole cache is often hundreds of
+// MB). The deck builder only needs metadata to browse/filter; each tile's art is
+// fetched on demand from the cache (getCachedImage) when it scrolls into view.
+// A plain URL image is tiny, so it's kept as-is. `__cachedImg` marks that a
+// base64 image lives in the cache under __storageKey, so the UI knows to lazy it.
+function lightCachedCard(card, key) {
+    const dataImg = typeof card.image === "string" && card.image.startsWith("data:");
+    const { altArts, altArt, ...rest } = card;
+    return {
+        ...rest,
+        __storageKey: key,
+        image: dataImg ? "" : (card.image || ""),
+        altArt: "",
+        altArts: [],
+        __cachedImg: dataImg
+    };
+}
+
+// Read the cache with a CURSOR (one record at a time) instead of getAll(), so the
+// entire multi-hundred-MB library is never held in memory at once - that getAll
+// was what crashed phones on load. When `wantNums` is given (the game board only
+// needs the decks' cards) keep the FULL card (with art) for just those numbers;
+// otherwise (the deck builder) keep a LIGHT copy of every card.
+function readCachedForLoad(wantNums) {
+    return new Promise((resolve) => {
+        openCache().then(db => {
+            const out = [];
+            const req = cacheTransaction(db, "readonly").openCursor();
+            req.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (!cursor) { resolve(out); return; }
+                const value = cursor.value;
+                const key = value[CACHE_KEY_PATH] || cardLibraryKey(value);
+                if (wantNums) {
+                    if (wantNums.has(keyNumberOf(key))) { value.__storageKey = key; out.push(value); }
+                } else {
+                    out.push(lightCachedCard(value, key));
+                }
+                cursor.continue();
+            };
+            req.onerror = () => resolve(out);
+        }).catch(() => resolve([]));
+    });
+}
+
+// Fetch ONE card's artwork from the cache by its storage key. Used to lazy-load a
+// tile's image after the light pool has rendered.
+export async function getCachedImage(storageKey) {
+    if (!storageKey) return "";
+    try {
+        const db = await openCache();
+        return await new Promise((resolve) => {
+            const req = cacheTransaction(db, "readonly").get(storageKey);
+            req.onsuccess = () => {
+                const card = req.result;
+                resolve(card && typeof card.image === "string" ? card.image : "");
+            };
+            req.onerror = () => resolve("");
+        });
+    } catch (_) {
+        return "";
+    }
+}
+
 // The set of tombstoned (deleted) storage keys from the last successful sync.
 // Kept in localStorage - it's just a small list of strings - so the offline-first
 // paint (getCachedLibrary / the fast path in loadSharedCards) can hide cards that
@@ -135,21 +205,26 @@ export async function getCachedLibrary(options = {}) {
     const wantNums = (onlyNumbers && (onlyNumbers.size || onlyNumbers.length))
         ? new Set([...onlyNumbers].map(n => sanitizeKeyPart(n)))
         : null;
-    const keyNumber = key => String(key).split("__")[0];
+    const deleted = readCachedDeletedSet();
+
+    // With wantNums (practice: just the two decks' cards) read ONLY those via a
+    // cursor - never getAll() the whole multi-hundred-MB library into memory,
+    // which is what crashed phones. Without it (online instant paint) fall back
+    // to the full read, since any opponent card might need resolving.
+    if (wantNums) {
+        const cards = (await readCachedForLoad(wantNums))
+            .filter(card => !deleted.has(card.__storageKey));
+        return { cards, deleted };
+    }
 
     const cached = await readCachedCards();
-    const deleted = readCachedDeletedSet();
     const cards = cached
         .map(card => {
             const key = card[CACHE_KEY_PATH] || cardLibraryKey(card);
             card.__storageKey = key;
             return card;
         })
-        .filter(card => {
-            const key = card.__storageKey;
-            if (deleted.has(key)) return false;
-            return !wantNums || wantNums.has(keyNumber(key));
-        });
+        .filter(card => !deleted.has(card.__storageKey));
     return { cards, deleted };
 }
 
@@ -208,7 +283,7 @@ function keyInCollection(key, sanitizedCollection) {
 //                    card resolved so far, so the pool can paint progressively
 //                    instead of waiting for the whole download to finish.
 export async function loadSharedCards(options = {}) {
-    const { getPriority, onProgress, onlyNumbers } = options;
+    const { getPriority, onProgress, onlyNumbers, light } = options;
 
     // onlyNumbers (a Set/array of card NUMBERS): restrict the whole operation to
     // just those cards. The game board only needs the cards in the two decks, so
@@ -221,14 +296,26 @@ export async function loadSharedCards(options = {}) {
     const keyNumber = key => String(key).split("__")[0];
     const keyWanted = key => !wantNums || wantNums.has(keyNumber(key));
 
+    // `light` (the deck builder): keep only metadata in memory, not the base64
+    // artwork - the whole library's art is hundreds of MB and loading it all via
+    // getAll() crashed phones on open. Each tile lazy-loads its own image later
+    // (getCachedImage). The game board keeps FULL cards, but only for the decks'
+    // cards (wantNums), which is a tiny bounded set. Only the online board (no
+    // wantNums, not light) still reads everything, since it must resolve any
+    // opponent card. A `light` copy of a downloaded card is used for the returned
+    // pool too, so a fresh download doesn't sneak base64 back into memory.
+    const lightMode = Boolean(light) && !wantNums;
+    const forReturn = (card, key) => lightMode ? lightCachedCard(card, key) : card;
+
     // ── Instant, offline-first paint ─────────────────────────────────────────
     // Read the on-device IndexedDB cache and hand it to the caller BEFORE we
-    // touch Firebase auth or the network. A repeat visitor sees the whole
-    // library with zero wait; the reconcile below then quietly patches whatever
-    // changed. Auth (a network round-trip) used to sit at the very top of this
-    // function and blocked even this cache read - that was the wait on every
-    // page load.
-    const cached = await readCachedCards();
+    // touch Firebase auth or the network. A repeat visitor sees the library with
+    // zero wait; the reconcile below then quietly patches whatever changed. Auth
+    // (a network round-trip) used to sit at the very top of this function and
+    // blocked even this cache read - that was the wait on every page load.
+    const cached = (lightMode || wantNums)
+        ? await readCachedForLoad(wantNums)   // cursor: light (builder) or deck-only (game)
+        : await readCachedCards();            // full library (online board)
     // Key by the EXACT storage key each card was cached under (its keyPath), not
     // a key recomputed from content - a legacy card stored at "JJK1" whose body
     // now carries a collection would otherwise recompute to "JJK1__collection",
@@ -321,8 +408,8 @@ export async function loadSharedCards(options = {}) {
             card.updatedAt = Number(index[key]?.updatedAt || 0);
             // Stamp the storage key so it's the cache keyPath and the load hint.
             card[CACHE_KEY_PATH] = key;
-            downloaded.push(card);
-            cachedByKey.set(key, card);
+            downloaded.push(card);                     // full card -> written to cache (keeps art)
+            cachedByKey.set(key, forReturn(card, key)); // light in the builder's in-memory pool
         }
         // Stream what we have so far so the grid fills in as cards land.
         if (onProgress) {

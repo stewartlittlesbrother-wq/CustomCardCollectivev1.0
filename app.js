@@ -610,7 +610,10 @@ function normalizeCard(raw, category) {
     // Exact shared-library key this card loaded from (set by loadSharedCards).
     // Kept so edit/delete can target the real entry even if it lives under a
     // legacy number-only key. Client-only: stripped before any Firebase write.
-    __storageKey: raw.__storageKey || ""
+    __storageKey: raw.__storageKey || "",
+    // Set when the card's base64 art was left in the cache (not loaded into
+    // memory) - the tile lazy-loads it from IndexedDB by __storageKey.
+    __cachedImg: Boolean(raw.__cachedImg)
   };
 }
 
@@ -702,6 +705,10 @@ async function loadSharedCardsForPool(options = {}) {
   try {
     const { cards, deleted } = await library.loadSharedCards({
       getPriority,
+      // Light mode: the pool keeps card METADATA only, never the base64 artwork
+      // (the full library is hundreds of MB - loading it all crashed phones). Each
+      // tile lazy-loads its own image from the cache when it scrolls into view.
+      light: true,
       onProgress: onProgress
         ? partial => onProgress({
             cards: (partial.cards || []).map(card => normalizeCard(card, card.category || card.cardType)),
@@ -1085,7 +1092,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-9")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-10")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -5699,6 +5706,10 @@ function renderBuilder() {
   el.deckList.innerHTML = (deckMarkup + tokenMarkup) ||
     `<div class="empty">Add up to 50 non-leader cards.</div>`;
 
+  // Lazy-load art for the leader slot + deck-list cards (they hold no base64).
+  observeLazyImages(el.leaderSlot);
+  observeLazyImages(el.deckList);
+
   renderCardGrid();
   renderSavedDecks();
   queueDeckTableResize();
@@ -6178,6 +6189,10 @@ function renderCardGrid() {
 
     el.cardGrid.appendChild(node);
   });
+
+  // Start lazy-loading art for the tiles now in the grid (only those near the
+  // viewport actually fetch their image).
+  observeLazyImages(el.cardGrid);
 }
 
 function scheduleCardGridRender() {
@@ -6199,7 +6214,67 @@ function cardVisual(card) {
     `;
   }
 
+  // Light pool card: the base64 art lives in the cache, not in memory. Render a
+  // placeholder <img> (no src yet) tagged with its cache key; observeLazyImages()
+  // fills in the real art from IndexedDB once the tile scrolls into view, so a
+  // huge library never loads all its images at once.
+  if (card && card.__cachedImg && card.__storageKey) {
+    return `
+      <img
+        class="lazy-card-img"
+        alt="${escapeAttr(card.name)}"
+        data-lazy-key="${escapeAttr(card.__storageKey)}"
+        data-fallback-name="${escapeAttr(card.name)}"
+        data-fallback-number="${escapeAttr(card.cardNumber)}"
+        data-fallback-color="${escapeAttr(colorValue(card))}"
+      >
+    `;
+  }
+
   return proxyCardMarkup(card?.name || "Empty", card?.cardNumber || "", colorValue(card));
+}
+
+// Lazy-load the base64 artwork for on-screen card tiles only. Card images total
+// hundreds of MB across the library, so the pool keeps just metadata; each tile's
+// art is fetched from the IndexedDB cache when it nears the viewport. This is what
+// keeps memory bounded (and stopped phones crashing on load).
+let __lazyImgObserver = null;
+function ensureLazyImgObserver() {
+  if (__lazyImgObserver || typeof IntersectionObserver === "undefined") return __lazyImgObserver;
+  __lazyImgObserver = new IntersectionObserver((entries, obs) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const img = entry.target;
+      obs.unobserve(img);
+      loadLazyCardImage(img);
+    });
+  }, { rootMargin: "300px" });
+  return __lazyImgObserver;
+}
+
+async function loadLazyCardImage(img) {
+  const key = img.getAttribute("data-lazy-key");
+  if (!key || img.dataset.lazyLoaded) return;
+  img.dataset.lazyLoaded = "1";
+  try {
+    const library = await getCardLibrary();
+    const url = library && library.getCachedImage ? await library.getCachedImage(key) : "";
+    if (url) img.src = url;
+    else img.classList.add("lazy-card-img-empty");
+  } catch (_) {
+    img.classList.add("lazy-card-img-empty");
+  }
+}
+
+function observeLazyImages(root) {
+  const scope = root || document;
+  const imgs = scope.querySelectorAll("img.lazy-card-img[data-lazy-key]:not([data-lazy-seen])");
+  const obs = ensureLazyImgObserver();
+  imgs.forEach(img => {
+    img.setAttribute("data-lazy-seen", "1");
+    if (obs) obs.observe(img);
+    else loadLazyCardImage(img);   // no IntersectionObserver support: just load it
+  });
 }
 
 function tableCardVisual(card) {

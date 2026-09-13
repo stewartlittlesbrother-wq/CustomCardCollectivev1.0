@@ -696,6 +696,16 @@ h2 {
   padding-right: 4px;
 }
 
+/* A card image whose art is still being lazy-loaded from the cache. Show a soft
+   placeholder instead of a broken-image icon until its src is set. */
+img.lazy-card-img {
+  background: linear-gradient(135deg, #20242c, #14171d);
+  min-height: 40px;
+}
+img.lazy-card-img-empty {
+  opacity: .35;
+}
+
 
 .card-tile {
   overflow: hidden;
