@@ -59,6 +59,7 @@ class SettingsManager {
     // Save settings to localStorage
     saveSettings() {
         localStorage.setItem('gameSettings', JSON.stringify(this.settings));
+        window.ccSyncPush?.('gameSettings');   // cross-device account sync
         this.showSaveNotification();
     }
 

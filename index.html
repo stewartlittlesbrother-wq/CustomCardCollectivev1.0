@@ -877,12 +877,12 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=199"></script>
+  <script src="js/version.js?v=201"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=181"></script>
+  <script src="js/auth-ui.js?v=201"></script>
   <script src="js/cards/decks.js?v=creation-9"></script>
-  <script src="js/manual-play.js?v=manual-22"></script>
-  <script src="app.js?v=creation-85"></script>
+  <script src="js/manual-play.js?v=manual-23"></script>
+  <script src="app.js?v=creation-87"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).
@@ -913,6 +913,7 @@
         el.addEventListener("change", () => {
           settings[key] = el.checked;
           localStorage.setItem(KEY, JSON.stringify(settings));
+          window.ccSyncPush && window.ccSyncPush(KEY);
         });
       });
     })();
@@ -926,6 +927,7 @@
       box.checked = localStorage.getItem(KEY) === "true";
       box.addEventListener("change", () => {
         localStorage.setItem(KEY, String(box.checked));
+        window.ccSyncPush && window.ccSyncPush(KEY);
       });
     })();
 
@@ -938,6 +940,7 @@
       box.checked = localStorage.getItem(KEY) === "true";
       box.addEventListener("change", () => {
         localStorage.setItem(KEY, String(box.checked));
+        window.ccSyncPush && window.ccSyncPush(KEY);
       });
     })();
 
@@ -951,6 +954,7 @@
       box.checked = stored === null ? true : stored === "true";
       box.addEventListener("change", () => {
         localStorage.setItem(KEY, String(box.checked));
+        window.ccSyncPush && window.ccSyncPush(KEY);
       });
     })();
   </script>

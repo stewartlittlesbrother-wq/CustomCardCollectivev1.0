@@ -61,6 +61,7 @@ const manualPlay = {
 
     saveSettings() {
         localStorage.setItem("manualPlaySettings", JSON.stringify(this.state.settings));
+        window.ccSyncPush?.("manualPlaySettings");   // cross-device account sync
     },
 
     setupEventListeners() {
@@ -153,7 +154,7 @@ const manualPlay = {
         // where it stalled (which zone, how many overlays / body nodes) even
         // though the console is unusable. Read it with:
         //   localStorage.getItem("cc_drag_debug")
-        window.__ccMPVer = 22; // manual-play build marker (paste window.__ccMPVer to check)
+        window.__ccMPVer = 23; // manual-play build marker (paste window.__ccMPVer to check)
         document.addEventListener("dragstart", (e) => {
             window.__ccDragActive = true;
             window.__ccDragOvers = 0;

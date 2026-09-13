@@ -49,6 +49,27 @@
         return servicePromise;
     }
 
+    // The account data-sync controller (decks/settings/board images/etc.). Loaded
+    // here so it runs on EVERY page auth-ui is on - home, game board, lobby - which
+    // is what makes "everything the same on all devices" actually hold.
+    let syncPromise = null;
+    function userSync() {
+        if (!syncPromise) {
+            const v = (window.APP_VERSION ? `?v=${window.APP_VERSION}` : "");
+            const moduleUrl = SCRIPT_URL
+                ? new URL(`firebase/userDataSync.js${v}`, SCRIPT_URL).href
+                : `js/firebase/userDataSync.js${v}`;
+            syncPromise = import(moduleUrl).catch(err => {
+                console.warn("Account sync unavailable:", err);
+                return null;
+            });
+        }
+        return syncPromise;
+    }
+    // Available synchronously to every page's save code; queues until the module
+    // loads, then flushes. No-op when signed out (the module guards on uid).
+    window.ccSyncPush = (key) => { userSync().then(mod => mod && mod.pushKey && mod.pushKey(key)); };
+
     // ── Styles (injected so this works on any page) ──────────────────────────
     function injectStyles() {
         if (document.getElementById("cc-auth-styles")) return;
@@ -340,6 +361,20 @@
                 renderAccountSettings();
                 // Let app.js refresh gated UI (e.g. card edit buttons) on change.
                 document.dispatchEvent(new CustomEvent("cc-account-change", { detail: account }));
+                // Sync this account's decks/settings/board-images across devices.
+                // Runs on whatever page you're on (home, board, lobby). When new
+                // data lands, fire cc-sync-applied so the page refreshes its UI.
+                userSync().then(mod => {
+                    if (!mod) return;
+                    if (account && account.uid) {
+                        mod.startAccountSync(account.uid, {
+                            onApplied: (keys) => document.dispatchEvent(
+                                new CustomEvent("cc-sync-applied", { detail: keys })),
+                        });
+                    } else if (mod.stopAccountSync) {
+                        mod.stopAccountSync();
+                    }
+                });
                 // Show the popup once on first load for a brand-new visitor who
                 // is neither signed in nor has chosen to play as a guest.
                 if (!account && !guestAcked() && !overlayEl) openPopup();

@@ -180,11 +180,16 @@ export async function getCachedCard(storageKey) {
 export async function getCachedArt(storageKey, index = 0) {
     const card = await getCachedCard(storageKey);
     if (!card) return "";
-    if (!index) return typeof card.image === "string" ? card.image : "";
-    const alts = Array.isArray(card.altArts) ? card.altArts : [];
-    const art = alts[index - 1];
-    if (typeof art === "string" && art) return art;
-    return typeof card.image === "string" ? card.image : "";
+    const main = typeof card.image === "string" ? card.image : "";
+    if (!index) return main;
+    // Alts can be an array, a Firebase object ({0:…,1:…}), or a single legacy
+    // `altArt` string. Normalize to a filtered list so index N resolves for every
+    // shape - that's why "only some alts came back".
+    const raw = Array.isArray(card.altArts) ? card.altArts
+        : (card.altArts && typeof card.altArts === "object") ? Object.values(card.altArts)
+        : (card.altArt ? [card.altArt] : []);
+    const alts = raw.filter(a => typeof a === "string" && a);
+    return alts[index - 1] || main;
 }
 
 // Fetch ONE card's MAIN artwork by storage key (lazy-load a tile's image).

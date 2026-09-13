@@ -188,6 +188,7 @@ function applyDonDeckSelection(deck) {
         player.donNums = nums;
     });
     try { localStorage.setItem(DON_ACTIVE_DECK_KEY, deck?.id || ""); } catch {}
+    window.ccSyncPush?.(DON_ACTIVE_DECK_KEY);
     updateDonDisplay();
 }
 
@@ -1847,6 +1848,7 @@ function setupOnlineChat() {
             nameInput.addEventListener("input", () => {
                 spectatorChatName = nameInput.value;
                 try { localStorage.setItem("cc_spectator_name", spectatorChatName); } catch (e) {}
+                window.ccSyncPush?.("cc_spectator_name");
             });
         }
     }
@@ -2716,6 +2718,7 @@ function setupExtraSlotsToggle() {
         }
         // Remember the choice as the default for future games.
         try { localStorage.setItem("optcgExtraSlots", String(next)); } catch {}
+        window.ccSyncPush?.("optcgExtraSlots");
         applyExtraRowLayout();
         renderCharacters();
         window.scheduleOnlineBoardSync?.();
@@ -3250,6 +3253,7 @@ function sfxMuted() {
 }
 function setSfxMuted(muted) {
     try { localStorage.setItem(SFX_MUTED_KEY, muted ? "1" : "0"); } catch {}
+    window.ccSyncPush?.(SFX_MUTED_KEY);
     updateSfxToggleLabel();
 }
 function updateSfxToggleLabel() {
@@ -3986,6 +3990,7 @@ function setupSidebarTurnToggles() {
             const settings = getTurnAutomationSettings();
             settings[key] = el.checked;
             try { localStorage.setItem(TURN_AUTOMATION_KEY, JSON.stringify(settings)); } catch (e) {}
+            window.ccSyncPush?.(TURN_AUTOMATION_KEY);
             addGameLog(`${el.checked ? "Enabled" : "Disabled"} ${key === "autoDraw" ? "auto draw" : "auto DON!!"} at turn start.`);
         });
     });
@@ -4003,6 +4008,8 @@ function setupSidebarTurnToggles() {
                 noCostEl.checked = false;
                 try { localStorage.setItem(PLAY_CARD_NO_COST_KEY, "0"); } catch (e) {}
             }
+            window.ccSyncPush?.(PLAY_CARD_REST_ONLY_KEY);
+            window.ccSyncPush?.(PLAY_CARD_NO_COST_KEY);
             addGameLog(`Play Card now ${restOnlyEl.checked ? "only rests DON!!" : "plays the card out"}.`);
         });
     }
@@ -4014,6 +4021,8 @@ function setupSidebarTurnToggles() {
                 restOnlyEl.checked = false;
                 try { localStorage.setItem(PLAY_CARD_REST_ONLY_KEY, "0"); } catch (e) {}
             }
+            window.ccSyncPush?.(PLAY_CARD_NO_COST_KEY);
+            window.ccSyncPush?.(PLAY_CARD_REST_ONLY_KEY);
             addGameLog(`Play Card now ${noCostEl.checked ? "plays the card out without resting DON!!" : "rests DON!! for the cost"}.`);
         });
     }

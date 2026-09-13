@@ -1106,7 +1106,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-11")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-12")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -1265,32 +1265,27 @@ async function syncPullMergePush(uid) {
   }
 }
 
-// Push one key's current value to the account (debounced). Called after saves.
+// Push one key's current value to the account after a save. The actual controller
+// now lives in userDataSync.js, driven by auth-ui.js so it runs on EVERY page
+// (home, game board, lobby). This just forwards to it via the global it exposes.
+// (The reconcile/merge helpers above are retained but no longer wired here.)
 function syncPush(key) {
-  if (!syncCurrentUid) return;   // only when signed in
-  clearTimeout(syncPushTimers[key]);
-  syncPushTimers[key] = setTimeout(async () => {
-    const mod = await getUserSync();
-    if (!mod || !syncCurrentUid) return;
-    let json = null;
-    try { json = localStorage.getItem(key); } catch (e) {}
-    if (json == null) return;
-    const meta = readSyncMeta();
-    const at = Date.now();
-    meta[key] = at;
-    writeSyncMeta(meta);
-    mod.pushUserData(syncCurrentUid, { [mod.sanitizeSyncKey(key)]: { at, json } });
-  }, 800);
+  try { window.ccSyncPush && window.ccSyncPush(key); } catch (e) {}
 }
 
-// React to sign-in / sign-out (auth-ui.js dispatches this on every change).
-document.addEventListener("cc-account-change", (event) => {
-  const account = event && event.detail;
-  if (account && account.uid) {
-    syncPullMergePush(account.uid);
-  } else {
-    syncCurrentUid = null;   // signed out: stop pushing (keep local data as-is)
-  }
+// When the shared sync applies new account data, refresh the builder so pulled
+// decks/cards/settings show without a reload.
+document.addEventListener("cc-sync-applied", () => {
+  try {
+    loadSavedDeck();          // re-read the working draft
+    loadCardPool();           // re-read local cards into the pool
+    renderSavedDecks && renderSavedDecks();
+    renderAll && renderAll();
+    // Refresh the Settings previews for pulled custom board images.
+    if (typeof CUSTOM_IMAGE_KEYS === "object") {
+      Object.keys(CUSTOM_IMAGE_KEYS).forEach(k => { try { refreshCustomImagePreview(k); } catch (e) {} });
+    }
+  } catch (e) {}
 });
 
 // The shared-library STORAGE key. MUST stay byte-for-byte identical to
@@ -4544,6 +4539,7 @@ async function handleCustomImageUpload(kind, file) {
   try {
     const compressed = await compressImageDataUrl(await readFileAsDataUrl(file));
     localStorage.setItem(CUSTOM_IMAGE_KEYS[kind], compressed);
+    syncPush(CUSTOM_IMAGE_KEYS[kind]);
     refreshCustomImagePreview(kind);
     toast("Image saved — it shows in your next game");
   } catch (error) {
@@ -4554,7 +4550,11 @@ async function handleCustomImageUpload(kind, file) {
 }
 
 function clearCustomImage(kind) {
-  try { localStorage.removeItem(CUSTOM_IMAGE_KEYS[kind]); } catch {}
+  // Store "" (not remove) so the cleared state SYNCS to other devices - the
+  // debounced push reads localStorage later, and a removed key would read null
+  // and skip. readCustomImage treats "" as "no image".
+  try { localStorage.setItem(CUSTOM_IMAGE_KEYS[kind], ""); } catch {}
+  syncPush(CUSTOM_IMAGE_KEYS[kind]);
   refreshCustomImagePreview(kind);
   toast("Image removed");
 }
@@ -6423,12 +6423,19 @@ function scheduleCardGridRender() {
 }
 
 function cardVisual(card) {
-  const src = preferredCardImageUrl(card);
-  if (src) {
+  // Only use a direct src if the SELECTED art is actually in memory. For a light
+  // pool card the main image may be a plain URL (kept in memory) while its ALTS
+  // live only in the cache - so when an alt is selected there's no direct src and
+  // we must lazy-load that specific art index. (Falling back to the main URL here
+  // was why "only some alts came back" for URL-image cards.)
+  const idx = altArtIndexFor(card);
+  const list = cardArtList(card);
+  const direct = list[idx] || (idx === 0 ? (card && card.imageUrl) || "" : "");
+  if (direct) {
     return `
       <img
         alt="${escapeAttr(card.name)}"
-        src="${escapeAttr(src)}"
+        src="${escapeAttr(direct)}"
         data-fallback-name="${escapeAttr(card.name)}"
         data-fallback-number="${escapeAttr(card.cardNumber)}"
         data-fallback-color="${escapeAttr(colorValue(card))}"
@@ -6436,17 +6443,17 @@ function cardVisual(card) {
     `;
   }
 
-  // Light pool card: the base64 art lives in the cache, not in memory. Render a
-  // placeholder <img> (no src yet) tagged with its cache key; observeLazyImages()
-  // fills in the real art from IndexedDB once the tile scrolls into view, so a
-  // huge library never loads all its images at once.
-  if (card && card.__cachedImg && card.__storageKey) {
+  // The selected art (main or an alt) lives in the cache, not in memory. Render a
+  // placeholder <img> tagged with its cache key + art index; observeLazyImages()
+  // fills it in from IndexedDB when the tile nears the viewport, so a huge library
+  // never loads all its images at once.
+  if (card && card.__storageKey && (card.__cachedImg || card.__altCount)) {
     return `
       <img
         class="lazy-card-img"
         alt="${escapeAttr(card.name)}"
         data-lazy-key="${escapeAttr(card.__storageKey)}"
-        data-lazy-index="${altArtIndexFor(card)}"
+        data-lazy-index="${idx}"
         data-fallback-name="${escapeAttr(card.name)}"
         data-fallback-number="${escapeAttr(card.cardNumber)}"
         data-fallback-color="${escapeAttr(colorValue(card))}"
@@ -6478,12 +6485,15 @@ function ensureLazyImgObserver() {
 // Resolve a card's display image URL, fetching from the cache when the light
 // pool holds no in-memory art. Used by hover-zoom and the Inspect dialog.
 async function resolveCardImageUrl(card) {
-  const direct = card ? preferredCardImageUrl(card) : "";
+  if (!card) return "";
+  const idx = altArtIndexFor(card);
+  const list = cardArtList(card);
+  const direct = list[idx] || (idx === 0 ? card.imageUrl || "" : "");
   if (direct) return direct;
-  if (card && card.__storageKey) {
+  if (card.__storageKey) {
     try {
       const library = await getCardLibrary();
-      if (library && library.getCachedArt) return await library.getCachedArt(card.__storageKey, altArtIndexFor(card));
+      if (library && library.getCachedArt) return await library.getCachedArt(card.__storageKey, idx);
     } catch (_) {}
   }
   return "";
@@ -7698,6 +7708,7 @@ function bindEvents() {
     creationOcrToggle.checked = getOcrEnabled();
     creationOcrToggle.addEventListener("change", () => {
       localStorage.setItem("optcgOcrEnabled", String(creationOcrToggle.checked));
+      syncPush("optcgOcrEnabled");
       if (homeOcrToggle) homeOcrToggle.checked = creationOcrToggle.checked;
     });
     homeOcrToggle?.addEventListener("change", () => {
