@@ -154,7 +154,7 @@ const manualPlay = {
         // where it stalled (which zone, how many overlays / body nodes) even
         // though the console is unusable. Read it with:
         //   localStorage.getItem("cc_drag_debug")
-        window.__ccMPVer = 24; // manual-play build marker (paste window.__ccMPVer to check)
+        window.__ccMPVer = 25; // manual-play build marker (paste window.__ccMPVer to check)
         document.addEventListener("dragstart", (e) => {
             window.__ccDragActive = true;
             window.__ccDragOvers = 0;
@@ -332,9 +332,9 @@ const manualPlay = {
                 e.dataTransfer.setData("playerKey", playerKey);
                 e.dataTransfer.setData("fromDeck", "true");
                 e.dataTransfer.setData("text/html", deckCard.innerHTML);
-                deckCard.style.opacity = "0.5";
-                
-                highlightAllZones();
+                // Defer DOM mutation — a synchronous change here can cancel the
+                // native drag (see the hand-card handler for the full explanation).
+                setTimeout(() => { deckCard.style.opacity = "0.5"; highlightAllZones(); }, 0);
             }
         }, true);
 
@@ -365,8 +365,8 @@ const manualPlay = {
                 e.dataTransfer.setData("playerKey", playerKey);
                 e.dataTransfer.setData("fromExtra", "true");
                 e.dataTransfer.setData("extraPile", pileKey);
-                extraCard.style.opacity = "0.5";
-                highlightAllZones();
+                // Defer DOM mutation — see the hand-card handler.
+                setTimeout(() => { extraCard.style.opacity = "0.5"; highlightAllZones(); }, 0);
             }
         }, true);
 
@@ -386,17 +386,25 @@ const manualPlay = {
             const handCard = e.target.closest(".hand-card.selectable-card");
             if (handCard) {
                 console.log("✓ HAND CARD DRAG START:", handCard.getAttribute("data-card-instance-id"));
+                // Transfer data MUST be set synchronously inside dragstart.
                 e.dataTransfer.effectAllowed = "move";
                 e.dataTransfer.setData("cardInstanceId", handCard.getAttribute("data-card-instance-id") || "");
                 e.dataTransfer.setData("playerKey", handCard.getAttribute("data-player") || "");
                 e.dataTransfer.setData("fromHand", "true");
                 e.dataTransfer.setData("text/html", handCard.innerHTML);
-                handCard.style.opacity = "0.5";
-                handCard.style.cursor = "grabbing";
-                
-                // Highlight ALL drop zones when dragging starts
-                console.log("Highlighting all drop zones");
-                highlightAllZones();
+                // DEFER every DOM mutation by a tick. Fading the dragged card, or
+                // reflowing its container (highlightAllZones adds a border to .hand,
+                // which shifts the card mid-dragstart), can make the browser CANCEL
+                // the native drag outright — then no dragover/dragend ever fire and
+                // the whole board appears frozen (only a refresh clears it). This is
+                // the exact freeze users hit on every drag. Waiting a tick lets the
+                // browser capture the drag image and commit the drag first — the same
+                // fix the pile-viewer drag already uses.
+                setTimeout(() => {
+                    handCard.style.opacity = "0.5";
+                    handCard.style.cursor = "grabbing";
+                    highlightAllZones();
+                }, 0);
             }
         }, true); // Use capture phase
 
@@ -457,11 +465,9 @@ const manualPlay = {
                         e.dataTransfer.setData("cardInstanceId", card.instanceId);
                         e.dataTransfer.setData("playerKey", playerKey);
                         e.dataTransfer.setData("fromHand", "false");
-                        boardCard.style.opacity = "0.5";
-                        
-                        // Highlight ALL drop zones when dragging board card
-                        console.log("Highlighting all drop zones for board card");
-                        highlightAllZones();
+                        // Defer DOM mutation — a synchronous change can cancel the
+                        // native drag (see the hand-card handler for the full note).
+                        setTimeout(() => { boardCard.style.opacity = "0.5"; highlightAllZones(); }, 0);
                     } else {
                         console.log("✗ Card not found in zone");
                     }
@@ -504,9 +510,8 @@ const manualPlay = {
                 e.dataTransfer.setData("playerKey", playerKey);
                 e.dataTransfer.setData("fromLife", "true");
                 e.dataTransfer.setData("lifeIndex", String(lifeIndex));
-                lifeCard.style.opacity = "0.5";
-                
-                highlightAllZones();
+                // Defer DOM mutation — see the hand-card handler.
+                setTimeout(() => { lifeCard.style.opacity = "0.5"; highlightAllZones(); }, 0);
             }
         }, true);
 
