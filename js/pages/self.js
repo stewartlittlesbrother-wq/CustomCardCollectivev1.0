@@ -584,8 +584,9 @@ let pendingOnlineRender = false;
 // covered. Deferred work is flushed on dragend/drop (and by the watchdog below).
 // Safe for the drop flow: the capture-phase dragend/drop listeners in manual-play
 // clear __ccDragActive BEFORE a drop target's own handler runs its render.
+let __dragDeferCount = 0;      // diagnostics: renders deferred during the current drag
 function deferRenderDuringDrag() {
-    if (isOnlineMatch && window.__ccDragActive) { pendingOnlineRender = true; return true; }
+    if (isOnlineMatch && window.__ccDragActive) { pendingOnlineRender = true; __dragDeferCount++; return true; }
     return false;
 }
 
@@ -649,8 +650,27 @@ function renderOnlineGameState() {
             renderOnlineGameState();
         }
     }, 0);
-    document.addEventListener("dragend", flush, true);
-    document.addEventListener("drop", flush, true);
+    // Per-drag diagnostic breadcrumb: captures, at the end of every drag, how many
+    // renders got deferred, the DOM size (spots a DOM explosion), and whether the
+    // flag actually cleared (spots a stuck drag). Read after a freeze with:
+    //   localStorage.getItem("cc_drag_debug")
+    const breadcrumb = (label) => {
+        try {
+            localStorage.setItem("cc_drag_debug", JSON.stringify({
+                at: label,
+                deferredRenders: __dragDeferCount,
+                domElements: document.getElementsByTagName("*").length,
+                flagStillActive: !!window.__ccDragActive,
+                pending: pendingOnlineRender,
+                ver: window.APP_VERSION || "?",
+                mp: window.__ccMPVer || "?",
+                t: Date.now()
+            }));
+        } catch (_) {}
+        __dragDeferCount = 0;
+    };
+    document.addEventListener("dragend", (e) => { breadcrumb("dragend"); flush(); }, true);
+    document.addEventListener("drop", (e) => { breadcrumb("drop"); flush(); }, true);
 })();
 
 function applyOnlineStateToGame() {
