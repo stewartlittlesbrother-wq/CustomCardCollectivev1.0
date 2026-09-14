@@ -574,6 +574,21 @@ function applySpectatorPlayerState(player, playerKey, publicPlayer) {
 // and flush it the moment the drag ends. THIS is the "freezes when I drag a card
 // in an online match" bug.
 let pendingOnlineRender = false;
+
+// Any render that REBUILDS card DOM (hand/board zones) must refuse to run while a
+// drag is in progress ONLINE — rebuilding destroys the very element being dragged,
+// so the browser never fires dragend/drop and the drag gets stuck (board frozen,
+// clicks swallowed, chat still updates, only a refresh clears it). The prior fix
+// only guarded renderOnlineGameState; this guards the zone renderers themselves so
+// EVERY path (incoming sync, turn automation, annotation redraw, direct calls) is
+// covered. Deferred work is flushed on dragend/drop (and by the watchdog below).
+// Safe for the drop flow: the capture-phase dragend/drop listeners in manual-play
+// clear __ccDragActive BEFORE a drop target's own handler runs its render.
+function deferRenderDuringDrag() {
+    if (isOnlineMatch && window.__ccDragActive) { pendingOnlineRender = true; return true; }
+    return false;
+}
+
 function renderOnlineGameState() {
     if (!gameState) return;
 
@@ -630,6 +645,27 @@ function renderOnlineGameState() {
     }, 0);
     document.addEventListener("dragend", flush, true);
     document.addEventListener("drop", flush, true);
+    // Fail-safe recovery: if a drag's source element gets removed mid-drag, the
+    // browser fires NEITHER dragend nor drop, so __ccDragActive would stay true
+    // forever and every board render would be deferred forever — a permanent
+    // freeze that only a refresh clears. A pointer release always happens when the
+    // user lets go, so clear the flag there too, then flush. A time watchdog is the
+    // last resort for the (rare) case where even pointerup is swallowed.
+    let dragFlagSince = 0;
+    document.addEventListener("dragstart", () => { dragFlagSince = Date.now(); }, true);
+    const recover = () => {
+        if (!window.__ccDragActive) return;
+        window.__ccDragActive = false;
+        dragFlagSince = 0;
+        flush();
+    };
+    document.addEventListener("pointerup", recover, true);
+    document.addEventListener("mouseup", recover, true);
+    setInterval(() => {
+        if (window.__ccDragActive && dragFlagSince && Date.now() - dragFlagSince > 5000) {
+            recover();
+        }
+    }, 1000);
 })();
 
 function applyOnlineStateToGame() {
@@ -5137,6 +5173,7 @@ function updateExtraZoneLabels() {
 }
 
 function renderExtraPiles() {
+    if (deferRenderDuringDrag()) return;
     updateExtraZoneLabels();
     // Spectators see the face-down piles revealed too.
     renderExtraPile(gameState.player1, "player1", "extraFaceUp", "player1ExtraFaceUpArea", true);
@@ -5968,6 +6005,7 @@ function shuffleDeck(deck) {
 // =========================
 
 function renderHands() {
+    if (deferRenderDuringDrag()) return;   // never rebuild the hand mid-drag online
     if (isOnlineMatch) {
         // Spectators see both hands face-up; a player sees only their own.
         renderPlayerHand(gameState.player1, "player1Hand", !isSpectator && playerSlot !== "p1");
@@ -6844,6 +6882,7 @@ function openMyLifePopup(player, playerKey) {
 // =========================
 
 function renderLeaders() {
+    if (deferRenderDuringDrag()) return;
     renderLeader(gameState.player1, "player1LeaderArea");
     renderLeader(gameState.player2, "player2LeaderArea");
     window.manualPlay?.reapplyAnnotations?.();
@@ -6913,6 +6952,7 @@ function renderLeader(player, areaId) {
 // =========================
 
 function renderCharacters() {
+    if (deferRenderDuringDrag()) return;
     renderPlayerCharacters(gameState.player1, "player1");
     renderPlayerCharacters(gameState.player2, "player2");
     window.manualPlay?.reapplyAnnotations?.();
@@ -6993,6 +7033,7 @@ function isDonAttachmentTarget(playerKey, card) {
 // =========================
 
 function renderStages() {
+    if (deferRenderDuringDrag()) return;
     renderPlayerStage(gameState.player1, "player1StageArea");
     renderPlayerStage(gameState.player2, "player2StageArea");
     window.manualPlay?.reapplyAnnotations?.();

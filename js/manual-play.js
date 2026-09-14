@@ -154,7 +154,7 @@ const manualPlay = {
         // where it stalled (which zone, how many overlays / body nodes) even
         // though the console is unusable. Read it with:
         //   localStorage.getItem("cc_drag_debug")
-        window.__ccMPVer = 23; // manual-play build marker (paste window.__ccMPVer to check)
+        window.__ccMPVer = 24; // manual-play build marker (paste window.__ccMPVer to check)
         document.addEventListener("dragstart", (e) => {
             window.__ccDragActive = true;
             window.__ccDragOvers = 0;
@@ -1748,6 +1748,12 @@ const manualPlay = {
     // this is called both right after a note/arrow is created and from self.js's render
     // functions so annotations survive those rebuilds.
     reapplyAnnotations() {
+        // Never redraw notes/arrows mid-drag: this removes+re-appends note labels on
+        // card elements (including, potentially, the one being dragged), which is
+        // where the "note bugs out then everything freezes" report comes from. A
+        // drop/dragend always triggers a fresh render that calls this again, so the
+        // notes catch up the instant the drag ends.
+        if (window.__ccDragActive) return;
         document.querySelectorAll(".card-note").forEach(n => n.remove());
 
         const drawNote = (key, note, isRemote) => {
