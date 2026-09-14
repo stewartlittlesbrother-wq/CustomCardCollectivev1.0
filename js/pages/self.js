@@ -575,15 +575,13 @@ function applySpectatorPlayerState(player, playerKey, publicPlayer) {
 // in an online match" bug.
 let pendingOnlineRender = false;
 
-// Any render that REBUILDS card DOM (hand/board zones) must refuse to run while a
-// drag is in progress ONLINE — rebuilding destroys the very element being dragged,
-// so the browser never fires dragend/drop and the drag gets stuck (board frozen,
-// clicks swallowed, chat still updates, only a refresh clears it). The prior fix
-// only guarded renderOnlineGameState; this guards the zone renderers themselves so
-// EVERY path (incoming sync, turn automation, annotation redraw, direct calls) is
-// covered. Deferred work is flushed on dragend/drop (and by the watchdog below).
-// Safe for the drop flow: the capture-phase dragend/drop listeners in manual-play
-// clear __ccDragActive BEFORE a drop target's own handler runs its render.
+// A render that rebuilds card DOM must not run mid-drag: it destroys the element
+// being dragged, so the browser never fires dragend/drop and the drag sticks.
+// renderOnlineGameState is the funnel for incoming opponent updates, but some
+// paths (notably maybeRunOnlineTurnStart) call the zone renderers DIRECTLY, so we
+// guard those too. To make sure a stuck flag can never freeze the board forever,
+// this is paired with the pointer-release recovery in flushDeferredRenderOnDragEnd
+// (a mouseup/pointerup — which never fires during a live drag — clears the flag).
 let __dragDeferCount = 0;      // diagnostics: renders deferred during the current drag
 function deferRenderDuringDrag() {
     if (isOnlineMatch && window.__ccDragActive) { pendingOnlineRender = true; __dragDeferCount++; return true; }
@@ -593,7 +591,7 @@ function deferRenderDuringDrag() {
 function renderOnlineGameState() {
     if (!gameState) return;
 
-    if (window.__ccDragActive) { pendingOnlineRender = true; return; }
+    if (window.__ccDragActive) { pendingOnlineRender = true; __dragDeferCount++; return; }
 
     clearHandSelection();
     clearBoardSelection();
@@ -638,21 +636,15 @@ function renderOnlineGameState() {
 // whatever the opponent did during the drag. Runs on a microtask so manual-play's
 // own dragend handler has already cleared window.__ccDragActive.
 (function flushDeferredRenderOnDragEnd() {
-    // Flush the deferred render ONLY on genuine drag-end signals (dragend/drop).
-    // We must NEVER clear __ccDragActive or flush on a guess (pointerup/mouseup/
-    // timer): doing so while a real drag is still in progress lets a render run
-    // mid-drag and destroy the dragged card — which IS the freeze. The defer-only
-    // guards below (deferRenderDuringDrag) prevent the source from being destroyed
-    // in the first place, so no such "recovery" is needed.
     const flush = () => setTimeout(() => {
         if (pendingOnlineRender && !window.__ccDragActive) {
             pendingOnlineRender = false;
             renderOnlineGameState();
         }
     }, 0);
-    // Per-drag diagnostic breadcrumb: captures, at the end of every drag, how many
-    // renders got deferred, the DOM size (spots a DOM explosion), and whether the
-    // flag actually cleared (spots a stuck drag). Read after a freeze with:
+    // Per-drag diagnostic breadcrumb: captures how many renders got deferred, the
+    // DOM size (spots a DOM explosion), and whether the flag actually cleared
+    // (spots a stuck drag). Read after a freeze with:
     //   localStorage.getItem("cc_drag_debug")
     const breadcrumb = (label) => {
         try {
@@ -669,8 +661,25 @@ function renderOnlineGameState() {
         } catch (_) {}
         __dragDeferCount = 0;
     };
-    document.addEventListener("dragend", (e) => { breadcrumb("dragend"); flush(); }, true);
-    document.addEventListener("drop", (e) => { breadcrumb("drop"); flush(); }, true);
+    document.addEventListener("dragend", () => { breadcrumb("dragend"); flush(); }, true);
+    document.addEventListener("drop", () => { breadcrumb("drop"); flush(); }, true);
+
+    // SAFE stuck-flag recovery. The freeze the user hit was: a drag ends WITHOUT
+    // firing dragend/drop (e.g. its source got removed, or the native drag was
+    // cancelled), so __ccDragActive stays true and every online render is deferred
+    // forever — a frozen board that only a refresh clears. A pointer/mouse release
+    // is safe to recover on because the browser does NOT dispatch mouseup/pointerup
+    // while a native HTML5 drag is actually in progress — so if we receive one while
+    // the flag is set, the drag is already over. This never clears a live drag, so
+    // it can't cause the mid-drag destruction that a naive timer-based clear would.
+    const recover = () => {
+        if (!window.__ccDragActive) return;
+        window.__ccDragActive = false;
+        breadcrumb("recover");
+        flush();
+    };
+    document.addEventListener("mouseup", recover, true);
+    document.addEventListener("pointerup", recover, true);
 })();
 
 function applyOnlineStateToGame() {
@@ -6010,7 +6019,7 @@ function shuffleDeck(deck) {
 // =========================
 
 function renderHands() {
-    if (deferRenderDuringDrag()) return;   // never rebuild the hand mid-drag online
+    if (deferRenderDuringDrag()) return;
     if (isOnlineMatch) {
         // Spectators see both hands face-up; a player sees only their own.
         renderPlayerHand(gameState.player1, "player1Hand", !isSpectator && playerSlot !== "p1");
