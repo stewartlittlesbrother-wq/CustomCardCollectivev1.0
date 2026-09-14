@@ -7211,12 +7211,21 @@ function hideMpDraftCover() {
   if (cover) cover.hidden = true;
 }
 
-async function whenCardsReady(timeoutMs = 25000) {
+async function whenCardsReady(timeoutMs = 40000) {
   const start = Date.now();
-  while ((!state.cards || !state.cards.length) && Date.now() - start < timeoutMs) {
+  // Wait for the FULL pool, not just the first streamed batch. loadCardPool sets
+  // state.cards to the bundled cards immediately (state.sharedSyncing = true),
+  // then streams in the whole shared library and only flips sharedSyncing → false
+  // once the complete pool is assembled. Opening packs on the early partial pool
+  // is what made the draft feel non-random — it was drawing from ~24 bundled
+  // cards instead of the 2000+ card library.
+  while (Date.now() - start < timeoutMs) {
+    const haveCards = state.cards && state.cards.length;
+    const fullyLoaded = state.sharedSyncing === false;   // set only when done
+    if (haveCards && fullyLoaded) return true;
     await new Promise(r => setTimeout(r, 150));
   }
-  return Boolean(state.cards && state.cards.length);
+  return Boolean(state.cards && state.cards.length);   // timed out — use what we have
 }
 
 // Entry point, called during boot. Returns true if we took over the page for a
