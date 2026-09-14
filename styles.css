@@ -6715,6 +6715,9 @@ html.touch-device .collection-hide-btn { opacity: .9; }
    on its children. */
 .pack-overlay[hidden] { display: none !important; }
 .pack-overlay [hidden] { display: none !important; }
+/* Draft-only shortcut under the booster / reveal. */
+.pack-skip-all { margin-top: 14px; align-self: center; opacity: .9; }
+.pack-skip-all:hover { opacity: 1; }
 
 /* The unopened booster */
 .pack-booster {

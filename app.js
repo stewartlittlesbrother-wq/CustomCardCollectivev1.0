@@ -6595,19 +6595,24 @@ function ensurePackOverlay() {
           <button type="button" class="ghost" id="packClose">Close</button>
         </div>
       </div>
+      <!-- Draft only: a secondary shortcut to skip the tap-through and open every
+           remaining pack at once. Individual opening (tap the pack / "Open next
+           pack") always stays available alongside it. -->
+      <button type="button" class="ghost pack-skip-all" id="packSkipAll" hidden>⏩ Open all packs</button>
       <img class="pack-zoom" id="packZoom" alt="" hidden>
     </div>`;
   document.body.appendChild(overlay);
   packOverlayEl = overlay;
 
-  // Close on backdrop click or the Close button; Esc too.
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) closePack(); });
+  // The overlay closes ONLY via its own Close / Cancel button — clicking the
+  // backdrop or pressing Esc no longer closes it, so you can't lose an opened
+  // pack (or, in a multiplayer draft, abandon your opponent) by a stray click.
   overlay.querySelector("#packClose").addEventListener("click", closePack);
   // #packAgain uses .onclick (set by restoreNormalPackButtons / onDraftPackRevealed)
   // so its action can switch between "open another" and the draft steps.
   overlay.querySelector("#packAgain").onclick = () => startPackOpen();
+  overlay.querySelector("#packSkipAll").addEventListener("click", openAllDraftPacks);
   overlay.querySelector("#packBooster").addEventListener("click", revealPack);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !overlay.hidden) closePack(); });
 
   // Hover a revealed card to zoom it big (like the deck builder). Resolves the
   // art from the cache the same way, and a token guards fast hovering.
@@ -6644,8 +6649,10 @@ function restoreNormalPackButtons() {
   if (!packOverlayEl) return;
   const again = packOverlayEl.querySelector("#packAgain");
   const close = packOverlayEl.querySelector("#packClose");
+  const skip = packOverlayEl.querySelector("#packSkipAll");
   if (again) { again.hidden = false; again.textContent = "Open another"; again.onclick = () => startPackOpen(); }
-  if (close) close.textContent = "Close";
+  if (close) { close.hidden = false; close.textContent = "Close"; close.onclick = null; }
+  if (skip) skip.hidden = true;   // "Open all" is a draft-only shortcut
 }
 
 let currentPack = [];
@@ -6770,8 +6777,10 @@ function beginDraft(collectionSlug) {
   overlay.hidden = false;
   const again = overlay.querySelector("#packAgain");
   const close = overlay.querySelector("#packClose");
+  const skip = overlay.querySelector("#packSkipAll");
   again.hidden = true;                 // shown only after a pack is revealed
   close.textContent = "Cancel draft";
+  if (skip) skip.hidden = false;       // let the player skip straight to the deck
 }
 
 // Called after each draft pack is revealed: bank the pulls and set up the next
@@ -6789,6 +6798,27 @@ function onDraftPackRevealed() {
     again.textContent = `Open next pack (${draftPacksOpened}/${DRAFT_PACKS})`;
     again.onclick = () => startPackOpen();
   }
+}
+
+// "Open all packs": skip the tap-through and bank every remaining pack at once,
+// then go straight to the deck builder. Works for both solo and multiplayer draft.
+function openAllDraftPacks() {
+  if (!packDraftMode) return;
+  // A booster showing on the table is a pack that was drawn (startPackOpen) but
+  // not yet revealed/banked — bank it before drawing the rest, so we don't skip
+  // or double-count the one currently on screen.
+  const boosterEl = packOverlayEl && packOverlayEl.querySelector("#packBooster");
+  const boosterShowing = boosterEl && !boosterEl.hidden;
+  if (boosterShowing && currentPack.length && draftPacksOpened < DRAFT_PACKS) {
+    draftPool.push(...currentPack);
+    draftPacksOpened += 1;
+  }
+  while (draftPacksOpened < DRAFT_PACKS) {
+    draftPool.push(...pickPackCards(PACK_SIZE));
+    draftPacksOpened += 1;
+  }
+  if (mpDraft) openMultiplayerDraftBuilder();
+  else openDraftBuilder();
 }
 
 // Aggregate the pool into { cardId: {card, count} } so the builder can cap copies
@@ -7127,9 +7157,14 @@ function beginMultiplayerDraft() {
   overlay.hidden = false;
   const again = overlay.querySelector("#packAgain");
   const close = overlay.querySelector("#packClose");
+  const skip = overlay.querySelector("#packSkipAll");
   again.hidden = true;
-  close.textContent = "Leave draft";
-  close.onclick = () => { if (confirm("Leave the draft and return to the lobby?")) leaveMpDraft(); };
+  // No "Leave draft" during a multiplayer draft: once you're opening packs, your
+  // opponent is counting on you, so there's no button to bail and strand them.
+  // (The build timer auto-fills + forces the game if someone goes idle.)
+  close.hidden = true;
+  close.onclick = null;
+  if (skip) skip.hidden = false;       // skip straight to the deck builder
 }
 
 function leaveMpDraft() {
