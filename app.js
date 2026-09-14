@@ -6086,6 +6086,9 @@ function renderSavedDecks() {
     `;
     }).join("")
     : `<div class="empty">No saved decks yet. Name a deck and hit Save.</div>`;
+  // The leader thumbnails are light-pool cards whose art lives in the cache, so
+  // kick off their lazy load — without this the thumbnails stayed black.
+  observeLazyImages(el.savedDeckList);
 }
 
 function queueDeckTableResize() {
@@ -6425,6 +6428,30 @@ function scheduleCardGridRender() {
   state.searchRenderTimer = setTimeout(renderCardGrid, 160);
 }
 
+// Small bounded LRU of already-resolved card art (URL or dataURL), keyed by
+// storageKey#artIndex. Re-rendering a grid / deck list / saved-decks list rebuilds
+// its innerHTML, which recreates every lazy <img> blank and re-fetches it from
+// IndexedDB - the async gap is the "cards flash black when I type / add a card"
+// flicker. Serving a src straight from this cache paints instantly with no flash.
+// Capped so base64 art can't re-accumulate into the mobile-OOM territory the
+// light pool was built to avoid (~400 * ~90KB ≈ 35MB worst case).
+const ART_MEM_CACHE = new Map();
+const ART_MEM_CACHE_MAX = 400;
+function artMemGet(key) {
+  if (!key || !ART_MEM_CACHE.has(key)) return undefined;
+  const url = ART_MEM_CACHE.get(key);
+  ART_MEM_CACHE.delete(key); ART_MEM_CACHE.set(key, url);   // bump as most-recent
+  return url;
+}
+function artMemSet(key, url) {
+  if (!key || !url) return;
+  if (ART_MEM_CACHE.has(key)) ART_MEM_CACHE.delete(key);
+  ART_MEM_CACHE.set(key, url);
+  while (ART_MEM_CACHE.size > ART_MEM_CACHE_MAX) {
+    ART_MEM_CACHE.delete(ART_MEM_CACHE.keys().next().value);  // evict oldest
+  }
+}
+
 function cardVisual(card) {
   // Only use a direct src if the SELECTED art is actually in memory. For a light
   // pool card the main image may be a plain URL (kept in memory) while its ALTS
@@ -6446,11 +6473,25 @@ function cardVisual(card) {
     `;
   }
 
-  // The selected art (main or an alt) lives in the cache, not in memory. Render a
-  // placeholder <img> tagged with its cache key + art index; observeLazyImages()
-  // fills it in from IndexedDB when the tile nears the viewport, so a huge library
-  // never loads all its images at once.
+  // The selected art (main or an alt) lives in the cache, not in memory.
   if (card && card.__storageKey && (card.__cachedImg || card.__altCount)) {
+    // Already resolved once this session? Paint it straight from memory so a
+    // re-render (typing, adding a card) doesn't flash black while IndexedDB reads.
+    const memHit = artMemGet(`${card.__storageKey}#${idx}`);
+    if (memHit) {
+      return `
+      <img
+        alt="${escapeAttr(card.name)}"
+        src="${escapeAttr(memHit)}"
+        data-fallback-name="${escapeAttr(card.name)}"
+        data-fallback-number="${escapeAttr(card.cardNumber)}"
+        data-fallback-color="${escapeAttr(colorValue(card))}"
+      >
+    `;
+    }
+    // First time: a placeholder <img> tagged with its cache key + art index;
+    // observeLazyImages() fills it in from IndexedDB when the tile nears the
+    // viewport, so a huge library never loads all its images at once.
     return `
       <img
         class="lazy-card-img"
@@ -6496,7 +6537,11 @@ async function resolveCardImageUrl(card) {
   if (card.__storageKey) {
     try {
       const library = await getCardLibrary();
-      if (library && library.getCachedArt) return await library.getCachedArt(card.__storageKey, idx);
+      if (library && library.getCachedArt) {
+        const url = await library.getCachedArt(card.__storageKey, idx);
+        if (url) artMemSet(`${card.__storageKey}#${idx}`, url);
+        return url;
+      }
     } catch (_) {}
   }
   return "";
@@ -6510,7 +6555,7 @@ async function loadLazyCardImage(img) {
   try {
     const library = await getCardLibrary();
     const url = library && library.getCachedArt ? await library.getCachedArt(key, index) : "";
-    if (url) img.src = url;
+    if (url) { img.src = url; artMemSet(`${key}#${index}`, url); }
     else img.classList.add("lazy-card-img-empty");
   } catch (_) {
     img.classList.add("lazy-card-img-empty");
@@ -6722,6 +6767,8 @@ let draftPool = [];          // every card pulled across the 10 packs (with dupe
 let draftPacksOpened = 0;
 let draftDeck = {};          // { cardId: qty } chosen for the deck
 let draftTimer = null;
+let draftAutoOpening = false; // "Open all packs" is auto-playing the reveals
+let draftPacksDone = false;   // packs finished → in (or entering) the builder
 
 // Collections that actually have packable cards, for the pre-draft pool chooser.
 function draftCollectionOptions() {
@@ -6772,53 +6819,113 @@ function beginDraft(collectionSlug) {
   draftPool = [];
   draftPacksOpened = 0;
   draftDeck = {};
+  draftAutoOpening = false;
+  draftPacksDone = false;
   const overlay = ensurePackOverlay();
   startPackOpen();
   overlay.hidden = false;
   const again = overlay.querySelector("#packAgain");
   const close = overlay.querySelector("#packClose");
   const skip = overlay.querySelector("#packSkipAll");
-  again.hidden = true;                 // shown only after a pack is revealed
+  // "Open pack" (individual) is always available; the pool tap also reveals.
+  again.hidden = false;
+  again.textContent = "Open pack";
+  again.onclick = draftOpenNextPack;
+  close.hidden = false;
   close.textContent = "Cancel draft";
-  if (skip) skip.hidden = false;       // let the player skip straight to the deck
+  if (skip) { skip.hidden = false; skip.textContent = "⏩ Open all packs"; skip.onclick = openAllDraftPacks; }
 }
 
 // Called after each draft pack is revealed: bank the pulls and set up the next
 // step ("Open next pack" until 10, then "Build your deck").
 function onDraftPackRevealed() {
+  // Ignore a stray late reveal that lands after we've already left pack-opening
+  // (e.g. an in-flight animation finishing right after "Skip to builder").
+  if (draftPacksDone || draftPacksOpened >= DRAFT_PACKS) return;
   const overlay = ensurePackOverlay();
   draftPool.push(...currentPack);
   draftPacksOpened += 1;
   const again = overlay.querySelector("#packAgain");
+  // During "Open all packs" auto-play the buttons are driven by the loop, not the
+  // user — leave them as the loop set them.
+  if (draftAutoOpening) return;
   again.hidden = false;
   if (draftPacksOpened >= DRAFT_PACKS) {
     again.textContent = `Build your deck → (${draftPool.length} cards)`;
-    again.onclick = () => (mpDraft ? openMultiplayerDraftBuilder() : openDraftBuilder());
+    again.onclick = finishDraftPacks;
   } else {
     again.textContent = `Open next pack (${draftPacksOpened}/${DRAFT_PACKS})`;
-    again.onclick = () => startPackOpen();
+    again.onclick = draftOpenNextPack;
   }
 }
 
-// "Open all packs": skip the tap-through and bank every remaining pack at once,
-// then go straight to the deck builder. Works for both solo and multiplayer draft.
-function openAllDraftPacks() {
-  if (!packDraftMode) return;
-  // A booster showing on the table is a pack that was drawn (startPackOpen) but
-  // not yet revealed/banked — bank it before drawing the rest, so we don't skip
-  // or double-count the one currently on screen.
-  const boosterEl = packOverlayEl && packOverlayEl.querySelector("#packBooster");
-  const boosterShowing = boosterEl && !boosterEl.hidden;
-  if (boosterShowing && currentPack.length && draftPacksOpened < DRAFT_PACKS) {
-    draftPool.push(...currentPack);
-    draftPacksOpened += 1;
+// One click = one full pack: reveal the booster on screen, or draw + reveal the
+// next one. Kept as an explicit button (alongside "Open all packs") plus the pool
+// tap. After the last pack it routes to the deck builder.
+function draftOpenNextPack() {
+  if (draftAutoOpening || draftPacksDone) return;
+  if (draftPacksOpened >= DRAFT_PACKS) { finishDraftPacks(); return; }
+  const booster = packOverlayEl && packOverlayEl.querySelector("#packBooster");
+  const showing = booster && !booster.hidden && !booster.classList.contains("pack-booster-opening");
+  if (showing) {
+    revealPack();               // reveal the pack currently on the table
+  } else {
+    startPackOpen();            // draw a fresh booster…
+    setTimeout(revealPack, 160); // …and tear it open
   }
+}
+
+// Finish the pack-opening phase and go to the deck builder (solo or multiplayer).
+function finishDraftPacks() {
+  draftAutoOpening = false;
+  draftPacksDone = true;
+  if (mpDraft) openMultiplayerDraftBuilder();
+  else openDraftBuilder();
+}
+
+// "Open all packs": play through every remaining pack's reveal animation in
+// sequence, showing all 120 cards, with the button turning into "Skip to builder"
+// so you can jump straight in at any point. Works for solo + multiplayer draft.
+async function autoPlayAllPacks() {
+  if (draftAutoOpening || draftPacksDone) return;
+  draftAutoOpening = true;
+  const overlay = ensurePackOverlay();
+  const again = overlay.querySelector("#packAgain");
+  const skip = overlay.querySelector("#packSkipAll");
+  if (again) again.hidden = true;                 // loop drives the flow now
+  if (skip) { skip.textContent = "⏭ Skip to builder"; skip.onclick = skipDraftToBuilder; }
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const boosterEl = () => overlay.querySelector("#packBooster");
+
+  while (draftPacksOpened < DRAFT_PACKS && draftAutoOpening) {
+    const showing = boosterEl() && !boosterEl().hidden;
+    if (!showing) { startPackOpen(); await sleep(160); }
+    const before = draftPacksOpened;
+    revealPack();                                   // banks via onDraftPackRevealed (~520ms)
+    // Wait until this pack is banked (or the user skips).
+    for (let i = 0; i < 40 && draftPacksOpened === before && draftAutoOpening; i++) await sleep(60);
+    if (!draftAutoOpening) return;                  // skip pressed → skipDraftToBuilder handles the rest
+    await sleep(650);                               // let the revealed cards be seen
+  }
+  if (draftAutoOpening && draftPacksOpened >= DRAFT_PACKS) finishDraftPacks();
+}
+
+function skipDraftToBuilder() {
+  draftAutoOpening = false;
+  draftPacksDone = true;                            // block any in-flight late reveal
   while (draftPacksOpened < DRAFT_PACKS) {
     draftPool.push(...pickPackCards(PACK_SIZE));
     draftPacksOpened += 1;
   }
   if (mpDraft) openMultiplayerDraftBuilder();
   else openDraftBuilder();
+}
+
+// "Open all packs": kicks off the animated auto-play (see autoPlayAllPacks).
+function openAllDraftPacks() {
+  if (!packDraftMode) return;
+  autoPlayAllPacks();
 }
 
 // Aggregate the pool into { cardId: {card, count} } so the builder can cap copies
@@ -6986,6 +7093,27 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// Right-click a pool card to add the MAX copies you pulled of it at once (capped
+// at the 50-card deck size). A quick way to fill out playsets while drafting.
+document.addEventListener("contextmenu", (e) => {
+  if (!draftBuilderEl || draftBuilderEl.hidden) return;
+  const add = e.target.closest && e.target.closest("[data-draft-add]");
+  if (!add) return;
+  e.preventDefault();                        // no browser menu on a pool card
+  if (mpDraft && mpDraft.locked) return;     // locked deck can't be edited
+  const id = add.getAttribute("data-draft-card");
+  const pulled = draftPool.filter(c => c.id === id).length;
+  let total = Object.values(draftDeck).reduce((a, b) => a + b, 0);
+  let changed = false;
+  while ((draftDeck[id] || 0) < pulled && total < DRAFT_DECK_SIZE) {
+    draftDeck[id] = (draftDeck[id] || 0) + 1;
+    total++;
+    changed = true;
+  }
+  if (changed) { refreshDraftCell(id); renderDraftDeckAndCount(); }
+  else if (total >= DRAFT_DECK_SIZE) toast(`Deck is full (${DRAFT_DECK_SIZE} cards).`);
+});
+
 // A random deck map { cardId: qty } of `size` cards, max 4 of each. Draws from the
 // SAME pool the draft used (respects the chosen collection), skipping leaders/DON!!.
 function randomDeckMap(size) {
@@ -7104,7 +7232,7 @@ async function maybeStartMultiplayerDraft() {
   try {
     [firebaseApp, svc] = await Promise.all([
       import("./js/firebase/firebaseApp.js"),
-      import("./js/firebase/multiplayerService.js?v=draft-2")
+      import("./js/firebase/multiplayerService.js?v=draft-3")
     ]);
     await firebaseApp.signInGuest();
   } catch (e) {
@@ -7152,19 +7280,62 @@ function beginMultiplayerDraft() {
   draftPool = [];
   draftPacksOpened = 0;
   draftDeck = {};
+  draftAutoOpening = false;
+  draftPacksDone = false;
+  mpDraft.builderOpen = false;
   const overlay = ensurePackOverlay();
   startPackOpen();
   overlay.hidden = false;
   const again = overlay.querySelector("#packAgain");
   const close = overlay.querySelector("#packClose");
   const skip = overlay.querySelector("#packSkipAll");
-  again.hidden = true;
+  // "Open pack" (individual) is available; the pool tap also reveals.
+  again.hidden = false;
+  again.textContent = "Open pack";
+  again.onclick = draftOpenNextPack;
   // No "Leave draft" during a multiplayer draft: once you're opening packs, your
   // opponent is counting on you, so there's no button to bail and strand them.
   // (The build timer auto-fills + forces the game if someone goes idle.)
   close.hidden = true;
   close.onclick = null;
-  if (skip) skip.hidden = false;       // skip straight to the deck builder
+  if (skip) { skip.hidden = false; skip.textContent = "⏩ Open all packs"; skip.onclick = openAllDraftPacks; }
+
+  // Persistent draft-node watch for the WHOLE draft (pack opening + building):
+  // learns the shared start time, tracks the opponent's status, and — because the
+  // clock now starts when the FIRST player reaches the builder — forces a slow
+  // pack-opener into the builder once time is up so they still get a deck.
+  if (mpDraft.unsubDraft) mpDraft.unsubDraft();
+  mpDraft.unsubDraft = mpDraft.svc.subscribeToDraft(mpDraft.room, (draft) => {
+    const other = mpDraft.slot === "p1" ? "p2" : "p1";
+    if (draft.startedAt && !mpDraft.startedAt) mpDraft.startedAt = Number(draft.startedAt);
+    mpDraft.opponentInBuilder = Boolean(draft[other]?.inBuilder);
+    mpDraft.opponentLocked = Boolean(draft[other]?.locked);
+    updateMpDraftStatus();
+    maybeForceExpiredDraft();
+  });
+
+  // Watch the match so both clients jump into the game once both have locked.
+  if (mpDraft.unsubMatch) mpDraft.unsubMatch();
+  mpDraft.unsubMatch = mpDraft.svc.subscribeToMatch(mpDraft.room, (match) => {
+    if (!match) return;
+    const p1 = match.players?.p1, p2 = match.players?.p2;
+    const bothReady = p1?.ready && p2?.ready && p1?.deck && p2?.deck;
+    if (match.status === "started" || bothReady) enterMpDraftGame();
+  });
+
+  // Single timer for the whole draft (drives both the expiry-force during pack
+  // opening and the visible countdown once building).
+  clearInterval(mpDraft.timer);
+  mpDraft.timer = setInterval(tickMpDraftTimer, 500);
+}
+
+// If the shared clock is up while a player is STILL opening packs, push them into
+// the builder (which immediately auto-fills their deck from their pulls). Prevents
+// anyone being stranded on the pack screen past the deadline.
+function maybeForceExpiredDraft() {
+  if (!mpDraft || mpDraft.builderOpen || !mpDraft.startedAt) return;
+  const left = mpDraft.startedAt + DRAFT_MINUTES * 60 * 1000 - Date.now();
+  if (left <= 0) skipDraftToBuilder();
 }
 
 function leaveMpDraft() {
@@ -7199,43 +7370,17 @@ function openMultiplayerDraftBuilder() {
   if (ready) ready.textContent = "Lock in deck";
 
   ensureMpDraftChrome(el2);
+  mpDraft.builderOpen = true;
 
-  // Announce we're in the builder, then anchor the shared clock once both are.
-  mpDraft.svc.markDraftInBuilder(mpDraft.room, mpDraft.slot).catch(() => {});
+  // Announce we're in the builder and start the shared clock NOW — the timer
+  // begins as soon as the FIRST player reaches the builder. The draft-node watch
+  // + match watch + timer are already running from beginMultiplayerDraft().
+  mpDraft.svc.markDraftInBuilder(mpDraft.room, mpDraft.slot)
+    .then(() => mpDraft.svc.claimDraftStartIfReady(mpDraft.room))
+    .catch(() => {});
 
-  // Watch the draft node for the shared start time + opponent status.
-  if (mpDraft.unsubDraft) mpDraft.unsubDraft();
-  mpDraft.unsubDraft = mpDraft.svc.subscribeToDraft(mpDraft.room, (draft) => {
-    const other = mpDraft.slot === "p1" ? "p2" : "p1";
-    // Both in the builder but no clock yet → claim it (transaction picks one).
-    if (draft.p1?.inBuilder && draft.p2?.inBuilder && !draft.startedAt) {
-      mpDraft.svc.claimDraftStartIfReady(mpDraft.room).catch(() => {});
-    }
-    if (draft.startedAt && !mpDraft.startedAt) mpDraft.startedAt = Number(draft.startedAt);
-    mpDraft.opponentInBuilder = Boolean(draft[other]?.inBuilder);
-    updateMpDraftStatus();
-  });
-
-  // Watch the match: once both players have locked (ready + deck submitted) — or
-  // the game is already started — jump into the game. We deliberately DON'T call
-  // startMatch here: this page (index.html) doesn't load the deck-building
-  // globals (parseDeckText/getCardById/leaders) that startMatch needs. The game
-  // page (self.html) DOES, and its ensureOnlineMatchStarted() self-heal deals the
-  // match on arrival, so both clients just navigate in and one of them starts it.
-  if (mpDraft.unsubMatch) mpDraft.unsubMatch();
-  mpDraft.unsubMatch = mpDraft.svc.subscribeToMatch(mpDraft.room, (match) => {
-    if (!match) return;
-    const p1 = match.players?.p1, p2 = match.players?.p2;
-    const bothReady = p1?.ready && p2?.ready && p1?.deck && p2?.deck;
-    if (match.status === "started" || bothReady) enterMpDraftGame();
-  });
-
-  // Chat.
   wireMpDraftChat();
-
-  // Shared countdown tick.
-  clearInterval(mpDraft.timer);
-  mpDraft.timer = setInterval(tickMpDraftTimer, 500);
+  updateMpDraftStatus();
   tickMpDraftTimer();
 }
 
@@ -7285,8 +7430,13 @@ function mpDraftTotal() {
 }
 
 function tickMpDraftTimer() {
+  if (!mpDraft) return;
+  // Still opening packs: the only job here is to force into the builder if the
+  // shared clock (started by whoever got to the builder first) has run out.
+  if (!mpDraft.builderOpen) { maybeForceExpiredDraft(); return; }
+
   const el2 = draftBuilderEl;
-  if (!el2 || el2.hidden || !mpDraft) return;
+  if (!el2 || el2.hidden) return;
   const timerEl = el2.querySelector("#draftTimer");
 
   if (!mpDraft.startedAt) {
@@ -7320,7 +7470,7 @@ function tickMpDraftTimer() {
 
 function updateMpDraftStatus() {
   const el2 = draftBuilderEl;
-  if (!el2 || !mpDraft) return;
+  if (!el2 || !mpDraft || !mpDraft.builderOpen) return;
   let status = el2.querySelector("#mpDraftStatus");
   if (!status) {
     status = document.createElement("div");
@@ -7329,15 +7479,17 @@ function updateMpDraftStatus() {
     const top = el2.querySelector(".draft-top");
     if (top) top.appendChild(status);
   }
-  if (mpDraft.locked) {
-    status.textContent = "Locked ✓ — waiting for your opponent…";
-  } else if (!mpDraft.startedAt) {
-    status.textContent = mpDraft.opponentInBuilder
-      ? "Starting the timer…"
-      : "Waiting for your opponent to finish opening packs…";
-  } else {
-    status.textContent = "Build your 50-card deck.";
-  }
+  // Your own live status.
+  const youState = mpDraft.locked ? "Locked ✓" : "Building…";
+  // Opponent's status, from the shared draft node: locked > building > packs.
+  const oppState = mpDraft.opponentLocked
+    ? "Locked ✓"
+    : (mpDraft.opponentInBuilder ? "Building…" : "Opening packs…");
+  const youCls = mpDraft.locked ? "mp-ready" : "mp-waiting";
+  const oppCls = mpDraft.opponentLocked ? "mp-ready" : "mp-waiting";
+  status.innerHTML =
+    `<span class="mp-draft-side ${youCls}">You: ${youState}</span>` +
+    `<span class="mp-draft-side ${oppCls}">Opponent: ${escapeHtml(oppState)}</span>`;
 }
 
 // Manual Ready button: lock (must be a full 50) or unlock.

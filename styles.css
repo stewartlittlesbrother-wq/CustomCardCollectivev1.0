@@ -6963,9 +6963,17 @@ html.touch-device .collection-hide-btn { opacity: .9; }
 .mp-draft-builder .draft-top { flex-wrap: wrap; }
 .mp-draft-status {
   flex-basis: 100%;
+  display: flex; gap: 16px; flex-wrap: wrap;
   font-size: .82rem; color: var(--muted, #9db1a8);
   padding-top: 4px;
 }
+.mp-draft-side {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 10px; border-radius: 999px;
+  background: rgba(255,255,255,.06); font-weight: 700;
+}
+.mp-draft-side.mp-ready { background: rgba(52,209,127,.18); color: var(--accent, #34d17f); }
+.mp-draft-side.mp-waiting { color: var(--muted, #9db1a8); }
 .draft-timer.draft-timer-warn {
   background: rgba(255,70,70,.2); color: #ff6a6a;
   animation: mp-draft-pulse 1s ease-in-out infinite;

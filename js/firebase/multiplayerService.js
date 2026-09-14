@@ -658,15 +658,15 @@ export async function setDraftLocked(roomCode, playerSlot, locked) {
     });
 }
 
-// Anchor the shared countdown the instant both players are in the builder. A
-// transaction so that if both clients notice "both in builder" together, only one
-// timestamp is written and both then count down from the same moment.
+// Anchor the shared countdown the instant the FIRST player reaches the builder.
+// A transaction so that if both clients enter together, only one timestamp is
+// written and both then count down from the same moment.
 export async function claimDraftStartIfReady(roomCode) {
     const code = cleanRoomCode(roomCode);
     const snapshot = await get(ref(database, `matches/${code}/draft`));
     const draft = snapshot.val() || {};
     if (draft.startedAt) return draft.startedAt;
-    if (!(draft.p1?.inBuilder && draft.p2?.inBuilder)) return null;
+    if (!(draft.p1?.inBuilder || draft.p2?.inBuilder)) return null;
     const result = await runTransaction(
         ref(database, `matches/${code}/draft/startedAt`),
         (current) => (current ? undefined : Date.now())
