@@ -637,6 +637,12 @@ function renderOnlineGameState() {
 // whatever the opponent did during the drag. Runs on a microtask so manual-play's
 // own dragend handler has already cleared window.__ccDragActive.
 (function flushDeferredRenderOnDragEnd() {
+    // Flush the deferred render ONLY on genuine drag-end signals (dragend/drop).
+    // We must NEVER clear __ccDragActive or flush on a guess (pointerup/mouseup/
+    // timer): doing so while a real drag is still in progress lets a render run
+    // mid-drag and destroy the dragged card — which IS the freeze. The defer-only
+    // guards below (deferRenderDuringDrag) prevent the source from being destroyed
+    // in the first place, so no such "recovery" is needed.
     const flush = () => setTimeout(() => {
         if (pendingOnlineRender && !window.__ccDragActive) {
             pendingOnlineRender = false;
@@ -645,27 +651,6 @@ function renderOnlineGameState() {
     }, 0);
     document.addEventListener("dragend", flush, true);
     document.addEventListener("drop", flush, true);
-    // Fail-safe recovery: if a drag's source element gets removed mid-drag, the
-    // browser fires NEITHER dragend nor drop, so __ccDragActive would stay true
-    // forever and every board render would be deferred forever — a permanent
-    // freeze that only a refresh clears. A pointer release always happens when the
-    // user lets go, so clear the flag there too, then flush. A time watchdog is the
-    // last resort for the (rare) case where even pointerup is swallowed.
-    let dragFlagSince = 0;
-    document.addEventListener("dragstart", () => { dragFlagSince = Date.now(); }, true);
-    const recover = () => {
-        if (!window.__ccDragActive) return;
-        window.__ccDragActive = false;
-        dragFlagSince = 0;
-        flush();
-    };
-    document.addEventListener("pointerup", recover, true);
-    document.addEventListener("mouseup", recover, true);
-    setInterval(() => {
-        if (window.__ccDragActive && dragFlagSince && Date.now() - dragFlagSince > 5000) {
-            recover();
-        }
-    }, 1000);
 })();
 
 function applyOnlineStateToGame() {
