@@ -132,14 +132,29 @@
                 </div>
 
                 <div class="mp-form">
-                    <label for="lobbyDeckSelect">Choose your deck</label>
-                    <select id="lobbyDeckSelect"></select>
+                    <!-- Regular match: pick a saved deck and ready up. -->
+                    <div id="lobbyRegularPanel">
+                        <label for="lobbyDeckSelect">Choose your deck</label>
+                        <select id="lobbyDeckSelect"></select>
 
-                    <label for="lobbyDonDeckSelect">DON!! deck</label>
-                    <select id="lobbyDonDeckSelect" class="mp-don-select"></select>
+                        <label for="lobbyDonDeckSelect">DON!! deck</label>
+                        <select id="lobbyDonDeckSelect" class="mp-don-select"></select>
 
-                    <button class="mp-btn-primary" id="btnReady">Ready Up</button>
-                    <button class="mp-btn-primary hidden" id="btnStart">Start Match</button>
+                        <button class="mp-btn-primary" id="btnReady">Ready Up</button>
+                        <button class="mp-btn-primary hidden" id="btnStart">Start Match</button>
+                    </div>
+
+                    <!-- Draft Battle: no deck picker — both players open packs, then
+                         build a deck on a shared timer with chat. -->
+                    <div id="lobbyDraftPanel" hidden>
+                        <div class="mp-draft-lobby">
+                            <span class="mp-draft-lobby-icon">🎴</span>
+                            <strong>Draft Battle</strong>
+                            <p id="draftLobbyHint" class="mp-toggle-hint">Waiting for an opponent to join…</p>
+                        </div>
+                        <button class="mp-btn-primary" id="btnEnterDraft" disabled>Open Packs &amp; Draft</button>
+                    </div>
+
                     <div id="mpLobbyMsg" class="mp-info"></div>
                     <div id="mpLobbyError" class="mp-error hidden"></div>
                 </div>
@@ -152,10 +167,10 @@
     <script src="../js/cards/cardDatabase.js?v=cardnum-16"></script>
     <script src="../js/cards/decks.js?v=ry-ichigo-2"></script>
     <script src="../js/core/deckParser.js?v=starting-1"></script>
-    <script type="module" src="../js/pages/multiplayer.js?v=lobby-13"></script>
+    <script type="module" src="../js/pages/multiplayer.js?v=lobby-14"></script>
   <script src="../js/rotate-prompt.js"></script>
 
-  <script src="../js/version.js?v=209"></script>
-  <script src="../js/auth-ui.js?v=209"></script>
+  <script src="../js/version.js?v=211"></script>
+  <script src="../js/auth-ui.js?v=211"></script>
 </body>
 </html>

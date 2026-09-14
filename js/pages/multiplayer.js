@@ -9,7 +9,7 @@ import {
     setPlayerReady,
     getMatch,
     clearMatchStartError
-} from "../firebase/multiplayerService.js?v=draft-1";
+} from "../firebase/multiplayerService.js?v=draft-2";
 
 // ── State ────────────────────────────────────────────
 let currentUser = null;
@@ -86,6 +86,12 @@ const lobbyDeckSelect  = $("lobbyDeckSelect");
 const lobbyDonDeckSelect = $("lobbyDonDeckSelect");
 const btnReady         = $("btnReady");
 const btnStart         = $("btnStart");
+const lobbyRegularPanel = $("lobbyRegularPanel");
+const lobbyDraftPanel  = $("lobbyDraftPanel");
+const draftLobbyHint   = $("draftLobbyHint");
+const btnEnterDraft    = $("btnEnterDraft");
+let currentMatchMode   = "regular";     // "regular" | "draft" (from match data)
+let currentDraftCollection = "";
 const mpLobbyMsg       = $("mpLobbyMsg");
 const mpLobbyError     = $("mpLobbyError");
 const btnBackFromLobby = $("btnBackFromLobby");
@@ -251,15 +257,63 @@ function openLobbyView(preferredDeckId = "") {
     showView("lobby");
 }
 
+// Switch the lobby between the regular deck-picker layout and the draft layout
+// (no deck picker — both players open packs then build). Driven by match.mode,
+// which arrives from the subscription (so the joiner learns it too).
+function applyLobbyMode(mode, draftCollection) {
+    currentMatchMode = mode === "draft" ? "draft" : "regular";
+    currentDraftCollection = draftCollection || "";
+    const draft = currentMatchMode === "draft";
+    if (lobbyRegularPanel) lobbyRegularPanel.hidden = draft;
+    if (lobbyDraftPanel) lobbyDraftPanel.hidden = !draft;
+}
+
+function goToDraft() {
+    if (!currentRoomCode || !playerSlot) return;
+    isRedirecting = true;
+    if (unsubscribeMatch) { unsubscribeMatch(); unsubscribeMatch = null; }
+    stopStartWatchdog();
+    const params = new URLSearchParams({
+        draft: "1",
+        room: currentRoomCode,
+        player: playerSlot,
+        pool: currentDraftCollection || ""
+    });
+    window.location.href = `../index.html?${params.toString()}`;
+}
+
+if (btnEnterDraft) btnEnterDraft.addEventListener("click", goToDraft);
+
 function handleMatchUpdate(match) {
     if (!match) return;
     if (isRedirecting) return; // already heading into the game
+
+    // Learn the room's mode from match data (the joiner didn't set it locally).
+    if (match.mode !== undefined) applyLobbyMode(match.mode, match.draftCollection);
 
     const p1 = match.players?.p1;
     const p2 = match.players?.p2;
 
     updateLobbyPlayerUI(lobbyP1, p1?.name, p1?.ready);
     updateLobbyPlayerUI(lobbyP2, p2?.name, p2?.ready);
+
+    // ── Draft rooms: skip the ready/deck flow; route both players to the draft ──
+    if (currentMatchMode === "draft") {
+        // The game may already be running (both drafted + startMatch fired from the
+        // draft page) — if we somehow land back here, still honour a started match.
+        if (match.status === "started") { enterMatch(); return; }
+        const bothHere = Boolean(p1 && p2);
+        if (btnEnterDraft) btnEnterDraft.disabled = !bothHere;
+        if (draftLobbyHint) {
+            draftLobbyHint.textContent = bothHere
+                ? "Opponent's here! Open your packs when ready — you'll build on a shared 15-minute timer."
+                : "Waiting for an opponent to join…";
+        }
+        mpLobbyMsg.textContent = bothHere
+            ? "Both players connected."
+            : "Share the room code with your opponent.";
+        return;
+    }
 
     // Show code box for host if room is private
     if (playerSlot === "p1" && match.isPublic === false) {
@@ -565,6 +619,10 @@ btnConfirmCreate.addEventListener("click", async () => {
 
         // Carry the deck chosen on the create screen into the lobby's picker.
         openLobbyView(createDeckSelect.value);
+        // Apply the chosen mode right away so the host doesn't see the regular
+        // deck-picker flash before the first match update arrives.
+        applyLobbyMode(mode, draftCollection);
+        if (mode === "draft") mpLobbyMsg.textContent = "Share the room code — your opponent joins, then you both draft.";
 
         // Private rooms are joined by code, so always surface it to the host.
         lobbyCodeBox.classList.remove("hidden");

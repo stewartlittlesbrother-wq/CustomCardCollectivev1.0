@@ -462,7 +462,9 @@ export async function joinRoom(roomCode, user, nickname = "Player 2") {
 // (megabytes), which is a large part of why online play felt so slow.
 export function subscribeToMatch(roomCode, callback) {
     const code = cleanRoomCode(roomCode);
-    const paths = ["status", "players", "isPublic", "lobbyName", "startError"];
+    // `mode` + `draftCollection` let the lobby switch to the draft layout; they're
+    // small scalars so watching them adds no meaningful traffic.
+    const paths = ["status", "players", "isPublic", "lobbyName", "startError", "mode", "draftCollection"];
     const latest = {};
     const unsubscribers = [];
 
@@ -625,6 +627,51 @@ export async function setPlayerReady(roomCode, playerSlot, ready) {
     await update(ref(database, `matches/${cleanRoomCode(roomCode)}`), {
         [`players/${playerSlot}/ready`]: Boolean(ready)
     });
+}
+
+// ── Draft Battle sync ────────────────────────────────────
+// A draft room lives under matches/<code>/draft:
+//   draft/p1/inBuilder, draft/p2/inBuilder  — set once a player finishes opening
+//     their 10 packs and enters the deck builder.
+//   draft/startedAt  — the shared 15-minute clock's anchor. Claimed (once) the
+//     moment BOTH players are in the builder, so the countdown is identical on
+//     both screens no matter who arrived first.
+//   draft/p1/locked, draft/p2/locked — a player has locked their deck (readied).
+// The actual drafted decks are submitted through the normal setPlayerDeck +
+// setPlayerReady path, so the existing startMatch flow deals the game unchanged.
+export function subscribeToDraft(roomCode, callback) {
+    const draftRef = ref(database, `matches/${cleanRoomCode(roomCode)}/draft`);
+    return onValue(draftRef, (snapshot) => callback(snapshot.val() || {}));
+}
+
+export async function markDraftInBuilder(roomCode, playerSlot) {
+    if (playerSlot !== "p1" && playerSlot !== "p2") return;
+    await update(ref(database, `matches/${cleanRoomCode(roomCode)}/draft/${playerSlot}`), {
+        inBuilder: true
+    });
+}
+
+export async function setDraftLocked(roomCode, playerSlot, locked) {
+    if (playerSlot !== "p1" && playerSlot !== "p2") return;
+    await update(ref(database, `matches/${cleanRoomCode(roomCode)}/draft/${playerSlot}`), {
+        locked: Boolean(locked)
+    });
+}
+
+// Anchor the shared countdown the instant both players are in the builder. A
+// transaction so that if both clients notice "both in builder" together, only one
+// timestamp is written and both then count down from the same moment.
+export async function claimDraftStartIfReady(roomCode) {
+    const code = cleanRoomCode(roomCode);
+    const snapshot = await get(ref(database, `matches/${code}/draft`));
+    const draft = snapshot.val() || {};
+    if (draft.startedAt) return draft.startedAt;
+    if (!(draft.p1?.inBuilder && draft.p2?.inBuilder)) return null;
+    const result = await runTransaction(
+        ref(database, `matches/${code}/draft/startedAt`),
+        (current) => (current ? undefined : Date.now())
+    );
+    return result.committed ? result.snapshot.val() : draft.startedAt || null;
 }
 
 export async function initializeMultiplayerGame(roomCode) {

@@ -6939,6 +6939,71 @@ html.touch-device .collection-hide-btn { opacity: .9; }
 .draft-deck-qty { font-weight: 900; font-size: .8rem; }
 .draft-deck-name { font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ── Multiplayer draft: loading cover, status, timer warning, chat ─────────── */
+.mp-draft-cover {
+  position: fixed; inset: 0; z-index: 4200;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 50% 40%, rgba(20,40,32,.9), rgba(0,0,0,.96));
+  color: #f3f8f5;
+}
+.mp-draft-cover[hidden] { display: none !important; }
+.mp-draft-cover-box { text-align: center; max-width: 360px; padding: 24px; }
+.mp-draft-cover-box p { margin: 14px 0 0; font-weight: 700; }
+.mp-draft-spinner {
+  width: 42px; height: 42px; margin: 0 auto; border-radius: 50%;
+  border: 4px solid rgba(255,255,255,.18); border-top-color: var(--accent, #34d17f);
+  animation: mp-draft-spin .9s linear infinite;
+}
+@keyframes mp-draft-spin { to { transform: rotate(360deg); } }
+
+/* Status line + timer warning sit in the builder's top bar. */
+.mp-draft-builder .draft-top { flex-wrap: wrap; }
+.mp-draft-status {
+  flex-basis: 100%;
+  font-size: .82rem; color: var(--muted, #9db1a8);
+  padding-top: 4px;
+}
+.draft-timer.draft-timer-warn {
+  background: rgba(255,70,70,.2); color: #ff6a6a;
+  animation: mp-draft-pulse 1s ease-in-out infinite;
+}
+@keyframes mp-draft-pulse { 50% { opacity: .55; } }
+
+/* Chat as the third column of the draft builder. */
+.mp-draft-builder .draft-main { grid-template-columns: minmax(0, 1fr) 260px 300px; }
+/* Narrow windows: drop the chat to a full-width row under the pool/decklist so
+   the card pool never collapses to zero width. */
+@media (max-width: 900px) {
+  .mp-draft-builder .draft-main { grid-template-columns: minmax(0, 1fr) 200px; }
+  .mp-draft-chat {
+    grid-column: 1 / -1; height: 170px;
+    border-left: none; padding-left: 0;
+    border-top: 1px solid var(--line, #2a2a2a); padding-top: 8px;
+  }
+}
+.mp-draft-chat {
+  display: flex; flex-direction: column; min-height: 0;
+  border-left: 1px solid var(--line, #2a2a2a); padding-left: 12px;
+}
+.mp-draft-chat-head { font-weight: 800; padding: 2px 0 6px; }
+.mp-draft-chat-log {
+  flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
+  font-size: .8rem; padding-right: 4px;
+}
+.mp-chat-line { color: var(--ink, #f3f8f5); word-break: break-word; }
+.mp-chat-line .mp-chat-who { font-weight: 800; color: var(--muted, #9db1a8); }
+.mp-chat-line.mine .mp-chat-who { color: var(--accent, #34d17f); }
+.mp-draft-chat-form { display: flex; gap: 6px; padding-top: 8px; }
+.mp-draft-chat-form input {
+  flex: 1; min-width: 0; padding: 8px; border-radius: 8px;
+  background: var(--surface-3, #202a26); color: var(--ink, #f3f8f5);
+  border: 1px solid var(--line, #2a2a2a);
+}
+.mp-draft-chat-form button { flex: none; padding: 8px 12px; }
+/* A locked deck can't be edited until you unlock. */
+.mp-draft-builder.mp-draft-locked .draft-pool,
+.mp-draft-builder.mp-draft-locked .draft-decklist { pointer-events: none; opacity: .6; }
+
 /* Pre-draft pool chooser */
 .draft-setup-box {
   background: var(--surface, #101614);

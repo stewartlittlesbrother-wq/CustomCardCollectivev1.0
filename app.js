@@ -6784,7 +6784,7 @@ function onDraftPackRevealed() {
   again.hidden = false;
   if (draftPacksOpened >= DRAFT_PACKS) {
     again.textContent = `Build your deck → (${draftPool.length} cards)`;
-    again.onclick = () => openDraftBuilder();
+    again.onclick = () => (mpDraft ? openMultiplayerDraftBuilder() : openDraftBuilder());
   } else {
     again.textContent = `Open next pack (${draftPacksOpened}/${DRAFT_PACKS})`;
     again.onclick = () => startPackOpen();
@@ -6929,6 +6929,8 @@ function renderDraftDeckAndCount() {
 // Delegated add/remove on the draft builder.
 document.addEventListener("click", (e) => {
   if (!draftBuilderEl || draftBuilderEl.hidden) return;
+  // In a multiplayer draft, a locked deck can't be edited until you unlock.
+  if (mpDraft && mpDraft.locked) return;
   const add = e.target.closest && e.target.closest("[data-draft-add]");
   const remove = e.target.closest && e.target.closest("[data-draft-remove]");
   if (add) {
@@ -6975,6 +6977,9 @@ function randomDeckMap(size) {
 // also control uses the SAME leader as you (the rainbow leader) with a RANDOM
 // 50-card deck, so you don't have to build two decks.
 function finishDraft() {
+  // In a multiplayer draft the Ready button locks/submits through the network
+  // flow instead of dropping straight into a solo practice game.
+  if (mpDraft) { mpToggleLock(); return; }
   clearInterval(draftTimer);
   const total = Object.values(draftDeck).reduce((a, b) => a + b, 0);
   if (total !== DRAFT_DECK_SIZE) {
@@ -7004,6 +7009,402 @@ function finishDraft() {
   } catch (e) {}
   if (draftBuilderEl) draftBuilderEl.hidden = true;
   window.location.href = "html/self.html";
+}
+
+// ── Multiplayer Draft ───────────────────────────────────────────────────────
+// A real two-player draft. Entered from the multiplayer lobby, which sends both
+// players here with ?draft=1&room=CODE&player=pN&pool=<collection>. Both open 10
+// packs from the shared pool, then build a 50-card deck on a SHARED 15-minute
+// clock (anchored server-side the moment both are in the builder) with chat and a
+// ready/lock button. When the clock runs out any missing cards are auto-filled
+// from that player's own pulls; when both players have locked (or time out) the
+// drafted decks are submitted and the normal match-start flow deals the game.
+// Runs here (not on multiplayer.html) so it reuses the working pack opener +
+// deck-builder rendering (state.cards, cardVisual, the lazy-image cache) instead
+// of re-porting all of it. See [[pack-opener-and-draft]].
+let mpDraft = null;          // { room, slot, pool, svc, user, nick, ... } while drafting
+const MP_DRAFT_WARN_MS = [10, 5, 3, 1].map(m => m * 60 * 1000);
+
+function getMpDraftParams() {
+  const p = new URLSearchParams(location.search);
+  if (p.get("draft") !== "1") return null;
+  const room = String(p.get("room") || "").trim().toUpperCase();
+  const slot = p.get("player");
+  if (!room || (slot !== "p1" && slot !== "p2")) return null;
+  return { room, slot, pool: p.get("pool") || "" };
+}
+
+// Full-screen "setting up…" cover shown while the card pool finishes loading, so
+// the home page isn't visible behind the draft during startup.
+function showMpDraftCover(text) {
+  let cover = document.getElementById("mpDraftCover");
+  if (!cover) {
+    cover = document.createElement("div");
+    cover.id = "mpDraftCover";
+    cover.className = "mp-draft-cover";
+    document.body.appendChild(cover);
+  }
+  cover.innerHTML = `<div class="mp-draft-cover-box"><div class="mp-draft-spinner"></div><p>${escapeHtml(text || "Setting up your draft…")}</p></div>`;
+  cover.hidden = false;
+  return cover;
+}
+function hideMpDraftCover() {
+  const cover = document.getElementById("mpDraftCover");
+  if (cover) cover.hidden = true;
+}
+
+async function whenCardsReady(timeoutMs = 25000) {
+  const start = Date.now();
+  while ((!state.cards || !state.cards.length) && Date.now() - start < timeoutMs) {
+    await new Promise(r => setTimeout(r, 150));
+  }
+  return Boolean(state.cards && state.cards.length);
+}
+
+// Entry point, called during boot. Returns true if we took over the page for a
+// multiplayer draft (so normal home init can be skipped where it matters).
+async function maybeStartMultiplayerDraft() {
+  const params = getMpDraftParams();
+  if (!params) return false;
+
+  document.documentElement.classList.add("mp-draft-mode");
+  showMpDraftCover("Connecting to your draft room…");
+
+  let svc, firebaseApp;
+  try {
+    [firebaseApp, svc] = await Promise.all([
+      import("./js/firebase/firebaseApp.js"),
+      import("./js/firebase/multiplayerService.js?v=draft-2")
+    ]);
+    await firebaseApp.signInGuest();
+  } catch (e) {
+    showMpDraftCover("Couldn't connect to the draft room. Return to the lobby and try again.");
+    return true;
+  }
+
+  let user = null;
+  try { user = await firebaseApp.waitForUser(); } catch (e) {}
+  if (!user) {
+    showMpDraftCover("Couldn't sign in for multiplayer. Return to the lobby and try again.");
+    return true;
+  }
+
+  mpDraft = {
+    ...params,
+    svc,
+    user,
+    nick: (window.ccAccount && window.ccAccount.user && window.ccAccount.user.displayName) || "Player",
+    startedAt: null,
+    warned: new Set(),
+    locked: false,
+    submitted: false,
+    launching: false,
+    unsubDraft: null,
+    unsubMatch: null,
+    unsubChat: null,
+    timer: null
+  };
+
+  showMpDraftCover("Loading the card pool…");
+  const ready = await whenCardsReady();
+  if (!ready) { showMpDraftCover("Cards took too long to load. Refresh to retry."); return true; }
+
+  hideMpDraftCover();
+  beginMultiplayerDraft();
+  return true;
+}
+
+// Open the 10 packs from the chosen pool (reuses the solo pack-open machinery,
+// but the "Build your deck" button routes to the multiplayer builder).
+function beginMultiplayerDraft() {
+  packCollectionFilter = mpDraft.pool || "";
+  packDraftMode = true;
+  draftPool = [];
+  draftPacksOpened = 0;
+  draftDeck = {};
+  const overlay = ensurePackOverlay();
+  startPackOpen();
+  overlay.hidden = false;
+  const again = overlay.querySelector("#packAgain");
+  const close = overlay.querySelector("#packClose");
+  again.hidden = true;
+  close.textContent = "Leave draft";
+  close.onclick = () => { if (confirm("Leave the draft and return to the lobby?")) leaveMpDraft(); };
+}
+
+function leaveMpDraft() {
+  teardownMpDraft();
+  window.location.href = "html/multiplayer.html";
+}
+
+function teardownMpDraft() {
+  if (!mpDraft) return;
+  try { mpDraft.unsubDraft && mpDraft.unsubDraft(); } catch (e) {}
+  try { mpDraft.unsubMatch && mpDraft.unsubMatch(); } catch (e) {}
+  try { mpDraft.unsubChat && mpDraft.unsubChat(); } catch (e) {}
+  clearInterval(mpDraft.timer);
+}
+
+// The networked deck builder: shared timer, chat, lock/ready.
+function openMultiplayerDraftBuilder() {
+  closePack();
+  packDraftMode = false;
+  clearInterval(draftTimer);   // make sure the solo countdown never runs here
+
+  const el2 = ensureDraftBuilder();
+  const leader = getCard(OMNI_LEADER_ID);
+  el2.querySelector("#draftLeader").innerHTML =
+    `<div class="draft-leader-art">${leader ? cardVisual(leader) : ""}</div><span>Leader: ${leader ? escapeHtml(leader.name) : "Rainbow Leader"}</span>`;
+  observeLazyImages(el2.querySelector("#draftLeader"));
+  el2.classList.add("mp-draft-builder");
+  el2.hidden = false;
+  renderDraftBuilder();
+
+  const ready = el2.querySelector("#draftReady");
+  if (ready) ready.textContent = "Lock in deck";
+
+  ensureMpDraftChrome(el2);
+
+  // Announce we're in the builder, then anchor the shared clock once both are.
+  mpDraft.svc.markDraftInBuilder(mpDraft.room, mpDraft.slot).catch(() => {});
+
+  // Watch the draft node for the shared start time + opponent status.
+  if (mpDraft.unsubDraft) mpDraft.unsubDraft();
+  mpDraft.unsubDraft = mpDraft.svc.subscribeToDraft(mpDraft.room, (draft) => {
+    const other = mpDraft.slot === "p1" ? "p2" : "p1";
+    // Both in the builder but no clock yet → claim it (transaction picks one).
+    if (draft.p1?.inBuilder && draft.p2?.inBuilder && !draft.startedAt) {
+      mpDraft.svc.claimDraftStartIfReady(mpDraft.room).catch(() => {});
+    }
+    if (draft.startedAt && !mpDraft.startedAt) mpDraft.startedAt = Number(draft.startedAt);
+    mpDraft.opponentInBuilder = Boolean(draft[other]?.inBuilder);
+    updateMpDraftStatus();
+  });
+
+  // Watch the match: once both players have locked (ready + deck submitted) — or
+  // the game is already started — jump into the game. We deliberately DON'T call
+  // startMatch here: this page (index.html) doesn't load the deck-building
+  // globals (parseDeckText/getCardById/leaders) that startMatch needs. The game
+  // page (self.html) DOES, and its ensureOnlineMatchStarted() self-heal deals the
+  // match on arrival, so both clients just navigate in and one of them starts it.
+  if (mpDraft.unsubMatch) mpDraft.unsubMatch();
+  mpDraft.unsubMatch = mpDraft.svc.subscribeToMatch(mpDraft.room, (match) => {
+    if (!match) return;
+    const p1 = match.players?.p1, p2 = match.players?.p2;
+    const bothReady = p1?.ready && p2?.ready && p1?.deck && p2?.deck;
+    if (match.status === "started" || bothReady) enterMpDraftGame();
+  });
+
+  // Chat.
+  wireMpDraftChat();
+
+  // Shared countdown tick.
+  clearInterval(mpDraft.timer);
+  mpDraft.timer = setInterval(tickMpDraftTimer, 500);
+  tickMpDraftTimer();
+}
+
+function ensureMpDraftChrome(el2) {
+  if (el2.querySelector(".mp-draft-chat")) return;
+  const chat = document.createElement("div");
+  chat.className = "mp-draft-chat";
+  chat.innerHTML = `
+    <div class="mp-draft-chat-head">Draft chat</div>
+    <div class="mp-draft-chat-log" id="mpDraftChatLog"></div>
+    <form class="mp-draft-chat-form" id="mpDraftChatForm">
+      <input id="mpDraftChatInput" type="text" maxlength="300" placeholder="Message your opponent…" autocomplete="off">
+      <button type="submit" class="red-button">Send</button>
+    </form>`;
+  // Sit as the third column of the builder's main grid (pool | decklist | chat).
+  const main = el2.querySelector(".draft-main");
+  (main || el2).appendChild(chat);
+}
+
+function wireMpDraftChat() {
+  const form = document.getElementById("mpDraftChatForm");
+  const input = document.getElementById("mpDraftChatInput");
+  const log = document.getElementById("mpDraftChatLog");
+  if (form && !form.dataset.wired) {
+    form.dataset.wired = "1";
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      mpDraft.svc.sendChatMessage(mpDraft.room, mpDraft.nick, text, mpDraft.slot).catch(() => {});
+    });
+  }
+  if (mpDraft.unsubChat) mpDraft.unsubChat();
+  mpDraft.unsubChat = mpDraft.svc.subscribeToChat(mpDraft.room, (messages) => {
+    if (!log) return;
+    log.innerHTML = messages.map(m => {
+      const mine = m.role === mpDraft.slot;
+      return `<div class="mp-chat-line${mine ? " mine" : ""}"><span class="mp-chat-who">${escapeHtml(m.sender || "Player")}:</span> ${escapeHtml(m.text || "")}</div>`;
+    }).join("");
+    log.scrollTop = log.scrollHeight;
+  });
+}
+
+function mpDraftTotal() {
+  return Object.values(draftDeck).reduce((a, b) => a + b, 0);
+}
+
+function tickMpDraftTimer() {
+  const el2 = draftBuilderEl;
+  if (!el2 || el2.hidden || !mpDraft) return;
+  const timerEl = el2.querySelector("#draftTimer");
+
+  if (!mpDraft.startedAt) {
+    if (timerEl) timerEl.textContent = "--:--";
+    return;
+  }
+  const end = mpDraft.startedAt + DRAFT_MINUTES * 60 * 1000;
+  const left = Math.max(0, end - Date.now());
+
+  // Warnings as each threshold is crossed (once each).
+  MP_DRAFT_WARN_MS.forEach(ms => {
+    if (left <= ms && !mpDraft.warned.has(ms)) {
+      mpDraft.warned.add(ms);
+      const mins = Math.round(ms / 60000);
+      toast(`⏳ ${mins} minute${mins === 1 ? "" : "s"} left to build your deck.`);
+    }
+  });
+
+  const m = Math.floor(left / 60000), s = Math.floor((left % 60000) / 1000);
+  if (timerEl) {
+    timerEl.textContent = `${m}:${String(s).padStart(2, "0")}`;
+    timerEl.classList.toggle("draft-timer-warn", left <= 60000);
+  }
+
+  if (left <= 0) {
+    clearInterval(mpDraft.timer);
+    mpDraft.timer = null;
+    mpTimeoutFinish();
+  }
+}
+
+function updateMpDraftStatus() {
+  const el2 = draftBuilderEl;
+  if (!el2 || !mpDraft) return;
+  let status = el2.querySelector("#mpDraftStatus");
+  if (!status) {
+    status = document.createElement("div");
+    status.id = "mpDraftStatus";
+    status.className = "mp-draft-status";
+    const top = el2.querySelector(".draft-top");
+    if (top) top.appendChild(status);
+  }
+  if (mpDraft.locked) {
+    status.textContent = "Locked ✓ — waiting for your opponent…";
+  } else if (!mpDraft.startedAt) {
+    status.textContent = mpDraft.opponentInBuilder
+      ? "Starting the timer…"
+      : "Waiting for your opponent to finish opening packs…";
+  } else {
+    status.textContent = "Build your 50-card deck.";
+  }
+}
+
+// Manual Ready button: lock (must be a full 50) or unlock.
+function mpToggleLock() {
+  if (!mpDraft) return;
+  if (mpDraft.locked) { mpUnlockDraft(); return; }
+  const total = mpDraftTotal();
+  if (total !== DRAFT_DECK_SIZE) {
+    toast(`Your deck must be exactly ${DRAFT_DECK_SIZE} cards to lock in (currently ${total}). It'll auto-fill if the timer runs out.`);
+    return;
+  }
+  mpSubmitDeck(false);
+}
+
+function mpUnlockDraft() {
+  mpDraft.locked = false;
+  setMpDraftLockedUI(false);
+  mpDraft.svc.setDraftLocked(mpDraft.room, mpDraft.slot, false).catch(() => {});
+  mpDraft.svc.setPlayerReady(mpDraft.room, mpDraft.slot, false).catch(() => {});
+  updateMpDraftStatus();
+}
+
+// Auto-fill any missing cards from this player's OWN pulls, then submit.
+function mpTimeoutFinish() {
+  if (!mpDraft || mpDraft.locked) return;
+  autofillDraftDeckFromPulls();
+  renderDraftBuilder();
+  toast("Time's up — your deck was filled from your pulls. Starting the match…");
+  mpSubmitDeck(true);
+}
+
+function autofillDraftDeckFromPulls() {
+  const counts = draftPoolCounts();               // [{card, count}] of own pulls
+  const bag = [];
+  counts.forEach(({ card, count }) => {
+    const used = draftDeck[card.id] || 0;
+    for (let i = used; i < count; i++) bag.push(card.id);
+  });
+  for (let i = bag.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [bag[i], bag[j]] = [bag[j], bag[i]];
+  }
+  let total = mpDraftTotal();
+  while (total < DRAFT_DECK_SIZE && bag.length) {
+    const id = bag.pop();
+    draftDeck[id] = (draftDeck[id] || 0) + 1;
+    total++;
+  }
+}
+
+function setMpDraftLockedUI(locked) {
+  const el2 = draftBuilderEl;
+  if (!el2) return;
+  const ready = el2.querySelector("#draftReady");
+  if (ready) ready.textContent = locked ? "Unlock" : "Lock in deck";
+  el2.classList.toggle("mp-draft-locked", locked);   // CSS disables add/remove
+}
+
+async function mpSubmitDeck(fromTimeout) {
+  if (!mpDraft || mpDraft.submitted && mpDraft.locked) return;
+  const total = mpDraftTotal();
+  if (!fromTimeout && total !== DRAFT_DECK_SIZE) return;
+
+  const deckText = Object.entries(draftDeck)
+    .filter(([, q]) => q > 0)
+    .map(([id, q]) => `${q}x${id}`)
+    .join("\n");
+
+  const deckData = {
+    id: "mp-draft",
+    name: "Draft Deck",
+    leaderKey: OMNI_LEADER_ID,
+    deckText,
+    startingCards: [],
+    tokens: []
+  };
+
+  mpDraft.locked = true;
+  mpDraft.submitted = true;
+  setMpDraftLockedUI(true);
+  updateMpDraftStatus();
+
+  try {
+    await mpDraft.svc.setPlayerDeck(mpDraft.room, mpDraft.slot, deckData);
+    await mpDraft.svc.setDraftLocked(mpDraft.room, mpDraft.slot, true);
+    await mpDraft.svc.setPlayerReady(mpDraft.room, mpDraft.slot, true);
+  } catch (e) {
+    // Roll back the lock so the player can retry.
+    mpDraft.locked = false;
+    mpDraft.submitted = false;
+    setMpDraftLockedUI(false);
+    updateMpDraftStatus();
+    toast("Couldn't submit your deck — check your connection and try again.");
+  }
+}
+
+function enterMpDraftGame() {
+  if (!mpDraft || mpDraft.enteringGame) return;
+  mpDraft.enteringGame = true;
+  const room = mpDraft.room, slot = mpDraft.slot;
+  teardownMpDraft();
+  window.location.href = `html/self.html?mode=online&room=${encodeURIComponent(room)}&player=${slot}`;
 }
 
 function tableCardVisual(card) {
@@ -8846,6 +9247,9 @@ loadCollections()
 // Report shared-library connectivity in Settings without blocking startup.
 refreshLibraryStatus();
 refreshRestoreHint();
+// If this page was opened as a multiplayer draft (?draft=1&room=…), take over
+// and run the draft instead of the normal home screen. Safe no-op otherwise.
+maybeStartMultiplayerDraft().catch(err => console.warn("Multiplayer draft init failed:", err));
 window.addEventListener("resize", () => {
   if (state.activeView === "builder") queueDeckTableResize();
 });
