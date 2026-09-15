@@ -154,7 +154,7 @@ const manualPlay = {
         // where it stalled (which zone, how many overlays / body nodes) even
         // though the console is unusable. Read it with:
         //   localStorage.getItem("cc_drag_debug")
-        window.__ccMPVer = 26; // manual-play build marker (paste window.__ccMPVer to check)
+        window.__ccMPVer = 27; // manual-play build marker (paste window.__ccMPVer to check)
         document.addEventListener("dragstart", (e) => {
             window.__ccDragActive = true;
             window.__ccDragOvers = 0;
@@ -339,7 +339,8 @@ const manualPlay = {
                 e.dataTransfer.setData("cardInstanceId", topCard.instanceId);
                 e.dataTransfer.setData("playerKey", playerKey);
                 e.dataTransfer.setData("fromDeck", "true");
-                e.dataTransfer.setData("text/html", deckCard.innerHTML);
+                // No setData("text/html", …): a hydrated card's innerHTML is megabytes
+                // of base64 and setting it synchronously in dragstart kills the drag.
                 // Defer DOM mutation — a synchronous change here can cancel the
                 // native drag (see the hand-card handler for the full explanation).
                 setTimeout(() => { deckCard.style.opacity = "0.5"; highlightAllZones(); }, 0);
@@ -399,7 +400,12 @@ const manualPlay = {
                 e.dataTransfer.setData("cardInstanceId", handCard.getAttribute("data-card-instance-id") || "");
                 e.dataTransfer.setData("playerKey", handCard.getAttribute("data-player") || "");
                 e.dataTransfer.setData("fromHand", "true");
-                e.dataTransfer.setData("text/html", handCard.innerHTML);
+                // DO NOT setData("text/html", handCard.innerHTML): once card images
+                // hydrate to full base64, innerHTML is MEGABYTES, and setting that
+                // synchronously in dragstart chokes/kills the native drag (no
+                // dragover/dragend ever fire → frozen). The drop handler never reads
+                // text/html, and the drag preview uses the element snapshot anyway,
+                // so this line is pure downside. THIS is the every-drag freeze.
                 // DEFER every DOM mutation by a tick. Fading the dragged card, or
                 // reflowing its container (highlightAllZones adds a border to .hand,
                 // which shifts the card mid-dragstart), can make the browser CANCEL
