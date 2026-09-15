@@ -5412,8 +5412,8 @@ button.trash-area {
   top: 50%;
   transform: translateY(-50%);
   z-index: 55;
-  width: min(460px, 34vw);
-  max-height: 92vh;
+  width: min(640px, 46vw);
+  max-height: 96vh;
   pointer-events: none;
   filter: drop-shadow(0 18px 40px rgba(0, 0, 0, .6));
 }
@@ -5423,7 +5423,7 @@ button.trash-area {
 .builder-hover-preview img {
   width: 100%;
   height: auto;
-  max-height: 92vh;
+  max-height: 96vh;
   object-fit: contain;
   border-radius: 10px;
   display: block;
@@ -6854,6 +6854,14 @@ html.touch-device .collection-hide-btn { opacity: .9; }
   box-shadow: 0 18px 50px rgba(0,0,0,.7), 0 0 0 2px rgba(255,255,255,.15);
   pointer-events: none;
   z-index: 4100;
+}
+/* The draft deck-builder gets a much bigger hover-zoom so you can actually read a
+   card's text while building. Centered (not pinned right) so it doesn't tuck
+   behind the chat column. */
+.draft-builder .pack-zoom {
+  width: min(520px, 60vw);
+  right: 50%;
+  transform: translate(50%, -50%);
 }
 
 /* ── Draft builder ──────────────────────────────────────────────────────────

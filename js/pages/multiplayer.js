@@ -534,10 +534,12 @@ codeInput.addEventListener("keydown", e => {
 });
 
 // ── Draft create options: match-type toggle + searchable collection pool ─────
-// Prefer the shared catalog's display name (js/cards/cardCollections.js); fall
-// back to a prettified slug for collections not in the built-in catalog.
+// Display names: prefer the shared-collections registry (the authoritative list
+// of every custom collection), then the built-in catalog, then a prettified slug.
+let sharedCollectionNames = {};   // slug -> display name, from loadSharedCollections()
 function prettyCollectionName(slug) {
     if (!slug) return "All cards";
+    if (sharedCollectionNames[slug]) return sharedCollectionNames[slug];
     const hit = (window.BUILTIN_COLLECTIONS || []).find(c => c.slug === slug);
     if (hit && hit.name) return hit.name;
     return String(slug).replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
@@ -567,14 +569,27 @@ async function ensureDraftCollections() {
     Object.values(window.cardDatabase || {}).forEach(c => {
         if (packable(c) && c.collection) slugs.add(c.collection);
     });
-    // Also include collections from the shared card library cache, so custom
-    // collections show up in the draft pool list (not just the built-in DB).
     try {
-        const mod = await import("../firebase/cardLibraryService.js?v=draft-1");
+        const mod = await import("../firebase/cardLibraryService.js?v=draft-3");
+        // The AUTHORITATIVE list of every collection (built-ins were only a partial
+        // hardcoded catalog, which is why newer collections were missing). Also
+        // capture their real display names.
+        if (mod.loadSharedCollections) {
+            const registry = await mod.loadSharedCollections();
+            (registry || []).forEach(c => {
+                if (!c || !c.slug) return;
+                slugs.add(c.slug);
+                if (c.name) sharedCollectionNames[c.slug] = c.name;
+            });
+        }
+        // Plus any collection that actually has packable cards in the cache, in case
+        // a collection has cards but isn't in the registry.
         const lib = mod.getCachedLibrary ? await mod.getCachedLibrary() : null;
-        const arr = Array.isArray(lib) ? lib : (lib ? Object.values(lib) : []);
+        const arr = Array.isArray(lib) ? lib : (lib && lib.cards ? lib.cards : (lib ? Object.values(lib) : []));
         arr.forEach(c => { if (packable(c) && c.collection) slugs.add(c.collection); });
     } catch (e) {}
+    // Never offer the special all-access virtual view as a draft pool.
+    slugs.delete("all-access");
     // Keep the "everything-else" bucket last; sort the rest by display name.
     draftCollectionList = [...slugs]
         .map(s => ({ slug: s, name: prettyCollectionName(s) }))

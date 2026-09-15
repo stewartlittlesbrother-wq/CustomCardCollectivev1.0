@@ -6760,7 +6760,7 @@ function revealPack() {
 // packs/chat/ready with a real opponent - is the next stage, built on this.)
 const DRAFT_PACKS = 10;
 const DRAFT_MINUTES = 15;
-const DRAFT_DECK_SIZE = 50;   // draft decks must be exactly 50, like a normal deck
+const DRAFT_DECK_SIZE = 40;   // draft decks are 40 cards (smaller than a normal 50)
 const OMNI_LEADER_ID = "OMNI-999";
 let packDraftMode = false;
 let draftPool = [];          // every card pulled across the 10 packs (with dupes)
