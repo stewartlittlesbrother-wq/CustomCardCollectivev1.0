@@ -154,7 +154,7 @@ const manualPlay = {
         // where it stalled (which zone, how many overlays / body nodes) even
         // though the console is unusable. Read it with:
         //   localStorage.getItem("cc_drag_debug")
-        window.__ccMPVer = 25; // manual-play build marker (paste window.__ccMPVer to check)
+        window.__ccMPVer = 26; // manual-play build marker (paste window.__ccMPVer to check)
         document.addEventListener("dragstart", (e) => {
             window.__ccDragActive = true;
             window.__ccDragOvers = 0;
@@ -218,18 +218,26 @@ const manualPlay = {
             document.querySelectorAll(".character-area, .stage-area, .trash-area, .hand, .life-area, .deck-area, .extra-faceup-area, .extra-facedown-area, .extra-slot-area").forEach(zone => {
                 zone.classList.add(highlightClass);
                 zone.style.background = "#4a90e2";
-                zone.style.border = "3px solid #2563eb";
+                // Use OUTLINE, not border. A border changes the element's box, which
+                // reflows/shifts its children — and if the zone holds the card you're
+                // dragging (e.g. .hand), that 3px shift as the drag commits makes the
+                // browser CANCEL the native drag → the every-drag freeze. Outline is
+                // painted outside the box and never affects layout, so nothing shifts.
+                zone.style.outline = "3px solid #2563eb";
+                zone.style.outlineOffset = "-3px";
                 zone.style.boxShadow = "0 0 20px rgba(74, 144, 226, 0.8) inset";
                 zone.style.borderRadius = "8px";
             });
         };
-        
+
         // Helper to clear all highlights
         const clearAllHighlights = () => {
             document.querySelectorAll(`.${highlightClass}`).forEach(zone => {
                 zone.classList.remove(highlightClass);
                 zone.style.background = "";
-                zone.style.border = "";
+                zone.style.outline = "";
+                zone.style.outlineOffset = "";
+                zone.style.border = "";   // clear any legacy inline border too
                 zone.style.boxShadow = "";
             });
             // Also clear top/bottom split indicators (life + deck)
