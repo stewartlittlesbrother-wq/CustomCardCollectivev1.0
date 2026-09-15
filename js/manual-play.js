@@ -154,7 +154,25 @@ const manualPlay = {
         // where it stalled (which zone, how many overlays / body nodes) even
         // though the console is unusable. Read it with:
         //   localStorage.getItem("cc_drag_debug")
-        window.__ccMPVer = 27; // manual-play build marker (paste window.__ccMPVer to check)
+        window.__ccMPVer = 28; // manual-play build marker (paste window.__ccMPVer to check)
+
+        // ══ Native HTML5 drag DISABLED for board cards (v224 pointer-drag rework) ══
+        // Native drag silently sticks/cancels when the dragged element is
+        // re-rendered, reflowed, or handed a big payload — the persistent freeze
+        // that survived ~40 patches. We replace it with a POINTER-based drag (see
+        // the controller added after the drop handlers). This listener is
+        // registered FIRST, so for board-card sources it cancels the native drag
+        // AND stops every old native dragstart handler below from running. Other
+        // native drags (e.g. the pile-viewer reorder) are on their own elements and
+        // are left untouched.
+        const NATIVE_DRAG_SOURCES = ".hand-card.selectable-card, [data-card-source='deck'], [data-card-source='extra'], [data-card-source='life'], .board-card-img";
+        document.addEventListener("dragstart", (e) => {
+            if (e.target && e.target.closest && e.target.closest(NATIVE_DRAG_SOURCES)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            }
+        }, true);
+
         document.addEventListener("dragstart", (e) => {
             window.__ccDragActive = true;
             window.__ccDragOvers = 0;
@@ -1519,6 +1537,195 @@ const manualPlay = {
             }
         };
 
+        // ══════════════════════════════════════════════════════════════════════
+        // POINTER-BASED DRAG (replaces native HTML5 drag)
+        // ----------------------------------------------------------------------
+        // pointerdown → (move past threshold) → follow a floating ghost → pointerup
+        // resolves the drop via document.elementFromPoint and reuses the SAME move
+        // handlers above. Pointer events can't get "stuck": pointerup/pointercancel
+        // ALWAYS fire, and the ghost is an independent element, so re-rendering the
+        // board mid-drag can't break it. Works for mouse, touch and pen (one code
+        // path — the old touch-drag shim is disabled).
+        // ══════════════════════════════════════════════════════════════════════
+        const DRAG_THRESHOLD = 6; // px of movement before a press becomes a drag
+
+        // Read {el, data} for whatever draggable source the press landed on, mirroring
+        // the old dragstart handlers. Returns null if it's not a valid drag source.
+        const readDragSource = (startEl) => {
+            if (!startEl || typeof startEl.closest !== "function") return null;
+            const handCard = startEl.closest(".hand-card.selectable-card");
+            if (handCard) {
+                const id = handCard.getAttribute("data-card-instance-id");
+                const pk = handCard.getAttribute("data-player");
+                if (!id || !pk) return null;
+                return { el: handCard, data: { cardInstanceId: id, playerKey: pk, fromHand: "true" } };
+            }
+            const deckCard = startEl.closest("[data-card-source='deck']");
+            if (deckCard) {
+                const pk = deckCard.getAttribute("data-player");
+                const player = gameState?.[pk];
+                if (!player || !player.deck?.length) return null;
+                const top = player.deck[player.deck.length - 1];
+                return { el: deckCard, data: { cardInstanceId: top.instanceId, playerKey: pk, fromDeck: "true" } };
+            }
+            const extraCard = startEl.closest("[data-card-source='extra']");
+            if (extraCard) {
+                const pk = extraCard.getAttribute("data-player");
+                const pileKey = extraCard.getAttribute("data-pile");
+                const pile = gameState?.[pk]?.[pileKey];
+                if (!pile?.length) return null;
+                const top = pile[pile.length - 1];
+                return { el: extraCard, data: { cardInstanceId: top.instanceId, playerKey: pk, fromExtra: "true", extraPile: pileKey } };
+            }
+            const lifeCard = startEl.closest("[data-card-source='life']");
+            if (lifeCard) {
+                const pk = lifeCard.getAttribute("data-player");
+                const lifeIndex = parseInt(lifeCard.getAttribute("data-life-index"));
+                const player = gameState?.[pk];
+                if (!player || !player.life?.[lifeIndex]) return null;
+                return { el: lifeCard, data: { cardInstanceId: player.life[lifeIndex].instanceId, playerKey: pk, fromLife: "true", lifeIndex } };
+            }
+            const boardCard = startEl.closest(".board-card-img");
+            if (boardCard && !startEl.closest(".hand-card")) {
+                const slot = boardCard.closest(".character-slot");
+                const stageArea = boardCard.closest(".stage-area");
+                const trashArea = boardCard.closest(".trash-area");
+                if (!slot && !stageArea && !trashArea) return null;
+                const pk = boardCard.getAttribute("data-player");
+                const player = gameState?.[pk];
+                if (!player) return null;
+                let card = null;
+                if (slot) card = player.characters?.[parseInt(slot.getAttribute("data-slot"))];
+                else if (stageArea) card = player.stage;
+                else if (trashArea) card = player.trash?.length ? player.trash[player.trash.length - 1] : null;
+                if (!card) return null;
+                return { el: boardCard, data: { cardInstanceId: card.instanceId, playerKey: pk, fromHand: "false" } };
+            }
+            return null;
+        };
+
+        // Run the actual move using the existing handlers (dataTransfer-free).
+        const runPointerDrop = (e, data) => {
+            const extraTarget = getExtraDropTarget(e);
+            if (extraTarget) handleDropIntoExtra(e, data.cardInstanceId, data.playerKey, extraTarget, data);
+            else if (data.fromExtra === "true") handleExtraCardDrop(e, data.cardInstanceId, data.playerKey, data.extraPile);
+            else if (data.fromDeck === "true") handleDeckCardDrop(e, data.cardInstanceId, data.playerKey);
+            else if (data.fromLife === "true") handleLifeCardDrop(e, data.cardInstanceId, data.playerKey, data.lifeIndex);
+            else if (data.fromHand === "true") handleHandCardDrop(e, data.cardInstanceId, data.playerKey);
+            else if (data.fromHand === "false") handleBoardCardDrop(e, data.cardInstanceId, data.playerKey);
+            window.playCardSound?.();
+            window.scheduleOnlineBoardSync?.();
+        };
+
+        // Resolve the drop target under the pointer and route it (with the same
+        // deck/life "bury top or bottom?" confirm the native drop used on touch).
+        const routePointerDrop = (pt, data) => {
+            const target = document.elementFromPoint(pt.clientX, pt.clientY);
+            if (!target) return;
+            const e = { target, clientX: pt.clientX, clientY: pt.clientY, preventDefault() {}, stopPropagation() {} };
+            const extraTarget = getExtraDropTarget(e);
+            const canClosest = typeof target.closest === "function";
+            const deckDropTarget = canClosest ? target.closest(".deck-area") : null;
+            const lifeDropTarget = (!deckDropTarget && canClosest) ? target.closest(".life-area") : null;
+            const pileTarget = deckDropTarget || lifeDropTarget;
+            const isTouch = document.documentElement.classList.contains("touch-device");
+            if (pileTarget && !extraTarget && isTouch && typeof window.confirmDeckMove === "function") {
+                const rect = pileTarget.getBoundingClientRect();
+                const isTop = pt.clientY < rect.top + rect.height / 2;
+                const player = gameState[data.playerKey];
+                let cardName = "this card";
+                const pools = player ? [player.hand, player.life, player.deck, player.trash, player.characters] : [];
+                for (const pool of pools) {
+                    if (!Array.isArray(pool)) continue;
+                    const c = pool.find(x => x && x.instanceId === data.cardInstanceId);
+                    if (c) { cardName = c.name || cardName; break; }
+                }
+                window.confirmDeckMove(isTop ? "top" : "bottom", cardName, () => runPointerDrop(e, data), deckDropTarget ? "deck" : "life");
+                return;
+            }
+            runPointerDrop(e, data);
+        };
+
+        const makeDragGhost = (srcEl, x, y) => {
+            const r = srcEl.getBoundingClientRect();
+            const ghost = document.createElement("div");
+            ghost.className = "mp-drag-ghost";
+            ghost.style.cssText = "position:fixed;left:0;top:0;z-index:2147483646;pointer-events:none;opacity:.9;"
+                + `width:${Math.max(40, r.width)}px;height:${Math.max(56, r.height)}px;`
+                + `transform:translate(${x - r.width / 2}px, ${y - r.height / 2}px);will-change:transform;`;
+            const srcImg = srcEl.querySelector("img");
+            if (srcImg && srcImg.src) {
+                const gi = document.createElement("img");
+                gi.src = srcImg.src;
+                gi.style.cssText = "width:100%;height:100%;object-fit:contain;border-radius:6px;box-shadow:0 10px 26px rgba(0,0,0,.6);";
+                ghost.appendChild(gi);
+            } else {
+                ghost.style.background = "rgba(60,120,220,.55)";
+                ghost.style.borderRadius = "6px";
+                ghost.style.boxShadow = "0 10px 26px rgba(0,0,0,.6)";
+            }
+            document.body.appendChild(ghost);
+            return ghost;
+        };
+
+        let ptrDrag = null;
+        const moveGhost = (ghost, x, y) => {
+            const w = ghost.offsetWidth, h = ghost.offsetHeight;
+            ghost.style.transform = `translate(${x - w / 2}px, ${y - h / 2}px)`;
+        };
+
+        const endPointerDrag = (pt, cancelled) => {
+            const drag = ptrDrag;
+            ptrDrag = null;
+            if (!drag) return;
+            window.__ccDragActive = false;
+            if (drag.ghost) drag.ghost.remove();
+            if (drag.srcEl) drag.srcEl.style.opacity = "";
+            clearAllHighlights();
+            if (drag.dragging && !cancelled && pt) {
+                try { routePointerDrop(pt, drag.data); }
+                catch (err) { console.error("Pointer drop failed:", err); }
+            }
+            try {
+                localStorage.setItem("cc_drag_debug", JSON.stringify({
+                    at: cancelled ? "ptr-cancel" : "ptr-drop",
+                    moved: !!(drag.dragging), ver: window.APP_VERSION || "?",
+                    mp: window.__ccMPVer, t: Date.now()
+                }));
+            } catch (_) {}
+        };
+
+        document.addEventListener("pointerdown", (e) => {
+            if (ptrDrag) return;                                   // one drag at a time
+            if (e.pointerType === "mouse" && e.button !== 0) return; // left button only
+            const src = readDragSource(e.target);
+            if (!src) return;
+            ptrDrag = { data: src.data, srcEl: src.el, ghost: null, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, dragging: false };
+        }, true);
+
+        document.addEventListener("pointermove", (e) => {
+            if (!ptrDrag || e.pointerId !== ptrDrag.pointerId) return;
+            if (!ptrDrag.dragging) {
+                if (Math.hypot(e.clientX - ptrDrag.startX, e.clientY - ptrDrag.startY) < DRAG_THRESHOLD) return;
+                ptrDrag.dragging = true;
+                window.__ccDragActive = true;
+                ptrDrag.ghost = makeDragGhost(ptrDrag.srcEl, e.clientX, e.clientY);
+                if (ptrDrag.srcEl) ptrDrag.srcEl.style.opacity = "0.4";
+                highlightAllZones();
+            }
+            if (ptrDrag.ghost) moveGhost(ptrDrag.ghost, e.clientX, e.clientY);
+            if (e.cancelable) e.preventDefault();                  // no scroll/selection mid-drag
+        }, true);
+
+        document.addEventListener("pointerup", (e) => {
+            if (!ptrDrag || e.pointerId !== ptrDrag.pointerId) return;
+            endPointerDrag({ clientX: e.clientX, clientY: e.clientY }, false);
+        }, true);
+        document.addEventListener("pointercancel", (e) => {
+            if (!ptrDrag || e.pointerId !== ptrDrag.pointerId) return;
+            endPointerDrag(null, true);
+        }, true);
+
         // The native dblclick event is unreliable here: a single click can
         // trigger a re-render (selection highlights, DON attach, online state
         // arriving), and self.js rebuilds zones with innerHTML - so the second
@@ -2226,6 +2433,12 @@ if (document.readyState === "loading") {
 // click / double-tap / DON-attach still work.
 // ─────────────────────────────────────────────────────────────────────────────
 (function installTouchDragSupport() {
+    // DISABLED (v224): the board now uses a unified POINTER-based drag (see
+    // setupCardInteractions) that already handles touch, mouse and pen. This old
+    // shim synthesized native DragEvents — which are now cancelled for board cards
+    // — so it would only conflict. Bail out entirely.
+    return;
+    /* eslint-disable no-unreachable */
     const isTouch = ("ontouchstart" in window)
         || navigator.maxTouchPoints > 0
         || (window.matchMedia && matchMedia("(pointer: coarse)").matches);
