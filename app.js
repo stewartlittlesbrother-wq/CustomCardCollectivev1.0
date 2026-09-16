@@ -355,6 +355,7 @@ const el = {
   leaderSlot: document.querySelector("#leaderSlot"),
   deckList: document.querySelector("#deckList"),
   exportDeck: document.querySelector("#exportDeck"),
+  exportDeckImage: document.querySelector("#exportDeckImage"),
   importDeck: document.querySelector("#importDeck"),
   deckSharePanel: document.querySelector("#deckSharePanel"),
   deckShareTitle: document.querySelector("#deckShareTitle"),
@@ -5244,6 +5245,226 @@ function closeDeckSharePanels() {
   el.deckSharePanel?.setAttribute("hidden", "");
 }
 
+// ── Export deck as a PNG image ───────────────────────────────────────────────
+// Renders the current deck (leader + main deck) to a canvas — a header banner,
+// a grid of the cards with their card numbers + copy counts, and Cost / Type /
+// Counter distribution bars — then downloads it as a PNG. Card art comes from the
+// same cache the builder uses (base64 for custom cards, so the canvas isn't
+// tainted). Remote/official art is loaded with crossOrigin; if a host lacks CORS
+// the card shows a name placeholder rather than failing the whole export.
+function roundRectPath(ctx, x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
+function drawImageCover(ctx, img, x, y, w, h) {
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  if (!iw || !ih) return;
+  const s = Math.max(w / iw, h / ih);
+  const dw = iw * s, dh = ih * s;
+  ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+}
+
+function loadCardImageForExport(card) {
+  return new Promise(resolve => {
+    if (!card) return resolve(null);
+    Promise.resolve(resolveCardImageUrl(card)).then(url => {
+      if (!url) return resolve(null);
+      const img = new Image();
+      // data: URIs are same-origin (no taint); tag only remote URLs for CORS so a
+      // CORS-enabled host can be captured, and a non-CORS one just fails to load.
+      if (!/^data:/i.test(url)) img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = url;
+    }).catch(() => resolve(null));
+  });
+}
+
+function deckExportTitle(leader) {
+  const name = (el.deckName?.value || "").trim();
+  if (name) return name;
+  if (leader) {
+    const code = String(leader.cardNumber || "").split("-")[0];
+    return (code ? `[${code}] ` : "") + (leader.name || "Deck");
+  }
+  return "Deck";
+}
+
+function drawDeckStats(ctx, x, y, w, h, entries) {
+  const cost = {}, type = { character: 0, event: 0, stage: 0 }, counter = { 0: 0, 1000: 0, 2000: 0 };
+  entries.forEach(({ card, qty }) => {
+    const c = Math.min(7, Math.max(0, Number(card.cost || 0)));
+    cost[c] = (cost[c] || 0) + qty;
+    const cat = card.category === "event" ? "event" : card.category === "stage" ? "stage" : "character";
+    type[cat] += qty;
+    const cv = Number(card.counter || 0);
+    counter[cv >= 2000 ? 2000 : cv >= 1000 ? 1000 : 0] += qty;
+  });
+
+  const gap = 44;
+  const groupW = (w - gap * 2) / 3;
+  const groups = [
+    { title: "Cost", color: "#2f8f86", bars: [1, 2, 3, 4, 5, 6, 7].map(k => ({ label: k === 7 ? "7+" : String(k), val: cost[k] || 0 })) },
+    { title: "Type", color: "#a53d3d", bars: [["CHAR", "character"], ["EVENT", "event"], ["STAGE", "stage"]].map(([l, k]) => ({ label: l, val: type[k] || 0 })) },
+    { title: "Counter", color: "#3a44a0", bars: [["0", 0], ["1000", 1000], ["2000", 2000]].map(([l, k]) => ({ label: l, val: counter[k] || 0 })) }
+  ];
+
+  groups.forEach((g, gi) => {
+    const gx = x + gi * (groupW + gap);
+    ctx.fillStyle = "#fff"; ctx.font = "700 24px system-ui, sans-serif"; ctx.textAlign = "left";
+    ctx.fillText(g.title, gx, y + 22);
+    const barsY = y + 46, barsH = h - 92;
+    const n = g.bars.length, step = groupW / n, bw = Math.min(66, step - 12);
+    const maxVal = Math.max(1, ...g.bars.map(b => b.val));
+    g.bars.forEach((b, bi) => {
+      const bx = gx + bi * step + (step - bw) / 2;
+      const bh = Math.max(3, Math.round((b.val / maxVal) * barsH));
+      const by = barsY + (barsH - bh);
+      ctx.fillStyle = g.color;
+      roundRectPath(ctx, bx, by, bw, bh, 6); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = "800 22px system-ui, sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(String(b.val), bx + bw / 2, by - 8);
+      ctx.fillStyle = "rgba(255,255,255,.72)"; ctx.font = "600 17px system-ui, sans-serif";
+      ctx.fillText(b.label, bx + bw / 2, barsY + barsH + 24);
+    });
+  });
+}
+
+async function exportDeckImage() {
+  if (state.cardsLoading) { toast("Cards are still loading — try again in a moment."); return; }
+  const leader = getCard(state.leaderId);
+  const entries = deckEntries();
+  if (!leader && !entries.length) { toast("Build a deck first, then export an image."); return; }
+
+  const btn = el.exportDeckImage;
+  const prevLabel = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Rendering…"; }
+
+  try {
+    const cells = [];
+    if (leader) cells.push({ card: leader, qty: 0, isLeader: true });
+    entries.forEach(e => cells.push({ card: e.card, qty: e.qty, isLeader: false }));
+
+    const imgs = await Promise.all(cells.map(c => loadCardImageForExport(c.card)));
+
+    const COLS = 6, CARD_W = 220, CARD_H = 308, GAP = 18, PAD = 30, LABEL_H = 34;
+    const HEADER_H = 190, STATS_H = 250;
+    const width = PAD * 2 + COLS * CARD_W + (COLS - 1) * GAP;
+    const rows = Math.max(1, Math.ceil(cells.length / COLS));
+    const gridH = rows * (CARD_H + LABEL_H) + Math.max(0, rows - 1) * GAP;
+    const height = HEADER_H + GAP + gridH + GAP + STATS_H + PAD;
+
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+
+    ctx.fillStyle = "#111417";
+    ctx.fillRect(0, 0, width, height);
+
+    // Header banner.
+    const hx = PAD, hy = PAD, hw = width - PAD * 2, hh = HEADER_H - PAD;
+    ctx.save();
+    roundRectPath(ctx, hx, hy, hw, hh, 14); ctx.clip();
+    ctx.fillStyle = "#0b0d0f"; ctx.fillRect(hx, hy, hw, hh);
+    if (cells[0] && cells[0].isLeader && imgs[0]) {
+      drawImageCover(ctx, imgs[0], hx, hy, hw, hh);
+      ctx.fillStyle = "rgba(0,0,0,.58)"; ctx.fillRect(hx, hy, hw, hh);
+    }
+    ctx.fillStyle = "#fff"; ctx.textAlign = "left";
+    ctx.font = "800 42px system-ui, sans-serif";
+    ctx.fillText(deckExportTitle(leader), hx + 30, hy + hh / 2 + 4, hw - 60);
+    ctx.font = "500 24px system-ui, sans-serif"; ctx.fillStyle = "rgba(255,255,255,.82)";
+    ctx.fillText(`${deckMainCount()} cards` + (leader ? ` · Leader: ${leader.name}` : ""), hx + 30, hy + hh / 2 + 42, hw - 60);
+    ctx.restore();
+    ctx.strokeStyle = "rgba(255,255,255,.15)"; ctx.lineWidth = 2;
+    roundRectPath(ctx, hx, hy, hw, hh, 14); ctx.stroke();
+
+    // Card grid.
+    const gy = HEADER_H + GAP;
+    cells.forEach((cell, i) => {
+      const col = i % COLS, row = Math.floor(i / COLS);
+      const x = PAD + col * (CARD_W + GAP);
+      const y = gy + row * (CARD_H + LABEL_H + GAP);
+      ctx.save();
+      roundRectPath(ctx, x, y, CARD_W, CARD_H, 10); ctx.clip();
+      if (imgs[i]) drawImageCover(ctx, imgs[i], x, y, CARD_W, CARD_H);
+      else {
+        ctx.fillStyle = "#20242a"; ctx.fillRect(x, y, CARD_W, CARD_H);
+        ctx.fillStyle = "#cbd3da"; ctx.font = "600 17px system-ui, sans-serif"; ctx.textAlign = "center";
+        wrapText(ctx, cell.card.name || "", x + CARD_W / 2, y + CARD_H / 2, CARD_W - 24, 22);
+      }
+      ctx.restore();
+      ctx.strokeStyle = cell.isLeader ? "#f6c445" : "rgba(255,255,255,.18)";
+      ctx.lineWidth = cell.isLeader ? 3 : 1.5;
+      roundRectPath(ctx, x, y, CARD_W, CARD_H, 10); ctx.stroke();
+      if (cell.isLeader) {
+        const bw = 100, bh = 30, bx = x + 7, by = y + 7;
+        ctx.fillStyle = "rgba(246,196,69,.94)"; roundRectPath(ctx, bx, by, bw, bh, 7); ctx.fill();
+        ctx.fillStyle = "#111"; ctx.font = "800 17px system-ui, sans-serif"; ctx.textAlign = "center";
+        ctx.fillText("LEADER", bx + bw / 2, by + bh - 9);
+      } else if (cell.qty > 0) {
+        const bw = 52, bh = 36, bx = x + CARD_W - bw - 7, by = y + 7;
+        ctx.fillStyle = "rgba(0,0,0,.82)"; roundRectPath(ctx, bx, by, bw, bh, 8); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.font = "800 24px system-ui, sans-serif"; ctx.textAlign = "center";
+        ctx.fillText("×" + cell.qty, bx + bw / 2, by + bh - 9);
+      }
+      ctx.fillStyle = "rgba(255,255,255,.88)"; ctx.font = "600 18px ui-monospace, monospace"; ctx.textAlign = "center";
+      ctx.fillText(cell.card.cardNumber || "", x + CARD_W / 2, y + CARD_H + 24, CARD_W);
+    });
+
+    // Stats.
+    drawDeckStats(ctx, PAD, HEADER_H + GAP + gridH + GAP, width - PAD * 2, STATS_H - PAD, entries);
+
+    const filename = (deckExportTitle(leader) || "deck").replace(/[^\w.-]+/g, "_").slice(0, 60) + ".png";
+    await new Promise((resolve, reject) => {
+      canvas.toBlob(blob => {
+        if (!blob) { reject(new Error("tainted or empty canvas")); return; }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        resolve();
+      }, "image/png");
+    });
+    toast("Deck image exported.");
+  } catch (err) {
+    console.error("Deck image export failed:", err);
+    if (/taint|security|insecure/i.test(String(err && err.message))) {
+      toast("Export blocked: some card art is hotlinked from another site and can't be captured into an image.");
+    } else {
+      toast("Deck image export failed — see console for details.");
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = prevLabel || "Export Image"; }
+  }
+}
+
+// Simple centered word-wrap for the placeholder card name (canvas has no wrapping).
+function wrapText(ctx, text, cx, cy, maxWidth, lineHeight) {
+  const words = String(text).split(/\s+/);
+  const lines = [];
+  let line = "";
+  words.forEach(word => {
+    const test = line ? line + " " + word : word;
+    if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = word; }
+    else line = test;
+  });
+  if (line) lines.push(line);
+  const startY = cy - ((lines.length - 1) * lineHeight) / 2;
+  lines.forEach((ln, i) => ctx.fillText(ln, cx, startY + i * lineHeight));
+}
+
 async function copyDeckShareText() {
   const text = el.deckShareText?.value || "";
   try {
@@ -8633,6 +8854,7 @@ function bindEvents() {
   el.saveDeck?.addEventListener("click", saveDeckToLibrary);
   el.saveDeckMini.addEventListener("click", saveDeckToLibrary);
   el.exportDeck?.addEventListener("click", openDeckExport);
+  el.exportDeckImage?.addEventListener("click", exportDeckImage);
   el.importDeck?.addEventListener("click", openDeckImport);
   el.deckShareCopy?.addEventListener("click", copyDeckShareText);
   el.deckShareLoad?.addEventListener("click", () => {
