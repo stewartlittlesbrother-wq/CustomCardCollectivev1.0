@@ -5298,28 +5298,26 @@ function deckExportTitle(leader) {
 }
 
 function drawDeckStats(ctx, x, y, w, h, entries) {
-  const cost = {}, type = { character: 0, event: 0, stage: 0 }, counter = { 0: 0, 1000: 0, 2000: 0 };
+  const cost = {}, type = { character: 0, event: 0, stage: 0 };
   entries.forEach(({ card, qty }) => {
     const c = Math.min(7, Math.max(0, Number(card.cost || 0)));
     cost[c] = (cost[c] || 0) + qty;
     const cat = card.category === "event" ? "event" : card.category === "stage" ? "stage" : "character";
     type[cat] += qty;
-    const cv = Number(card.counter || 0);
-    counter[cv >= 2000 ? 2000 : cv >= 1000 ? 1000 : 0] += qty;
   });
 
   const gap = 44;
-  const groupW = (w - gap * 2) / 3;
+  const groupW = (w - gap) / 2;   // two groups now (Counter chart removed)
   const groups = [
     { title: "Cost", color: "#2f8f86", bars: [1, 2, 3, 4, 5, 6, 7].map(k => ({ label: k === 7 ? "7+" : String(k), val: cost[k] || 0 })) },
-    { title: "Type", color: "#a53d3d", bars: [["CHAR", "character"], ["EVENT", "event"], ["STAGE", "stage"]].map(([l, k]) => ({ label: l, val: type[k] || 0 })) },
-    { title: "Counter", color: "#3a44a0", bars: [["0", 0], ["1000", 1000], ["2000", 2000]].map(([l, k]) => ({ label: l, val: counter[k] || 0 })) }
+    { title: "Type", color: "#a53d3d", bars: [["CHAR", "character"], ["EVENT", "event"], ["STAGE", "stage"]].map(([l, k]) => ({ label: l, val: type[k] || 0 })) }
   ];
 
   groups.forEach((g, gi) => {
     const gx = x + gi * (groupW + gap);
+    // Section titles nudged up + left.
     ctx.fillStyle = "#fff"; ctx.font = "700 24px system-ui, sans-serif"; ctx.textAlign = "left";
-    ctx.fillText(g.title, gx, y + 22);
+    ctx.fillText(g.title, gx - 8, y + 6);
     const barsY = y + 46, barsH = h - 92;
     const n = g.bars.length, step = groupW / n, bw = Math.min(66, step - 12);
     const maxVal = Math.max(1, ...g.bars.map(b => b.val));
