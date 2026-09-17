@@ -356,6 +356,7 @@ const el = {
   deckList: document.querySelector("#deckList"),
   exportDeck: document.querySelector("#exportDeck"),
   exportDeckImage: document.querySelector("#exportDeckImage"),
+  printDeck: document.querySelector("#printDeck"),
   importDeck: document.querySelector("#importDeck"),
   deckSharePanel: document.querySelector("#deckSharePanel"),
   deckShareTitle: document.querySelector("#deckShareTitle"),
@@ -5463,6 +5464,336 @@ function wrapText(ctx, text, cx, cy, maxWidth, lineHeight) {
   lines.forEach((ln, i) => ctx.fillText(ln, cx, startY + i * lineHeight));
 }
 
+// =========================================================================
+// Proxy print — lay the deck out at TRUE physical card size on printer sheets
+// and download a PDF you can print at 100% for real, correctly-sized proxies.
+// Everything here is in millimetres (1 unit = 1 mm); a PDF carries absolute
+// physical dimensions, so printed at "Actual size" each card comes out 63×88mm.
+// =========================================================================
+
+const PROXY_PAGES = {
+  letter: { w: 215.9, h: 279.4, label: "Letter (8.5 × 11 in)" },
+  a4:     { w: 210,   h: 297,   label: "A4 (210 × 297 mm)" },
+  legal:  { w: 215.9, h: 355.6, label: "Legal (8.5 × 14 in)" }
+};
+const PROXY_CARD_SIZES = {
+  standard: { w: 63,   h: 88,   label: "Standard (63 × 88 mm)" },
+  small:    { w: 59,   h: 86,   label: "Small / JP (59 × 86 mm)" }
+};
+
+const proxySettings = {
+  page: "letter",
+  cardKey: "standard",
+  cardW: 63,
+  cardH: 88,
+  cutMarks: true,
+  cutColor: "#7CFC00",
+  cutThickness: 0.265,
+  rowGap: 0,
+  colGap: 0,
+  includeLeader: true
+};
+
+// The LIVE list of cards to print — one entry per physical copy. Seeded from the
+// deck when the modal opens, then the user can remove individual copies (which
+// only edits this run, never their saved deck). Preview + PDF both read this.
+let proxyPrintCards = [];
+
+// One card object per PHYSICAL card to print: leader once, then every deck card
+// repeated by its quantity, in the deck's normal order.
+function proxyCardList() {
+  const list = [];
+  const leader = getCard(state.leaderId);
+  if (proxySettings.includeLeader && leader) list.push(leader);
+  deckEntries().forEach(({ card, qty }) => {
+    for (let i = 0; i < qty; i++) list.push(card);
+  });
+  return list;
+}
+
+// Grid geometry for the current page + card size + gaps, centred on the sheet.
+function proxyLayout() {
+  const page = PROXY_PAGES[proxySettings.page] || PROXY_PAGES.letter;
+  const cw = Math.max(20, Number(proxySettings.cardW) || 63);
+  const ch = Math.max(20, Number(proxySettings.cardH) || 88);
+  const cg = Math.max(0, Number(proxySettings.colGap) || 0);
+  const rg = Math.max(0, Number(proxySettings.rowGap) || 0);
+  const cols = Math.max(1, Math.floor((page.w + cg) / (cw + cg)));
+  const rows = Math.max(1, Math.floor((page.h + rg) / (ch + rg)));
+  const perPage = cols * rows;
+  const gridW = cols * cw + (cols - 1) * cg;
+  const gridH = rows * ch + (rows - 1) * rg;
+  const offX = (page.w - gridW) / 2;
+  const offY = (page.h - gridH) / 2;
+  return { page, cw, ch, cg, rg, cols, rows, perPage, offX, offY };
+}
+
+// Cache the resolved <img> per unique card so preview + PDF don't reload art.
+const proxyImgCache = new Map();
+async function ensureProxyImages(cards) {
+  const uniq = [...new Set(cards.map(c => c.id))];
+  await Promise.all(uniq.map(async id => {
+    if (proxyImgCache.has(id)) return;
+    const card = getCard(id) || cards.find(c => c.id === id);
+    proxyImgCache.set(id, await loadCardImageForExport(card));
+  }));
+}
+
+// Draw the cut grid: thin full-sheet lines along every card edge, so a guillotine
+// or blade run gives exact 63×88 cards. `ctx` is already scaled to mm.
+function drawProxyCutLines(ctx, L) {
+  const xs = new Set(), ys = new Set();
+  for (let c = 0; c < L.cols; c++) { const l = L.offX + c * (L.cw + L.cg); xs.add(+l.toFixed(3)); xs.add(+(l + L.cw).toFixed(3)); }
+  for (let r = 0; r < L.rows; r++) { const t = L.offY + r * (L.ch + L.rg); ys.add(+t.toFixed(3)); ys.add(+(t + L.ch).toFixed(3)); }
+  ctx.strokeStyle = proxySettings.cutColor;
+  ctx.lineWidth = Math.max(0.05, Number(proxySettings.cutThickness) || 0.265);
+  ctx.beginPath();
+  xs.forEach(x => { ctx.moveTo(x, 0); ctx.lineTo(x, L.page.h); });
+  ys.forEach(y => { ctx.moveTo(0, y); ctx.lineTo(L.page.w, y); });
+  ctx.stroke();
+}
+
+// Render ONE page (0-indexed) of the proxy sheet to a canvas at mmScale px/mm.
+function renderProxyPageCanvas(pageIndex, mmScale) {
+  const L = proxyLayout();
+  const cards = proxyPrintCards;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(L.page.w * mmScale);
+  canvas.height = Math.round(L.page.h * mmScale);
+  const ctx = canvas.getContext("2d");
+  ctx.scale(mmScale, mmScale);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, L.page.w, L.page.h);
+
+  const start = pageIndex * L.perPage;
+  const pageCards = cards.slice(start, start + L.perPage);
+  pageCards.forEach((card, i) => {
+    const col = i % L.cols, row = Math.floor(i / L.cols);
+    const x = L.offX + col * (L.cw + L.cg);
+    const y = L.offY + row * (L.ch + L.rg);
+    const img = proxyImgCache.get(card.id);
+    if (img) {
+      drawImageCover(ctx, img, x, y, L.cw, L.ch);
+    } else {
+      ctx.fillStyle = "#e9edf2"; ctx.fillRect(x, y, L.cw, L.ch);
+      ctx.fillStyle = "#333"; ctx.textAlign = "center";
+      ctx.font = `600 ${Math.max(2, L.cw / 12)}px system-ui, sans-serif`;
+      wrapText(ctx, card?.name || "Card", x + L.cw / 2, y + L.ch / 2, L.cw - 6, L.cw / 9);
+    }
+  });
+
+  if (proxySettings.cutMarks) drawProxyCutLines(ctx, L);
+  return canvas;
+}
+
+// jsPDF is only pulled in when you actually print (kept off the initial load).
+let jsPdfPromise = null;
+function loadJsPdf() {
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf.jsPDF);
+  if (jsPdfPromise) return jsPdfPromise;
+  jsPdfPromise = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    s.onload = () => (window.jspdf && window.jspdf.jsPDF) ? resolve(window.jspdf.jsPDF) : reject(new Error("jsPDF missing"));
+    s.onerror = () => reject(new Error("Failed to load jsPDF"));
+    document.head.appendChild(s);
+  });
+  return jsPdfPromise;
+}
+
+async function downloadProxyPdf(statusEl) {
+  const cards = proxyPrintCards;
+  if (!cards.length) { toast("Nothing to print — the card list is empty."); return; }
+  const setStatus = (t) => { if (statusEl) statusEl.textContent = t; };
+
+  try {
+    setStatus("Loading PDF engine…");
+    const JsPDF = await loadJsPdf();
+    setStatus("Loading card art…");
+    await ensureProxyImages(cards);
+
+    const L = proxyLayout();
+    const totalPages = Math.max(1, Math.ceil(cards.length / L.perPage));
+    const orientation = L.page.w > L.page.h ? "landscape" : "portrait";
+    const doc = new JsPDF({ unit: "mm", format: [L.page.w, L.page.h], orientation });
+
+    // ~300 DPI card bitmaps for crisp print without a gigantic file.
+    const DPI = 300, mmScale = DPI / 25.4;
+    for (let p = 0; p < totalPages; p++) {
+      setStatus(`Rendering page ${p + 1} of ${totalPages}…`);
+      if (p > 0) doc.addPage([L.page.w, L.page.h], orientation);
+      const canvas = renderProxyPageCanvas(p, mmScale);
+      let dataUrl;
+      try { dataUrl = canvas.toDataURL("image/jpeg", 0.92); }
+      catch (e) {
+        toast("Print blocked: some card art is hotlinked from another site and can't be captured. Those cards would print blank.");
+        setStatus("");
+        return;
+      }
+      doc.addImage(dataUrl, "JPEG", 0, 0, L.page.w, L.page.h, undefined, "FAST");
+    }
+
+    const leader = getCard(state.leaderId);
+    const filename = (deckExportTitle(leader) || "deck").replace(/[^\w.-]+/g, "_").slice(0, 60) + "_proxies.pdf";
+    doc.save(filename);
+    setStatus(`Done — ${cards.length} cards, ${totalPages} page${totalPages === 1 ? "" : "s"}. Print at 100% / "Actual size".`);
+  } catch (err) {
+    console.error("Proxy PDF failed:", err);
+    toast("Couldn't build the print PDF — check your connection (the PDF engine loads from the web) and try again.");
+    setStatus("");
+  }
+}
+
+// Rebuild the print list from the current deck (undoes manual removals).
+function resetProxyList() {
+  proxyPrintCards = proxyCardList();
+  refreshProxyPreview();
+}
+
+function removeProxyCard(index) {
+  if (index >= 0 && index < proxyPrintCards.length) {
+    proxyPrintCards.splice(index, 1);
+    refreshProxyPreview();
+  }
+}
+
+// Render EVERY card in the run as a scrollable grid, grouped into the pages they'll
+// print on (so you see the page breaks), each with a ✕ to drop that copy.
+function refreshProxyPreview() {
+  const wrap = document.getElementById("proxyPreview");
+  const info = document.getElementById("proxyPreviewInfo");
+  if (!wrap) return;
+  const cards = proxyPrintCards;
+  const L = proxyLayout();
+  const totalPages = Math.max(1, Math.ceil(cards.length / L.perPage));
+  if (info) info.textContent = `${cards.length} card${cards.length === 1 ? "" : "s"} · ${L.cols}×${L.rows} per sheet · ${totalPages} page${totalPages === 1 ? "" : "s"}`;
+
+  if (!cards.length) {
+    wrap.innerHTML = `<div class="proxy-empty">Nothing to print. Use “Reset list” to restore your deck's cards.</div>`;
+    return;
+  }
+
+  let html = "";
+  for (let p = 0; p < totalPages; p++) {
+    const start = p * L.perPage;
+    const pageCards = cards.slice(start, start + L.perPage);
+    html += `<div class="proxy-sheet-page">
+      <div class="proxy-sheet-page-label">Page ${p + 1}</div>
+      <div class="proxy-sheet-grid" style="grid-template-columns:repeat(${L.cols},minmax(0,1fr));">`;
+    pageCards.forEach((card, j) => {
+      const gi = start + j;
+      const isLeader = card.category === "leader";
+      html += `<div class="proxy-card-cell${isLeader ? " is-leader" : ""}">
+        ${cardVisual(card)}
+        <button type="button" class="proxy-card-remove" data-index="${gi}" title="Remove this copy">✕</button>
+        ${isLeader ? '<span class="proxy-card-tag">LEADER</span>' : ""}
+      </div>`;
+    });
+    html += `</div></div>`;
+  }
+  wrap.innerHTML = html;
+  observeLazyImages(wrap);
+  wrap.querySelectorAll(".proxy-card-remove").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeProxyCard(Number(btn.getAttribute("data-index")));
+    });
+  });
+}
+
+function openPrintDeckModal() {
+  if (state.cardsLoading) { toast("Cards are still loading — try again in a moment."); return; }
+  const cards = proxyCardList();
+  if (!cards.length) { toast("Build a deck first, then print."); return; }
+  proxyPrintCards = cards.slice();   // fresh, editable copy for this run
+  document.getElementById("proxyPrintOverlay")?.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "proxyPrintOverlay";
+  overlay.className = "proxy-print-overlay";
+
+  const pageOpts = Object.entries(PROXY_PAGES).map(([k, v]) => `<option value="${k}" ${k === proxySettings.page ? "selected" : ""}>${v.label}</option>`).join("");
+  const cardOpts = Object.entries(PROXY_CARD_SIZES).map(([k, v]) => `<option value="${k}" ${k === proxySettings.cardKey ? "selected" : ""}>${v.label}</option>`).join("") + `<option value="custom" ${proxySettings.cardKey === "custom" ? "selected" : ""}>Custom…</option>`;
+
+  overlay.innerHTML = `
+    <div class="proxy-print-modal">
+      <div class="proxy-print-head">
+        <strong>Print Deck — Proxy Sheets</strong>
+        <button type="button" class="proxy-x" id="proxyClose" aria-label="Close">✕</button>
+      </div>
+      <div class="proxy-print-body">
+        <div class="proxy-settings">
+          <label>Page size
+            <select id="proxyPage">${pageOpts}</select>
+          </label>
+          <label>Card size
+            <select id="proxyCardSize">${cardOpts}</select>
+          </label>
+          <div class="proxy-custom-row" id="proxyCustomRow" ${proxySettings.cardKey === "custom" ? "" : "hidden"}>
+            <label>W (mm)<input type="number" id="proxyCardW" min="20" max="120" step="0.1" value="${proxySettings.cardW}"></label>
+            <label>H (mm)<input type="number" id="proxyCardH" min="20" max="160" step="0.1" value="${proxySettings.cardH}"></label>
+          </div>
+          <div class="proxy-row2">
+            <label>Row gap (mm)<input type="number" id="proxyRowGap" min="0" max="30" step="0.5" value="${proxySettings.rowGap}"></label>
+            <label>Col gap (mm)<input type="number" id="proxyColGap" min="0" max="30" step="0.5" value="${proxySettings.colGap}"></label>
+          </div>
+          <label class="proxy-check"><input type="checkbox" id="proxyLeader" ${proxySettings.includeLeader ? "checked" : ""}> Include leader</label>
+          <label class="proxy-check"><input type="checkbox" id="proxyCut" ${proxySettings.cutMarks ? "checked" : ""}> Cut lines</label>
+          <div class="proxy-row2">
+            <label>Line color<input type="color" id="proxyCutColor" value="${proxySettings.cutColor}"></label>
+            <label>Thickness (mm)<input type="number" id="proxyCutThick" min="0.05" max="2" step="0.05" value="${proxySettings.cutThickness}"></label>
+          </div>
+          <button type="button" class="red-button proxy-download" id="proxyDownload">⬇ Download PDF</button>
+          <div class="proxy-status" id="proxyStatus"></div>
+          <p class="proxy-hint">Print the PDF at <strong>100% / “Actual size”</strong> (no “fit to page”) so cards come out exactly ${proxySettings.cardW}×${proxySettings.cardH} mm.</p>
+        </div>
+        <div class="proxy-preview-col">
+          <div class="proxy-preview-top">
+            <div class="proxy-preview-info" id="proxyPreviewInfo"></div>
+            <button type="button" class="ghost proxy-reset" id="proxyReset">↺ Reset list</button>
+          </div>
+          <div class="proxy-preview-hint">Scroll to see every card · click ✕ on a card to remove that copy (your saved deck isn't changed).</div>
+          <div class="proxy-preview" id="proxyPreview"></div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector("#proxyClose").addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  const applyCardSize = () => {
+    if (proxySettings.cardKey !== "custom") {
+      const cs = PROXY_CARD_SIZES[proxySettings.cardKey] || PROXY_CARD_SIZES.standard;
+      proxySettings.cardW = cs.w; proxySettings.cardH = cs.h;
+    }
+  };
+
+  overlay.querySelector("#proxyPage").addEventListener("change", (e) => { proxySettings.page = e.target.value; refreshProxyPreview(); });
+  overlay.querySelector("#proxyCardSize").addEventListener("change", (e) => {
+    proxySettings.cardKey = e.target.value;
+    overlay.querySelector("#proxyCustomRow").hidden = proxySettings.cardKey !== "custom";
+    applyCardSize();
+    overlay.querySelector("#proxyCardW").value = proxySettings.cardW;
+    overlay.querySelector("#proxyCardH").value = proxySettings.cardH;
+    refreshProxyPreview();
+  });
+  overlay.querySelector("#proxyCardW").addEventListener("input", (e) => { proxySettings.cardW = Number(e.target.value) || proxySettings.cardW; refreshProxyPreview(); });
+  overlay.querySelector("#proxyCardH").addEventListener("input", (e) => { proxySettings.cardH = Number(e.target.value) || proxySettings.cardH; refreshProxyPreview(); });
+  overlay.querySelector("#proxyRowGap").addEventListener("input", (e) => { proxySettings.rowGap = Number(e.target.value) || 0; refreshProxyPreview(); });
+  overlay.querySelector("#proxyColGap").addEventListener("input", (e) => { proxySettings.colGap = Number(e.target.value) || 0; refreshProxyPreview(); });
+  overlay.querySelector("#proxyLeader").addEventListener("change", (e) => { proxySettings.includeLeader = e.target.checked; resetProxyList(); });
+  overlay.querySelector("#proxyReset").addEventListener("click", resetProxyList);
+  overlay.querySelector("#proxyCut").addEventListener("change", (e) => { proxySettings.cutMarks = e.target.checked; refreshProxyPreview(); });
+  overlay.querySelector("#proxyCutColor").addEventListener("input", (e) => { proxySettings.cutColor = e.target.value; refreshProxyPreview(); });
+  overlay.querySelector("#proxyCutThick").addEventListener("input", (e) => { proxySettings.cutThickness = Number(e.target.value) || 0.265; refreshProxyPreview(); });
+  overlay.querySelector("#proxyDownload").addEventListener("click", () => downloadProxyPdf(overlay.querySelector("#proxyStatus")));
+
+  applyCardSize();
+  refreshProxyPreview();
+}
+
 async function copyDeckShareText() {
   const text = el.deckShareText?.value || "";
   try {
@@ -8951,6 +9282,7 @@ function bindEvents() {
   el.saveDeckMini.addEventListener("click", saveDeckToLibrary);
   el.exportDeck?.addEventListener("click", openDeckExport);
   el.exportDeckImage?.addEventListener("click", exportDeckImage);
+  el.printDeck?.addEventListener("click", openPrintDeckModal);
   el.importDeck?.addEventListener("click", openDeckImport);
   el.deckShareCopy?.addEventListener("click", copyDeckShareText);
   el.deckShareLoad?.addEventListener("click", () => {

@@ -6926,6 +6926,74 @@ html.touch-device .collection-hide-btn { opacity: .9; }
 .rainbow-leader-cell-art img, .rainbow-leader-cell-art .proxy-card { width: 100%; height: 100%; object-fit: cover; display: block; }
 .rainbow-leader-cell-name { font-size: .74rem; font-weight: 700; text-align: center; line-height: 1.2; }
 .rainbow-leader-empty { color: #bbb; padding: 24px; font-size: .9rem; grid-column: 1 / -1; text-align: center; }
+
+/* Proxy print modal — settings on the left, live sheet preview on the right. */
+.proxy-print-overlay {
+  position: fixed; inset: 0; z-index: 12000;
+  background: rgba(0, 0, 0, .8);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.proxy-print-modal {
+  width: 100%; max-width: 900px; max-height: 92vh;
+  background: #14140f; border: 2px solid #888; border-radius: 12px;
+  display: flex; flex-direction: column; overflow: hidden; color: #fff;
+}
+.proxy-print-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid #555;
+}
+.proxy-print-head strong { font-size: 1.05rem; }
+.proxy-x { background: none; border: none; color: #bbb; font-size: 1.1rem; cursor: pointer; padding: 4px 8px; }
+.proxy-x:hover { color: #fff; }
+.proxy-print-body { display: flex; gap: 16px; padding: 16px; overflow: auto; }
+.proxy-settings { flex: 0 0 250px; display: flex; flex-direction: column; gap: 10px; }
+.proxy-settings label { display: flex; flex-direction: column; gap: 4px; font-size: .78rem; color: #cbd3da; font-weight: 700; }
+.proxy-settings select,
+.proxy-settings input[type="number"] {
+  padding: 7px 8px; font-size: .85rem; border-radius: 6px;
+  border: 1px solid #666; background: #111; color: #fff; font-weight: 600;
+}
+.proxy-settings input[type="color"] { width: 100%; height: 30px; padding: 0; border: 1px solid #666; border-radius: 6px; background: #111; cursor: pointer; }
+.proxy-custom-row, .proxy-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.proxy-check { flex-direction: row !important; align-items: center; gap: 8px; color: #fff !important; }
+.proxy-check input { width: 16px; height: 16px; }
+.proxy-download { margin-top: 4px; padding: 10px; font-weight: 800; cursor: pointer; }
+.proxy-status { font-size: .78rem; color: #8fe388; min-height: 1.1em; }
+.proxy-hint { font-size: .72rem; color: #9db1a8; line-height: 1.35; margin: 0; }
+.proxy-hint strong { color: #ffd966; }
+.proxy-preview-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.proxy-preview-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.proxy-preview-info { font-size: .78rem; color: #cbd3da; font-weight: 700; }
+.proxy-reset { font-size: .72rem; padding: 4px 9px; cursor: pointer; flex: none; }
+.proxy-preview-hint { font-size: .7rem; color: #9db1a8; line-height: 1.3; }
+.proxy-preview {
+  flex: 1; min-height: 320px; max-height: 64vh; overflow-y: auto;
+  background: #26262b; border-radius: 8px; padding: 10px;
+}
+.proxy-empty { color: #9db1a8; text-align: center; padding: 44px 12px; font-size: .85rem; }
+.proxy-sheet-page { margin-bottom: 14px; }
+.proxy-sheet-page-label { font-size: .72rem; font-weight: 800; color: #9db1a8; margin: 0 2px 6px; letter-spacing: .04em; }
+.proxy-sheet-grid { display: grid; gap: 6px; background: #fff; padding: 6px; border-radius: 4px; }
+.proxy-card-cell { position: relative; aspect-ratio: 63 / 88; border-radius: 3px; overflow: hidden; background: #e9edf2; }
+.proxy-card-cell img, .proxy-card-cell .proxy-card { width: 100%; height: 100%; object-fit: cover; display: block; }
+.proxy-card-cell.is-leader { outline: 2px solid #f6c445; outline-offset: -2px; }
+.proxy-card-remove {
+  position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border-radius: 50%;
+  border: none; background: rgba(200,30,30,.94); color: #fff; font-size: 13px; font-weight: 800;
+  line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .12s; padding: 0;
+}
+.proxy-card-cell:hover .proxy-card-remove { opacity: 1; }
+.proxy-card-remove:hover { background: #e53935; }
+.proxy-card-tag {
+  position: absolute; bottom: 3px; left: 3px; background: rgba(246,196,69,.94); color: #111;
+  font-size: .55rem; font-weight: 800; padding: 1px 5px; border-radius: 3px; letter-spacing: .03em;
+}
+@media (hover: none) { .proxy-card-remove { opacity: 1; } }
+@media (max-width: 720px) {
+  .proxy-print-body { flex-direction: column; }
+  .proxy-settings { flex-basis: auto; }
+}
 .draft-info { display: flex; flex-direction: column; }
 .draft-info strong { font-size: .95rem; }
 .draft-info span { color: var(--muted, #9db1a8); font-size: .8rem; }

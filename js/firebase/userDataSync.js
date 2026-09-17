@@ -184,19 +184,29 @@ export async function startAccountSync(uid, options = {}) {
 export function stopAccountSync() { currentUid = null; }
 
 // Push ONE key's current value to the account (debounced). Called after any save
-// on any page (via window.ccSyncPush). No-op when signed out or key isn't synced.
+// on any page (via window.ccSyncPush). No-op when the key isn't synced.
+//
+// The local write time is stamped into meta SYNCHRONOUSLY, right here — NOT inside
+// the debounced push, and even when signed out. Without that, a change made just
+// before navigating into a match (or while signed out) never recorded a timestamp,
+// so the next sign-in sync saw localAt=0, let a stale cloud value win, and quietly
+// reverted the setting (this was the "Extra Slots keep turning themselves off" bug).
+// Stamping immediately means this device's value is always the newest for reconcile.
 export function pushKey(key) {
-    if (!currentUid || !SYNC_KEYS.has(key)) return;
+    if (!SYNC_KEYS.has(key)) return;
+    const at = Date.now();
+    const meta = readMeta();
+    meta[key] = at;
+    writeMeta(meta);
+    if (!currentUid) return;   // no account to push to yet — the timestamp is enough
     clearTimeout(pushTimers[key]);
     pushTimers[key] = setTimeout(() => {
         if (!currentUid) return;
         const json = lsGet(key);
         if (json == null) return;
-        const meta = readMeta();
-        const at = Date.now();
-        meta[key] = at;
-        writeMeta(meta);
-        pushEntries(currentUid, { [sanitizeSyncKey(key)]: { at, json } });
+        // Use the stamp recorded for the latest write to this key.
+        const stampedAt = Number(readMeta()[key]) || at;
+        pushEntries(currentUid, { [sanitizeSyncKey(key)]: { at: stampedAt, json } });
     }, 800);
 }
 
