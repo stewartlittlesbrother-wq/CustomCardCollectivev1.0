@@ -7480,6 +7480,9 @@ async function maybeStartMultiplayerDraft() {
     svc,
     user,
     nick: (window.ccAccount && window.ccAccount.user && window.ccAccount.user.displayName) || "Player",
+    // Each player drafts under a rainbow leader; the omni leader is the default
+    // until they pick a different one from the leader panel in the builder.
+    leaderId: OMNI_LEADER_ID,
     startedAt: null,
     warned: new Set(),
     locked: false,
@@ -7579,6 +7582,104 @@ function teardownMpDraft() {
   clearInterval(mpDraft.timer);
 }
 
+// Every "rainbow" leader in the pool — a leader with two or more colours (the
+// omni leader has all six). These are the leaders you can draft under; a mono
+// colour leader would fight the mixed-colour draft pool. Omni always leads.
+function rainbowLeaders() {
+  const leaders = (state.cards || []).filter(card =>
+    card && card.category === "leader" &&
+    Array.isArray(card.colors) &&
+    card.colors.filter(color => color && color !== "colorless").length >= 2);
+  // Guarantee the omni leader is present even if it isn't in the pool array.
+  if (!leaders.some(l => l.omniLeader || l.id === OMNI_LEADER_ID)) {
+    const omni = getCard(OMNI_LEADER_ID) || (typeof getOmniLeaderCard === "function" ? getOmniLeaderCard() : null);
+    if (omni) leaders.unshift(omni);
+  }
+  leaders.sort((a, b) => {
+    if (a.omniLeader && !b.omniLeader) return -1;
+    if (b.omniLeader && !a.omniLeader) return 1;
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+  return leaders;
+}
+
+// Paint the builder's leader slot from mpDraft.leaderId and wire the "Choose
+// Rainbow Leader" button.
+function renderMpDraftLeaderChoice() {
+  const el2 = draftBuilderEl;
+  if (!el2) return;
+  const host = el2.querySelector("#draftLeader");
+  if (!host) return;
+  const id = (mpDraft && mpDraft.leaderId) || OMNI_LEADER_ID;
+  const leader = getCard(id) || getCard(OMNI_LEADER_ID);
+  host.innerHTML =
+    `<div class="draft-leader-art">${leader ? cardVisual(leader) : ""}</div>` +
+    `<span>Leader: ${leader ? escapeHtml(leader.name) : "Rainbow Leader"}</span>` +
+    `<button type="button" class="red-button draft-leader-pick" id="draftLeaderPick">Choose Rainbow Leader</button>`;
+  observeLazyImages(host);
+  host.querySelector("#draftLeaderPick")?.addEventListener("click", showRainbowLeaderPicker);
+}
+
+// A panel of every rainbow leader on the sim; pick one to lead your draft deck.
+function showRainbowLeaderPicker() {
+  document.getElementById("rainbowLeaderOverlay")?.remove();
+  const leaders = rainbowLeaders();
+  const currentId = (mpDraft && mpDraft.leaderId) || OMNI_LEADER_ID;
+
+  const overlay = document.createElement("div");
+  overlay.id = "rainbowLeaderOverlay";
+  overlay.className = "rainbow-leader-overlay";
+
+  const popup = document.createElement("div");
+  popup.className = "rainbow-leader-popup";
+  popup.innerHTML = `
+    <div class="rainbow-leader-head">
+      <strong>Choose your Rainbow Leader</strong>
+      <input type="text" id="rainbowLeaderSearch" placeholder="Search leaders…" autocomplete="off" spellcheck="false">
+      <button type="button" class="red-button" id="rainbowLeaderClose">Close</button>
+    </div>
+    <div class="rainbow-leader-grid" id="rainbowLeaderGrid"></div>`;
+  overlay.appendChild(popup);
+  document.body.appendChild(overlay);
+
+  const grid = popup.querySelector("#rainbowLeaderGrid");
+
+  const render = (query) => {
+    const term = String(query || "").trim().toLowerCase();
+    const shown = term
+      ? leaders.filter(l =>
+          String(l.name || "").toLowerCase().includes(term) ||
+          String(l.cardNumber || "").toLowerCase().includes(term))
+      : leaders;
+    grid.innerHTML = "";
+    if (!shown.length) {
+      grid.innerHTML = `<div class="rainbow-leader-empty">No rainbow leaders found.</div>`;
+      return;
+    }
+    shown.forEach(l => {
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "rainbow-leader-cell" + (l.id === currentId ? " selected" : "");
+      cell.setAttribute("data-leader-id", l.id);
+      cell.innerHTML =
+        `<div class="rainbow-leader-cell-art">${cardVisual(l)}</div>` +
+        `<span class="rainbow-leader-cell-name">${escapeHtml(l.name || "Leader")}</span>`;
+      cell.addEventListener("click", () => {
+        if (mpDraft) mpDraft.leaderId = l.id;
+        renderMpDraftLeaderChoice();
+        overlay.remove();
+      });
+      grid.appendChild(cell);
+    });
+    observeLazyImages(grid);
+  };
+
+  render("");
+  popup.querySelector("#rainbowLeaderSearch").addEventListener("input", (e) => render(e.target.value));
+  popup.querySelector("#rainbowLeaderClose").addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
 // The networked deck builder: shared timer, chat, lock/ready.
 function openMultiplayerDraftBuilder() {
   closePack();
@@ -7586,10 +7687,7 @@ function openMultiplayerDraftBuilder() {
   clearInterval(draftTimer);   // make sure the solo countdown never runs here
 
   const el2 = ensureDraftBuilder();
-  const leader = getCard(OMNI_LEADER_ID);
-  el2.querySelector("#draftLeader").innerHTML =
-    `<div class="draft-leader-art">${leader ? cardVisual(leader) : ""}</div><span>Leader: ${leader ? escapeHtml(leader.name) : "Rainbow Leader"}</span>`;
-  observeLazyImages(el2.querySelector("#draftLeader"));
+  renderMpDraftLeaderChoice();
   el2.classList.add("mp-draft-builder");
   el2.hidden = false;
   renderDraftBuilder();
@@ -7789,7 +7887,7 @@ async function mpSubmitDeck(fromTimeout) {
   const deckData = {
     id: "mp-draft",
     name: "Draft Deck",
-    leaderKey: OMNI_LEADER_ID,
+    leaderKey: (mpDraft && mpDraft.leaderId) || OMNI_LEADER_ID,
     deckText,
     startingCards: [],
     tokens: []

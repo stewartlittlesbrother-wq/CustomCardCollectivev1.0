@@ -2775,6 +2775,23 @@ function setupExtraSlotsToggle() {
     });
 }
 
+// The extra-slots preference (optcgExtraSlots) is synced per account and can LAND
+// AFTER the board finished initialising. A PRACTICE board seeds its extra row once
+// at init (from localStorage) and never re-reads, so if the synced value arrives
+// late the extra row stays off — the "extra slots show in multiplayer but not
+// practice vs self" bug (online is fine: it restores extraRow from the synced
+// match board on every update). When synced settings apply, re-seed practice.
+document.addEventListener("cc-sync-applied", (e) => {
+    const keys = e.detail;
+    if (Array.isArray(keys) && !keys.includes("optcgExtraSlots")) return;
+    if (isOnlineMatch || isSpectator || !gameState) return;   // online = from match board
+    const on = extraSlotsEnabled();
+    if (gameState.player1) gameState.player1.extraRow = on;
+    if (gameState.player2) gameState.player2.extraRow = on;
+    applyExtraRowLayout();
+    renderCharacters();
+});
+
 // =========================
 // Dice & coin roller
 // =========================
@@ -2834,6 +2851,285 @@ function setupDiceRoller() {
     bind("rollCoinBtn", "coin");
     bind("rollD6Btn", "d6");
     bind("rollD12Btn", "d12");
+}
+
+// =========================
+// Add from Outside of Play
+// =========================
+// Bring a resource in that isn't in your deck: bump your DON!! deck by one, or
+// search the whole card pool and drop a card into your hand ready to play.
+// Modeled on the token picker (searchable list, stays open so you can add
+// several in a row).
+
+// Which side the button acts on: your own seat online, the active seat in
+// practice (you control both), falling back to Player 1.
+function outsidePlayTargetPlayer() {
+    if (isSpectator || !gameState) return null;
+    if (isOnlineMatch) {
+        const key = getOwnOnlinePlayerKey();
+        return key ? gameState[key] : null;
+    }
+    return gameState.currentPlayer || gameState.player1 || null;
+}
+
+function setupOutsidePlayButton() {
+    const btn = document.getElementById("addOutsidePlayBtn");
+    if (!btn) return;
+    // Spectators can't change the board.
+    if (isSpectator) { btn.classList.add("hidden"); return; }
+    btn.addEventListener("click", showAddOutsideMenu);
+}
+
+// Add one card to the player's DON!! deck (its max), so one more DON!! becomes
+// available to put on the field over the game. Synced so both sides see it.
+function addDonFromOutside() {
+    const player = outsidePlayTargetPlayer();
+    if (!player) return;
+    player.donMax = donMaxFor(player) + 1;
+    updateDonDisplay();
+    window.scheduleOnlineBoardSync?.();
+    addGameLog(`${player.name} added a DON!! from outside of play (DON!! deck is now ${donMaxFor(player)}).`);
+}
+
+// Take one card back OUT of the player's DON!! deck. Can't drop the deck below
+// the DON!! already on the field (those cards came from it), so remove those
+// first if you want to go lower.
+function removeDonFromOutside() {
+    const player = outsidePlayTargetPlayer();
+    if (!player) return false;
+    const onField = getDonOnField(player);
+    const current = donMaxFor(player);
+    if (current <= onField) {
+        addGameLog(`${player.name} can't remove a DON!! — none left in the DON!! deck (rest are on the field).`);
+        return false;
+    }
+    player.donMax = current - 1;
+    updateDonDisplay();
+    window.scheduleOnlineBoardSync?.();
+    addGameLog(`${player.name} removed a DON!! from outside of play (DON!! deck is now ${donMaxFor(player)}).`);
+    return true;
+}
+
+// Drop a chosen card straight into the player's hand, ready to play normally.
+function addCardFromOutside(card, player) {
+    if (!card || !player) return;
+    if (!Array.isArray(player.hand)) player.hand = [];
+    const instance = createCardInstance(card);
+    instance.fromOutsideOfPlay = true;
+    player.hand.push(instance);
+    renderHands();
+    window.scheduleOnlineBoardSync?.();
+    addGameLog(`${player.name} added ${card.name || "a card"} to their hand from outside of play.`, [card]);
+}
+
+// The small chooser: DON!! deck +1, or open the card search.
+function showAddOutsideMenu() {
+    const player = outsidePlayTargetPlayer();
+    if (!player) return;
+    document.getElementById("outsidePlayMenuOverlay")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "outsidePlayMenuOverlay";
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.72);display:flex;align-items:center;justify-content:center;z-index:10000;";
+
+    const popup = document.createElement("div");
+    popup.style.cssText = "width:90%;max-width:380px;background:rgba(20,20,20,0.98);border:2px solid #888;border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:12px;";
+
+    const title = document.createElement("h2");
+    title.style.cssText = "color:#fff;margin:0;font-size:15px;text-align:center;";
+    title.textContent = `Add from Outside of Play — ${player.name}`;
+    popup.appendChild(title);
+
+    // DON!! deck: add or remove one, with a live remaining-in-deck count. Stays
+    // open so you can adjust by several in a row.
+    const donWrap = document.createElement("div");
+    donWrap.style.cssText = "border:1px solid #b8860b;border-radius:6px;background:rgba(224,168,0,0.12);padding:10px;display:flex;flex-direction:column;gap:8px;";
+
+    const donLabel = document.createElement("div");
+    donLabel.style.cssText = "color:#fff;font-size:13px;font-weight:700;";
+    const donCount = () => Math.max(0, donMaxFor(player) - getDonOnField(player));
+    const paintDon = () => {
+        donLabel.innerHTML = `🟠 <strong>DON!! card</strong> — <span style="color:#ffd966;">${donCount()} in DON!! deck</span>`;
+    };
+    paintDon();
+    donWrap.appendChild(donLabel);
+
+    const donRow = document.createElement("div");
+    donRow.style.cssText = "display:flex;gap:8px;";
+    const donAdd = document.createElement("button");
+    donAdd.textContent = "+ Add one";
+    donAdd.style.cssText = "flex:1;padding:9px;font-size:12px;font-weight:700;cursor:pointer;border-radius:6px;border:1px solid #0e9f70;background:#10b981;color:#000;";
+    donAdd.addEventListener("click", () => { addDonFromOutside(); paintDon(); });
+    const donRemove = document.createElement("button");
+    donRemove.textContent = "− Remove one";
+    donRemove.style.cssText = "flex:1;padding:9px;font-size:12px;font-weight:700;cursor:pointer;border-radius:6px;border:1px solid #c82333;background:#dc3545;color:#fff;";
+    donRemove.addEventListener("click", () => { removeDonFromOutside(); paintDon(); });
+    donRow.appendChild(donAdd);
+    donRow.appendChild(donRemove);
+    donWrap.appendChild(donRow);
+    popup.appendChild(donWrap);
+
+    const cardBtn = document.createElement("button");
+    cardBtn.style.cssText = "padding:12px;font-size:13px;font-weight:700;cursor:pointer;border-radius:6px;border:1px solid #0e7490;background:#0891b2;color:#fff;text-align:left;";
+    cardBtn.innerHTML = "🔍 <strong>Card</strong><br><span style='font-weight:400;font-size:11px;'>Search the card list and add one to your hand.</span>";
+    cardBtn.addEventListener("click", () => {
+        removeAddOutsideMenu();
+        showOutsideCardPicker(player);
+    });
+    popup.appendChild(cardBtn);
+
+    const closeBtn = document.createElement("button");
+    closeBtn.textContent = "Cancel";
+    closeBtn.style.cssText = "padding:8px;font-size:12px;font-weight:700;cursor:pointer;border-radius:6px;border:1px solid #5a6268;background:#6c757d;color:#fff;";
+    closeBtn.addEventListener("click", removeAddOutsideMenu);
+    popup.appendChild(closeBtn);
+
+    overlay.appendChild(popup);
+    overlay.addEventListener("click", (event) => { if (event.target === overlay) removeAddOutsideMenu(); });
+    document.body.appendChild(overlay);
+}
+
+function removeAddOutsideMenu() {
+    document.getElementById("outsidePlayMenuOverlay")?.remove();
+}
+
+// Searchable picker over the WHOLE card pool. The board normally loads only the
+// cards the decks need (fast on mobile), so make sure the full library is loaded
+// before listing, then filter as you type.
+async function showOutsideCardPicker(player) {
+    if (!player) return;
+    removeOutsideCardPicker();
+
+    const overlay = document.createElement("div");
+    overlay.className = "look-top-overlay";
+    overlay.id = "outsideCardPickerOverlay";
+    overlay.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;z-index:10000;";
+
+    const popup = document.createElement("div");
+    popup.style.cssText = "width:95%;max-width:1000px;max-height:90vh;background:rgba(20,20,20,0.98);border:2px solid #888;border-radius:8px;display:flex;flex-direction:column;overflow:hidden;";
+
+    const header = document.createElement("div");
+    header.style.cssText = "padding:10px 16px;border-bottom:1px solid #555;display:flex;flex-direction:column;gap:8px;";
+
+    const title = document.createElement("h2");
+    title.style.cssText = "color:#fff;margin:0;font-size:14px;";
+    title.textContent = `Add a card to ${player.name}'s hand`;
+    header.appendChild(title);
+
+    const search = document.createElement("input");
+    search.type = "text";
+    search.placeholder = "Search by name or card number…";
+    search.autocomplete = "off";
+    search.spellcheck = false;
+    search.style.cssText = "width:100%;padding:8px 10px;font-size:13px;border-radius:6px;border:1px solid #666;background:#111;color:#fff;box-sizing:border-box;";
+    header.appendChild(search);
+
+    const grid = document.createElement("div");
+    grid.style.cssText = "padding:12px;display:flex;flex-wrap:wrap;gap:12px;overflow-y:auto;align-content:flex-start;flex:1;";
+    grid.textContent = "Loading card list…";
+
+    const footer = document.createElement("div");
+    footer.style.cssText = "padding:8px 12px;border-top:1px solid #555;display:flex;justify-content:space-between;align-items:center;";
+    const hint = document.createElement("span");
+    hint.style.cssText = "color:#bbb;font-size:11px;";
+    footer.appendChild(hint);
+    const closeButton = document.createElement("button");
+    closeButton.textContent = "Close";
+    closeButton.style.cssText = "padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;border-radius:4px;border:1px solid #5a6268;background:#6c757d;color:#fff;";
+    closeButton.addEventListener("click", removeOutsideCardPicker);
+    footer.appendChild(closeButton);
+
+    popup.appendChild(header);
+    popup.appendChild(grid);
+    popup.appendChild(footer);
+    overlay.appendChild(popup);
+    overlay.addEventListener("click", (event) => { if (event.target === overlay) removeOutsideCardPicker(); });
+    document.body.appendChild(overlay);
+
+    // Ensure the whole pool is available before listing.
+    if (typeof window.loadFullCardLibraryBlocking === "function") {
+        try { await window.loadFullCardLibraryBlocking(); } catch { /* fall back to whatever's loaded */ }
+    }
+    // The user may have closed the picker while it loaded.
+    if (!document.getElementById("outsideCardPickerOverlay")) return;
+
+    const MAX_RESULTS = 60;
+    const allCards = Object.values(window.cardDatabase || {})
+        .filter(c => c && c.name)
+        .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    const renderResults = () => {
+        const q = search.value.trim().toLowerCase();
+        let matches = allCards;
+        if (q) {
+            matches = allCards.filter(c =>
+                String(c.name || "").toLowerCase().includes(q) ||
+                String(c.cardNumber || "").toLowerCase().includes(q) ||
+                String(c.id || "").toLowerCase().includes(q));
+        }
+        const shown = matches.slice(0, MAX_RESULTS);
+        grid.innerHTML = "";
+
+        if (!allCards.length) {
+            grid.textContent = "No cards available.";
+            hint.textContent = "";
+            return;
+        }
+        if (!shown.length) {
+            grid.textContent = "No cards match your search.";
+            hint.textContent = `0 of ${allCards.length} cards`;
+            return;
+        }
+
+        shown.forEach(card => {
+            const cell = document.createElement("div");
+            cell.style.cssText = "width:130px;display:flex;flex-direction:column;gap:6px;align-items:center;";
+
+            const img = document.createElement("img");
+            img.src = cardArtSrc(card);
+            img.alt = card.name || "Card";
+            img.loading = "lazy";
+            img.style.cssText = "width:100%;border-radius:6px;display:block;cursor:pointer;";
+            img.addEventListener("mouseenter", () => showCardPreview(cardArtSrc(card)));
+            img.addEventListener("click", () => showBigCardImage(cardArtSrc(card)));
+            cell.appendChild(img);
+
+            const label = document.createElement("div");
+            label.style.cssText = "color:#fff;font-size:11px;font-weight:700;text-align:center;line-height:1.2;";
+            label.textContent = card.name || "Card";
+            cell.appendChild(label);
+
+            const addButton = document.createElement("button");
+            addButton.textContent = "+ Add to hand";
+            addButton.style.cssText = "width:100%;padding:5px;font-size:11px;font-weight:700;cursor:pointer;border-radius:4px;border:1px solid #0e9f70;background:#10b981;color:#000;";
+            addButton.addEventListener("click", () => {
+                addCardFromOutside(card, player);
+                addButton.textContent = "Added ✓";
+                addButton.style.background = "#6c757d";
+                addButton.style.color = "#fff";
+                setTimeout(() => {
+                    addButton.textContent = "+ Add to hand";
+                    addButton.style.background = "#10b981";
+                    addButton.style.color = "#000";
+                }, 900);
+            });
+            cell.appendChild(addButton);
+
+            grid.appendChild(cell);
+        });
+
+        hint.textContent = matches.length > shown.length
+            ? `Showing ${shown.length} of ${matches.length} matches — refine your search`
+            : `${shown.length} card${shown.length === 1 ? "" : "s"}`;
+    };
+
+    search.addEventListener("input", renderResults);
+    renderResults();
+    search.focus();
+}
+
+function removeOutsideCardPicker() {
+    document.getElementById("outsideCardPickerOverlay")?.remove();
 }
 
 // The exact card numbers/ids the game needs, so the board pulls only THOSE from
@@ -2950,6 +3246,7 @@ async function initializeGamePage() {
     setupExtraSlotsToggle();
     setupSidebarTurnToggles();
     setupDiceRoller();
+    setupOutsidePlayButton();
     setupSfxToggle();
     setupDeckViewerInspect();
     try {
