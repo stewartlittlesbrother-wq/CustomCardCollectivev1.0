@@ -5673,22 +5673,32 @@ function refreshProxyPreview() {
     return;
   }
 
+  // Show the cut grid in the preview the same way it prints: the sheet background
+  // shows through the gaps between cards, so the gaps ARE the cut lines. Off →
+  // plain white paper with a hair of spacing.
+  const cutOn = proxySettings.cutMarks;
+  const linePx = cutOn ? Math.max(1, Math.round((Number(proxySettings.cutThickness) || 0.265) * 4)) : 3;
+  const sheetBg = cutOn ? proxySettings.cutColor : "#ffffff";
+
   let html = "";
   for (let p = 0; p < totalPages; p++) {
     const start = p * L.perPage;
     const pageCards = cards.slice(start, start + L.perPage);
     html += `<div class="proxy-sheet-page">
       <div class="proxy-sheet-page-label">Page ${p + 1}</div>
-      <div class="proxy-sheet-grid" style="grid-template-columns:repeat(${L.cols},minmax(0,1fr));">`;
-    pageCards.forEach((card, j) => {
-      const gi = start + j;
+      <div class="proxy-sheet-grid" style="grid-template-columns:repeat(${L.cols},minmax(0,1fr));background:${sheetBg};gap:${linePx}px;padding:${linePx}px;">`;
+    // Fill the whole cols×rows grid so empty slots still show cut lines, like the PDF.
+    for (let slot = 0; slot < L.perPage; slot++) {
+      const card = pageCards[slot];
+      if (!card) { html += `<div class="proxy-card-cell proxy-empty-cell"></div>`; continue; }
+      const gi = start + slot;
       const isLeader = card.category === "leader";
       html += `<div class="proxy-card-cell${isLeader ? " is-leader" : ""}">
         ${cardVisual(card)}
         <button type="button" class="proxy-card-remove" data-index="${gi}" title="Remove this copy">✕</button>
         ${isLeader ? '<span class="proxy-card-tag">LEADER</span>' : ""}
       </div>`;
-    });
+    }
     html += `</div></div>`;
   }
   wrap.innerHTML = html;
