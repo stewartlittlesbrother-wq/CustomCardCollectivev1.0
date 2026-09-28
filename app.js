@@ -307,6 +307,10 @@ const state = {
   // of looking like a user's uploaded cards vanished.
   sharedSyncing: false,
   leaderId: "",
+  // Dual Leader format: when on, the deck has TWO leaders and may use cards from
+  // BOTH their colour pools (union). leaderId2 is the second leader.
+  dualLeader: false,
+  leaderId2: "",
   deck: {},
   // Token types this deck makes available in game. Deliberately a separate list
   // from `deck` so tokens never count toward the 50-card main deck, have no copy
@@ -353,6 +357,8 @@ const el = {
   allowAnyDeckSize: document.querySelector("#allowAnyDeckSize"),
   deckWarnings: document.querySelector("#deckWarnings"),
   leaderSlot: document.querySelector("#leaderSlot"),
+  leaderSlot2: document.querySelector("#leaderSlot2"),
+  dualLeaderToggle: document.querySelector("#dualLeaderToggle"),
   deckList: document.querySelector("#deckList"),
   exportDeck: document.querySelector("#exportDeck"),
   exportDeckImage: document.querySelector("#exportDeckImage"),
@@ -4884,6 +4890,8 @@ function loadSavedDeck() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
     state.leaderId = saved.leaderId || "";
+    state.dualLeader = Boolean(saved.dualLeader);
+    state.leaderId2 = saved.leaderId2 || "";
     state.deck = saved.deck || {};
     state.tokens = Array.isArray(saved.tokens) ? saved.tokens : [];
     state.startingCards = Array.isArray(saved.startingCards) ? saved.startingCards : [];
@@ -4903,6 +4911,8 @@ function saveDeck() {
   reconcileStartingCards();
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     leaderId: state.leaderId,
+    dualLeader: state.dualLeader,
+    leaderId2: state.leaderId2,
     deck: state.deck,
     tokens: state.tokens,
     startingCards: state.startingCards,
@@ -4947,6 +4957,8 @@ function currentDeckSnapshot() {
   return {
     name: state.deckName || el.deckName.value.trim() || "Current Deck",
     leaderId: state.leaderId,
+    dualLeader: state.dualLeader,
+    leaderId2: state.leaderId2,
     deck: { ...state.deck },
     tokens: [...state.tokens],
     startingCards: state.startingCards.map(e => ({ ...e })),
@@ -5035,6 +5047,8 @@ function saveNamedDeck() {
   decks.unshift({
     name,
     leaderId: state.leaderId,
+    dualLeader: state.dualLeader,
+    leaderId2: state.leaderId2,
     deck: state.deck,
     tokens: state.tokens,
     startingCards: state.startingCards,
@@ -5079,6 +5093,10 @@ function buildDeckText() {
     const leader = getCard(state.leaderId);
     lines.push(`Leader: ${leader?.cardNumber || state.leaderId}`);
   }
+  if (state.dualLeader && state.leaderId2) {
+    const leader2 = getCard(state.leaderId2);
+    lines.push(`Leader2: ${leader2?.cardNumber || state.leaderId2}`);
+  }
 
   // Ordered the same way the deck list is shown, for a tidy paste.
   const shown = new Set();
@@ -5118,7 +5136,7 @@ function resolveDeckLineCard(rawNumber) {
 // Lenient: accepts "4x NUM", "4 x NUM", "4 NUM", ignores blanks and # comments,
 // and collects any card numbers it couldn't find so the user can be told.
 function parseDeckShareText(text) {
-  const result = { name: "", leaderId: "", deck: {}, tokens: [], missing: [] };
+  const result = { name: "", leaderId: "", leaderId2: "", dualLeader: false, deck: {}, tokens: [], missing: [] };
 
   String(text || "").split(/\r?\n/).forEach(rawLine => {
     const line = rawLine.trim();
@@ -5127,6 +5145,15 @@ function parseDeckShareText(text) {
     // Deck name comment
     if (line.startsWith("#")) {
       if (!result.name) result.name = line.replace(/^#+/, "").trim();
+      return;
+    }
+
+    const leader2Match = line.match(/^leader\s*2\s*[:=]\s*(.+)$/i);
+    if (leader2Match) {
+      const card = resolveDeckLineCard(leader2Match[1]);
+      result.leaderId2 = card ? (card.id || card.cardNumber) : leader2Match[1].trim();
+      result.dualLeader = true;
+      if (!card) result.missing.push(leader2Match[1].trim());
       return;
     }
 
@@ -5195,6 +5222,8 @@ function importDeckFromText(text) {
   }
 
   state.leaderId = parsed.leaderId || "";
+  state.dualLeader = Boolean(parsed.dualLeader && parsed.leaderId2);
+  state.leaderId2 = state.dualLeader ? parsed.leaderId2 : "";
   state.deck = parsed.deck;
   state.tokens = parsed.tokens;
   // An imported list is a fresh deck; the text format doesn't carry starting
@@ -5821,6 +5850,8 @@ function loadNamedDeck(index) {
   if (!deck) return;
   state.deckName = deck.name;
   state.leaderId = deck.leaderId || "";
+  state.dualLeader = Boolean(deck.dualLeader);
+  state.leaderId2 = deck.leaderId2 || "";
   state.deck = deck.deck || {};
   state.tokens = Array.isArray(deck.tokens) ? deck.tokens : [];
   state.startingCards = Array.isArray(deck.startingCards) ? deck.startingCards : [];
@@ -5974,6 +6005,18 @@ function addToDeck(id) {
   if (!card) return;
 
   if (card.category === "leader") {
+    if (state.dualLeader) {
+      if (id === state.leaderId || id === state.leaderId2) {
+        toast(`${card.name} is already a leader`);
+        return;
+      }
+      // Fill leader 1 first, then leader 2; once both are set, replace #2.
+      if (!state.leaderId) { state.leaderId = id; toast(`${card.name} set as leader 1`); }
+      else { state.leaderId2 = id; toast(`${card.name} set as leader 2`); }
+      pruneDeckForLeader();
+      saveDeck(false);
+      return;
+    }
     state.leaderId = id;
     pruneDeckForLeader();
     saveDeck(false);
@@ -6048,10 +6091,24 @@ function addFourToDeck(id) {
   toast(added ? `Added ${added} ${card.name}` : "Could not add more copies");
 }
 
+// The combined colour pool of the active leader(s). In Dual Leader format this is
+// the UNION of both leaders' colours; otherwise just the one leader's colours.
+function activeLeaderColorSet() {
+  const set = new Set();
+  (getCard(state.leaderId)?.colors || []).forEach(c => set.add(c));
+  if (state.dualLeader) (getCard(state.leaderId2)?.colors || []).forEach(c => set.add(c));
+  return set;
+}
+// Either active leader is the omni/rainbow leader (plays every colour).
+function anyLeaderOmni() {
+  return Boolean(getCard(state.leaderId)?.omniLeader
+    || (state.dualLeader && getCard(state.leaderId2)?.omniLeader));
+}
+
 function canCardJoinLeader(card) {
-  const leader = getCard(state.leaderId);
-  if (!leader) return false;
-  const leaderColors = new Set(leader.colors || []);
+  if (!getCard(state.leaderId)) return false;
+  if (anyLeaderOmni()) return true;
+  const leaderColors = activeLeaderColorSet();
   return card.colors?.some(color => leaderColors.has(color));
 }
 
@@ -6079,6 +6136,7 @@ function clearDeck() {
   state.deck = {};
   state.tokens = [];
   state.leaderId = "";
+  state.leaderId2 = "";
   state.startingCards = [];
   state.game = null;
   saveDeck(false);
@@ -6172,10 +6230,11 @@ function autoFillDeck() {
   }
 
   state.deck = {};
-  const leaderColors = new Set(leader.colors);
+  const leaderColors = activeLeaderColorSet();
+  const omni = anyLeaderOmni();
   const candidates = state.cards
     .filter(card => card.category !== "leader")
-    .filter(card => card.colors.some(color => leaderColors.has(color)))
+    .filter(card => omni || card.colors.some(color => leaderColors.has(color)))
     .sort((a, b) => Number(a.cost || 0) - Number(b.cost || 0));
 
   for (const card of candidates) {
@@ -6195,7 +6254,9 @@ function filteredCards() {
   const category = el.categoryFilter.value;
   const color = el.colorFilter.value;
   const leader = getCard(state.leaderId);
-  const leaderColors = new Set(leader?.colors || []);
+  // In Dual Leader format the pool is the UNION of both leaders' colours.
+  const leaderColors = activeLeaderColorSet();
+  const leadersReady = leader && (!state.dualLeader || getCard(state.leaderId2));
 
   // Does the open collection contain any leaders? Leader-first browsing only
   // makes sense when it does - a set with no leaders must still show its cards.
@@ -6235,7 +6296,8 @@ function filteredCards() {
       if (!leader) {
         if (card.category !== "leader") return false;
       } else if (card.category === "leader") {
-        return false;
+        // Keep leaders visible in Dual Leader mode until the SECOND one is picked.
+        if (leadersReady) return false;
       }
     }
 
@@ -6254,7 +6316,7 @@ function filteredCards() {
       // "View all" lifts the restriction entirely, and the all-access omni leader
       // (every colour) can play anything.
       && (state.viewAll
-        || leader?.omniLeader
+        || anyLeaderOmni()
         || !leader
         || card.category === "leader"
         || card.category === "token"
@@ -6465,12 +6527,24 @@ function renderBuilder() {
   if (el.deckCountCap) el.deckCountCap.textContent = anySize ? " cards" : "/50";
   if (el.allowAnyDeckSize) el.allowAnyDeckSize.checked = anySize;
 
-  if (!leader) warnings.push("Choose exactly 1 leader.");
+  if (!leader) warnings.push(state.dualLeader ? "Choose 2 leaders." : "Choose exactly 1 leader.");
+  else if (state.dualLeader && !getCard(state.leaderId2)) warnings.push("Dual Leader: choose a second leader.");
   // With the 50-card cap lifted, a non-50 deck is intentional — don't nag.
   if (!anySize && mainCount !== 50) warnings.push(`Main deck has ${mainCount} cards. OPTCG style decks use 50.`);
 
   el.deckWarnings.innerHTML = warnings.map(text => `<div class="warning">${escapeHtml(text)}</div>`).join("");
   el.leaderSlot.innerHTML = leader ? renderDeckRow(leader, 1, true) : `<div class="empty">Leader slot</div>`;
+
+  // Dual Leader: keep the toggle in sync and render the second leader slot.
+  if (el.dualLeaderToggle) el.dualLeaderToggle.checked = state.dualLeader;
+  if (el.leaderSlot2) {
+    el.leaderSlot2.hidden = !state.dualLeader;
+    if (state.dualLeader) {
+      const leader2 = getCard(state.leaderId2);
+      el.leaderSlot2.innerHTML = leader2 ? renderDeckRow(leader2, 1, true) : `<div class="empty">Leader 2 slot</div>`;
+      observeLazyImages(el.leaderSlot2);
+    }
+  }
 
   // Tokens render in the SAME grid as the deck cards. They used to sit in a
   // separate panel below, which fell outside the fixed-height scroll area and
@@ -9159,12 +9233,36 @@ function bindEvents() {
       if (hasCards && !confirm("Remove the leader and clear the entire deck?")) return;
 
       state.leaderId = "";
+      state.leaderId2 = "";
       state.deck = {};
       state.tokens = [];
       saveDeck();
     }
     const inspectId = event.target.closest("[data-inspect]")?.dataset.inspect;
     if (inspectId) previewCard(getCard(inspectId));
+  });
+
+  // Second leader slot (Dual Leader format). Clearing it only drops leader 2 and
+  // prunes cards that no longer match either leader's colours — leader 1's deck stays.
+  el.leaderSlot2?.addEventListener("click", event => {
+    if (event.target.closest("[data-clear-leader]")) {
+      state.leaderId2 = "";
+      pruneDeckForLeader();
+      saveDeck();
+      return;
+    }
+    const inspectId = event.target.closest("[data-inspect]")?.dataset.inspect;
+    if (inspectId) previewCard(getCard(inspectId));
+  });
+
+  // Dual Leader toggle: turning it off drops the 2nd leader and prunes its cards.
+  el.dualLeaderToggle?.addEventListener("change", event => {
+    state.dualLeader = event.target.checked;
+    if (!state.dualLeader && state.leaderId2) {
+      state.leaderId2 = "";
+      pruneDeckForLeader();
+    }
+    saveDeck();
   });
 
   el.allowAnyDeckSize?.addEventListener("change", () => {

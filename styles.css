@@ -555,6 +555,9 @@ h2 {
   min-height: 86px;
   padding: 10px;
 }
+/* Second leader slot (Dual Leader format) — a touch tighter to sit under the first. */
+.leader-slot-2 { margin-top: -6px; border-style: dashed; border-color: rgba(120, 200, 255, .6); }
+.leader-slot-2[hidden] { display: none !important; }
 
 .warnings {
   display: grid;

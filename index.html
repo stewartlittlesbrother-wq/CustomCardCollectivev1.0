@@ -25,7 +25,7 @@
   </script>
   <title>Golds Customs</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=draft-mp-9">
+  <link rel="stylesheet" href="styles.css?v=draft-mp-10">
 </head>
 <body>
   <div class="app-shell">
@@ -400,6 +400,9 @@
                   <label class="deck-size-toggle" title="Lift the 50-card cap so you can build a deck with more or fewer than 50 cards">
                     <input type="checkbox" id="allowAnyDeckSize"> Any size
                   </label>
+                  <label class="deck-size-toggle" title="Dual Leader format: choose 2 leaders and build from BOTH their colour pools">
+                    <input type="checkbox" id="dualLeaderToggle"> Dual Leader
+                  </label>
                 </div>
                 <div class="deck-tools">
                   <button class="red-button" type="button" id="saveDeckMini">Save</button>
@@ -682,6 +685,7 @@
 
               <div class="deck-board-scroll">
                 <section class="leader-slot" id="leaderSlot"></section>
+                <section class="leader-slot leader-slot-2" id="leaderSlot2" hidden></section>
                 <div class="deck-list" id="deckList"></div>
               </div>
             </section>
@@ -881,13 +885,13 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=237"></script>
+  <script src="js/version.js?v=238"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=237"></script>
+  <script src="js/auth-ui.js?v=238"></script>
   <script src="js/cards/cardCollections.js?v=draft-1"></script>
   <script src="js/cards/decks.js?v=creation-9"></script>
   <script src="js/manual-play.js?v=manual-28"></script>
-  <script src="app.js?v=creation-118"></script>
+  <script src="app.js?v=creation-119"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).
