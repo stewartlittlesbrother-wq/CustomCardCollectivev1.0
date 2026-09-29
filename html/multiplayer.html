@@ -137,6 +137,13 @@
                         <label for="lobbyDeckSelect">Choose your deck</label>
                         <select id="lobbyDeckSelect"></select>
 
+                        <!-- Dual Leader decks only: which of the two leaders supplies the
+                             life + power for both (the other is its linked twin). -->
+                        <div id="lobbyStatsRow" hidden>
+                            <label for="lobbyStatsSelect">Stats leader <span class="mp-toggle-hint">(its life &amp; power apply to both leaders)</span></label>
+                            <select id="lobbyStatsSelect"></select>
+                        </div>
+
                         <label for="lobbyDonDeckSelect">DON!! deck</label>
                         <select id="lobbyDonDeckSelect" class="mp-don-select"></select>
 
@@ -164,13 +171,13 @@
     </main>
 
     <script src="../js/cards/cardCollections.js?v=draft-1"></script>
-    <script src="../js/cards/cardDatabase.js?v=cardnum-17"></script>
-    <script src="../js/cards/decks.js?v=ry-ichigo-2"></script>
+    <script src="../js/cards/cardDatabase.js?v=cardnum-18"></script>
+    <script src="../js/cards/decks.js?v=ry-ichigo-3"></script>
     <script src="../js/core/deckParser.js?v=starting-1"></script>
-    <script type="module" src="../js/pages/multiplayer.js?v=lobby-17"></script>
+    <script type="module" src="../js/pages/multiplayer.js?v=lobby-18"></script>
   <script src="../js/rotate-prompt.js"></script>
 
-  <script src="../js/version.js?v=239"></script>
-  <script src="../js/auth-ui.js?v=239"></script>
+  <script src="../js/version.js?v=241"></script>
+  <script src="../js/auth-ui.js?v=241"></script>
 </body>
 </html>

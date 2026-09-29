@@ -172,22 +172,32 @@ function createInitialPrivateState(selectedDeck) {
     // `leaders` map (that's keyed by the built-in leader set). Fall back to a
     // direct card lookup, then to a case-insensitive scan, so a custom leader
     // never hard-fails match start and strands both players in the lobby.
+    const findLeaderDefinition = (key) => {
+        let found = globalThis.leaders[key];
+
+        if (!found && typeof globalThis.getCardById === "function") {
+            found = globalThis.getCardById(key);
+        }
+
+        if (!found) {
+            const wanted = String(key || "").toLowerCase();
+            const match = Object.entries(globalThis.leaders || {})
+                .find(([leaderKey, value]) =>
+                    leaderKey.toLowerCase() === wanted ||
+                    String(value?.cardNumber || "").toLowerCase() === wanted ||
+                    String(value?.id || "").toLowerCase() === wanted);
+            found = match?.[1];
+        }
+        return found || null;
+    };
+
     const leaderKey = selectedDeck.leaderKey;
-    let leaderDefinition = globalThis.leaders[leaderKey];
-
-    if (!leaderDefinition && typeof globalThis.getCardById === "function") {
-        leaderDefinition = globalThis.getCardById(leaderKey);
-    }
-
-    if (!leaderDefinition) {
-        const wanted = String(leaderKey || "").toLowerCase();
-        const match = Object.entries(globalThis.leaders || {})
-            .find(([key, value]) =>
-                key.toLowerCase() === wanted ||
-                String(value?.cardNumber || "").toLowerCase() === wanted ||
-                String(value?.id || "").toLowerCase() === wanted);
-        leaderDefinition = match?.[1];
-    }
+    const leaderDefinition = findLeaderDefinition(leaderKey);
+    // Dual Leader: `leaderKey` is the STATS leader; `leaderKey2` is its linked
+    // twin. A missing twin quietly becomes a normal single-leader game.
+    const leader2Definition = selectedDeck.leaderKey2
+        ? findLeaderDefinition(selectedDeck.leaderKey2)
+        : null;
 
     if (!leaderDefinition) {
         throw new Error(
@@ -198,6 +208,7 @@ function createInitialPrivateState(selectedDeck) {
     const deck = globalThis.shuffleDeck(globalThis.parseDeckText(selectedDeck.deckText))
         .map(card => createMultiplayerCard(card));
     const leader = createMultiplayerCard(leaderDefinition);
+    const leader2 = leader2Definition ? createMultiplayerCard(leader2Definition) : null;
 
     // Token TYPES the deck makes available. Resolved here so the board can show
     // the token zone without another database round-trip. Read the card map
@@ -221,6 +232,7 @@ function createInitialPrivateState(selectedDeck) {
         characters: [],
         trash: [],
         leader,
+        leader2,
         stage: null,
         tokenTypes
     };
@@ -318,6 +330,7 @@ function createInitialPublicPlayerState(privateState) {
     // createPublicPlayerStateFromLocal in self.js - Firebase mangles arrays.
     const board = {
         leader: stripCardForSync(privateState.leader || null),
+        leader2: stripCardForSync(privateState.leader2 || null),
         characters: (privateState.characters || []).map(stripCardForSync),
         stage: stripCardForSync(privateState.stage || null),
         trash: (privateState.trash || []).map(stripCardForSync),

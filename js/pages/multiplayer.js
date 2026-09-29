@@ -9,7 +9,7 @@ import {
     setPlayerReady,
     getMatch,
     clearMatchStartError
-} from "../firebase/multiplayerService.js?v=draft-3";
+} from "../firebase/multiplayerService.js?v=draft-4";
 
 // ── State ────────────────────────────────────────────
 let currentUser = null;
@@ -185,6 +185,48 @@ function populateDecks(select) {
     }
 }
 
+// ── Dual Leader: choose the stats leader ──────────────
+// A Dual Leader deck has two leaders; ONE supplies the life and power for both and
+// the other rides along as a linked twin (see the board's leader twin). The lobby
+// asks which before you ready up. The row only shows for a dual deck.
+function leaderDisplayName(key) {
+    const leaders = window.leaders || {};
+    const found = leaders[key]
+        || Object.values(leaders).find(l => l?.cardNumber === key || l?.id === key)
+        || (window.cardDatabase || {})[key];
+    return found?.name || key;
+}
+
+function refreshLobbyStatsRow() {
+    const row = $("lobbyStatsRow");
+    const select = $("lobbyStatsSelect");
+    if (!row || !select) return;
+    const deck = window.getDeckById?.(lobbyDeckSelect.value);
+    if (!deck || !deck.leaderKey2) { row.hidden = true; select.innerHTML = ""; return; }
+
+    const previous = select.value;
+    select.innerHTML = "";
+    [["1", deck.leaderKey], ["2", deck.leaderKey2]].forEach(([value, key]) => {
+        const o = document.createElement("option");
+        o.value = value;
+        o.textContent = leaderDisplayName(key);
+        select.appendChild(o);
+    });
+    if (previous === "1" || previous === "2") select.value = previous;
+    row.hidden = false;
+}
+lobbyDeckSelect.addEventListener("change", refreshLobbyStatsRow);
+
+// The deck as it should be sent for this match: for a Dual Leader deck, leaderKey
+// is the chosen STATS leader and leaderKey2 the twin (swapped if leader 2 was picked).
+function deckWithChosenStatsLeader(deck) {
+    if (!deck || !deck.leaderKey2) return { leaderKey: deck?.leaderKey, leaderKey2: "" };
+    const stats2 = $("lobbyStatsSelect")?.value === "2";
+    return stats2
+        ? { leaderKey: deck.leaderKey2, leaderKey2: deck.leaderKey }
+        : { leaderKey: deck.leaderKey, leaderKey2: deck.leaderKey2 };
+}
+
 function updateLobbyPlayerUI(slotEl, name, ready) {
     slotEl.querySelector(".lobby-player-name").textContent = name || "—";
     const statusEl = slotEl.querySelector(".lobby-player-status");
@@ -230,6 +272,7 @@ function openLobbyView(preferredDeckId = "") {
         && [...lobbyDeckSelect.options].some(o => o.value === preferredDeckId)) {
         lobbyDeckSelect.value = preferredDeckId;
     }
+    refreshLobbyStatsRow();
     clearError(mpLobbyError);
     mpLobbyMsg.textContent = "Choose your deck and ready up.";
     isReady = false;
@@ -674,10 +717,13 @@ btnReady.addEventListener("click", async () => {
         // Clear any previous failure so readying up with a different deck can retry.
         await clearMatchStartError(currentRoomCode).catch(() => {});
         matchStartRequested = false;
+        const chosenLeaders = deckWithChosenStatsLeader(selectedDeck);
         await setPlayerDeck(currentRoomCode, playerSlot, {
             id: selectedDeck.id,
             name: selectedDeck.name,
-            leaderKey: selectedDeck.leaderKey,
+            leaderKey: chosenLeaders.leaderKey,
+            // Dual Leader twin ("" for a normal deck).
+            leaderKey2: chosenLeaders.leaderKey2 || "",
             deckText: selectedDeck.deckText,
             // Carry the deck's "start in play" placements and token types into the
             // match, or multiplayer silently ignores them (createInitialPrivateState

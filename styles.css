@@ -4428,6 +4428,12 @@ button.trash-area {
   object-fit: cover;
 }
 
+/* Dual Leader deck: two leader thumbnails side by side, then the deck text. */
+.practice-deck-summary:has(.practice-leader-preview-2) {
+  grid-template-columns: 96px 96px minmax(0, 1fr);
+}
+.practice-stats-label small { color: var(--muted); font-weight: 700; }
+
 .practice-deck-summary strong,
 .practice-deck-summary span,
 .practice-deck-summary small {

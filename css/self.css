@@ -5958,3 +5958,28 @@ body.hand-flat .opponent-hand .hand-card.hand-card-glide {
     font: 500 12px/1.2 system-ui, sans-serif;
 }
 .spectator-name-input::placeholder { color: rgba(255, 255, 255, .45); }
+
+/* ── Dual Leader: the linked pair ─────────────────────────────────────────────
+   The two leaders are ONE leader under the hood (same rested state, same attached
+   DON!!, stats from the chosen leader), so they are drawn as a pair fanned INSIDE
+   the leader's own cell: each card at 80% size, offset so together they fill
+   exactly one card footprint. Nothing pokes into a neighbouring zone, so it holds
+   on every layout - the mirrored top board, the phone grid (Life sits right next
+   to the leader there), the extra-row layouts.
+   `scale`/`translate` are the individual transform properties, so they compose
+   with a rested leader's `transform: rotate(45deg)` instead of replacing it. */
+.leader-area.has-leader-twin { position: relative; }
+.leader-area.has-leader-twin > .leader-card-img { scale: .8; }
+.leader-area.has-leader-twin > .leader-card-img:not(.leader-twin-img) {
+    position: relative;
+    z-index: 2;
+    translate: 10% 4%;
+}
+.leader-area .leader-twin-img {
+    position: absolute !important;
+    top: 50%;
+    left: 50%;
+    z-index: 1;
+    translate: calc(-50% - 10%) calc(-50% - 4%);
+    filter: brightness(.9);
+}

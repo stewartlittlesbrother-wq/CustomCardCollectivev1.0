@@ -75,6 +75,7 @@ function savedDeckCardNumbers() {
         if (Array.isArray(decks)) decks.forEach(d => {
             if (!d) return;
             if (d.leaderId) nums.add(d.leaderId);
+            if (d.leaderId2) nums.add(d.leaderId2);   // Dual Leader twin
             if (d.deck) Object.keys(d.deck).forEach(id => nums.add(id));
             if (Array.isArray(d.tokens)) d.tokens.forEach(t => t && nums.add(t));
             if (Array.isArray(d.startingCards)) d.startingCards.forEach(e => e && e.id && nums.add(e.id));

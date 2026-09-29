@@ -328,6 +328,12 @@ const state = {
     player: "current",
     opponent: "current"
   },
+  // Dual Leader decks: which leader ("1" or "2") supplies the stats (life + power)
+  // for each board. Ignored for normal decks.
+  practiceStats: {
+    player: "1",
+    opponent: "1"
+  },
   searchMode: "AND",
   sortField: "number",
   rotationOnly: false,
@@ -7875,7 +7881,7 @@ async function maybeStartMultiplayerDraft() {
   try {
     [firebaseApp, svc] = await Promise.all([
       import("./js/firebase/firebaseApp.js"),
-      import("./js/firebase/multiplayerService.js?v=draft-3")
+      import("./js/firebase/multiplayerService.js?v=draft-4")
     ]);
     await firebaseApp.signInGuest();
   } catch (e) {
@@ -8409,8 +8415,9 @@ function startPractice() {
   const donSel = getPracticeDonDeckIds();
   const activeDon = getActiveDonDeckId();
   sessionStorage.setItem("custom-cards-sim-practice-decks", JSON.stringify({
-    player: playerDeck,
-    opponent: opponentDeck,
+    // statsLeader: for a Dual Leader deck, which leader supplies the life + power.
+    player: { ...playerDeck, statsLeader: state.practiceStats.player },
+    opponent: { ...opponentDeck, statsLeader: state.practiceStats.opponent },
     donDecks: {
       player: donSel.player || activeDon,
       opponent: donSel.opponent || activeDon
@@ -8612,6 +8619,17 @@ function renderPracticeDeckPicker(key, label) {
   const snapshot = practiceDeckSnapshot(selected);
   const leader = getCard(snapshot?.leaderId);
   const mainCount = deckSnapshotCount(snapshot?.deck);
+  // Dual Leader deck: show both leaders and let the player pick the stats leader.
+  const leader2 = (snapshot?.dualLeader && snapshot?.leaderId2) ? getCard(snapshot.leaderId2) : null;
+  const statsChoice = state.practiceStats[key] === "2" ? "2" : "1";
+  const statsPicker = leader2 ? `
+      <label class="practice-don-label practice-stats-label">
+        <span>Stats leader <small>(its life &amp; power apply to both)</small></span>
+        <select data-practice-stats="${escapeAttr(key)}">
+          <option value="1" ${statsChoice === "1" ? "selected" : ""}>${escapeHtml(leader?.name || "Leader 1")}</option>
+          <option value="2" ${statsChoice === "2" ? "selected" : ""}>${escapeHtml(leader2.name)}</option>
+        </select>
+      </label>` : "";
 
   return `
     <article class="practice-deck-card">
@@ -8629,11 +8647,13 @@ function renderPracticeDeckPicker(key, label) {
         <span>DON!! deck</span>
         <select data-practice-don-deck="${escapeAttr(key)}">${renderDonDeckOptions(getPracticeDonDeckIds()[key] || getActiveDonDeckId())}</select>
       </label>
+      ${statsPicker}
       <div class="practice-deck-summary">
         <div class="practice-leader-preview">${leader ? cardVisual(leader) : `<div class="empty">No leader</div>`}</div>
+        ${leader2 ? `<div class="practice-leader-preview practice-leader-preview-2">${cardVisual(leader2)}</div>` : ""}
         <div>
           <strong>${escapeHtml(snapshot?.name || "No deck selected")}</strong>
-          <span>${leader ? escapeHtml(leader.name) : "No leader selected"}</span>
+          <span>${leader ? escapeHtml(leader.name) : "No leader selected"}${leader2 ? ` + ${escapeHtml(leader2.name)}` : ""}</span>
           <small>${mainCount}/50 main deck</small>
         </div>
       </div>
@@ -9607,6 +9627,12 @@ function bindEvents() {
     // Per-board DON!! deck picker (one per deck on the practice setup).
     const donSelect = event.target.closest("[data-practice-don-deck]");
     if (donSelect) { setPracticeDonDeckId(donSelect.dataset.practiceDonDeck, donSelect.value); return; }
+    // Dual Leader: which leader supplies the stats for this board.
+    const statsSelect = event.target.closest("[data-practice-stats]");
+    if (statsSelect) {
+      state.practiceStats[statsSelect.dataset.practiceStats] = statsSelect.value === "2" ? "2" : "1";
+      return;
+    }
     const select = event.target.closest("[data-practice-deck]");
     if (!select) return;
     state.practiceDecks[select.dataset.practiceDeck] = select.value;

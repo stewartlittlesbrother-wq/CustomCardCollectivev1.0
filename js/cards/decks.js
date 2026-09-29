@@ -30,6 +30,10 @@ function getSavedMultiplayerDecks() {
                 id: `saved-${index}`,
                 name: deck.name || `Saved Deck ${index + 1}`,
                 leaderKey: deck.leaderId || "",
+                // Dual Leader format: the second leader (empty for a normal deck).
+                // leaderKey stays leader 1 here; the lobby swaps the two according
+                // to the "stats leader" the player picks before the match.
+                leaderKey2: (deck.dualLeader && deck.leaderId2) ? deck.leaderId2 : "",
                 deckText: deckMapToText(deck.deck),
                 // Token types this deck makes available in game (may be empty).
                 tokens: Array.isArray(deck.tokens) ? deck.tokens : [],

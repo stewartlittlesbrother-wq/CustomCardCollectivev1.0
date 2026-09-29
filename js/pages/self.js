@@ -414,6 +414,8 @@ function applyBoardToPlayer(player, boardJson) {
     if (!board) return;
     // Rebuild artwork locally - it is intentionally not transmitted.
     player.leader = hydrateCard(board.leader || null);
+    // Dual Leader: the linked twin of the (stats) leader, if this deck has one.
+    player.leader2 = hydrateCard(board.leader2 || null);
     player.characters = hydrateCards(board.characters || []);
     player.stage = hydrateCard(board.stage || null);
     player.trash = hydrateCards(board.trash || []);
@@ -557,6 +559,7 @@ function applySpectatorPlayerState(player, playerKey, publicPlayer) {
     // Any face-down cards sitting on the board are revealed for spectators too.
     const face = (card) => (card ? { ...card, faceUp: true } : card);
     player.leader = face(player.leader);
+    player.leader2 = face(player.leader2);
     player.stage = face(player.stage);
     player.characters = (player.characters || []).map(face);
     player.extraFaceUp = (player.extraFaceUp || []).map(face);
@@ -1503,6 +1506,8 @@ function hydrateCard(card) {
 function createPublicPlayerStateFromLocal(player) {
     const board = {
         leader: stripCard(player.leader || null),
+        // Dual Leader twin (null for a normal deck) so the opponent sees both.
+        leader2: stripCard(player.leader2 || null),
         characters: stripCards(player.characters || []),
         stage: stripCard(player.stage || null),
         trash: stripCards(player.trash || []),
@@ -1952,7 +1957,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-3");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-4");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2019,7 +2024,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-3");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-4");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2420,10 +2425,18 @@ function snapshotToDeckDefinition(snapshot, id) {
         .map(([cardId, qty]) => `${Number(qty)}x${cardId}`)
         .join("\n");
 
+    // Dual Leader: `leaderKey` is always the STATS leader (its life + power apply
+    // to both) and `leaderKey2` the linked twin. The builder stores leader 1 / 2 in
+    // pick order; `statsLeader` ("1"/"2", chosen before the game) decides which is
+    // which. A normal deck has no second leader.
+    const dual = Boolean(snapshot.dualLeader && snapshot.leaderId2);
+    const swap = dual && String(snapshot.statsLeader) === "2";
+
     return {
         id,
         name: snapshot.name || "Practice Deck",
-        leaderKey: snapshot.leaderId,
+        leaderKey: swap ? snapshot.leaderId2 : snapshot.leaderId,
+        leaderKey2: dual ? (swap ? snapshot.leaderId : snapshot.leaderId2) : "",
         deckText,
         // Token types ride along with the deck - they're not part of deckText
         // because they are not deck contents.
@@ -2447,15 +2460,21 @@ function createInitialPlayerState(playerName, deckDefinition) {
 
     const leaders = window.leaders || {};
     const key = selectedDeck.leaderKey;
-    let leader = leaders[key];
-
-    if (!leader) {
-        leader = Object.values(leaders).find(entry =>
-            entry?.cardNumber === key || entry?.id === key) || null;
-    }
-    if (!leader && typeof window.getCardById === "function") {
-        leader = window.getCardById(key);
-    }
+    const findLeader = (leaderKey) => {
+        let found = leaders[leaderKey];
+        if (!found) {
+            found = Object.values(leaders).find(entry =>
+                entry?.cardNumber === leaderKey || entry?.id === leaderKey) || null;
+        }
+        if (!found && typeof window.getCardById === "function") {
+            found = window.getCardById(leaderKey);
+        }
+        return found || null;
+    };
+    const leader = findLeader(key);
+    // Dual Leader twin. A missing second leader just degrades to a normal
+    // single-leader game rather than failing the whole match.
+    const leader2 = selectedDeck.leaderKey2 ? findLeader(selectedDeck.leaderKey2) : null;
 
     if (!leader) {
         throw new Error(
@@ -2484,6 +2503,7 @@ function createInitialPlayerState(playerName, deckDefinition) {
         life: [],
         trash: [],
         leader: createCardInstance(leader),
+        leader2: leader2 ? createCardInstance(leader2) : null,
         characters: [],
         stage: null,
         // Extra utility piles (custom zones for leader-effect ideas)
@@ -2547,6 +2567,7 @@ function createEmptyPlayerState(playerName) {
         life: [],
         trash: [],
         leader: null,
+        leader2: null,
         characters: [],
         stage: null,
         extraFaceUp: [],
@@ -3145,6 +3166,7 @@ function collectNeededCardNumbers() {
     [practice.player1Deck, practice.player2Deck].forEach(deck => {
         if (!deck) return;
         if (deck.leaderKey) nums.add(deck.leaderKey);
+        if (deck.leaderKey2) nums.add(deck.leaderKey2);
         (deck.tokens || []).forEach(token => token && nums.add(token));
         String(deck.deckText || "").split(/\n+/).forEach(line => {
             const match = line.trim().match(/^\d+x(.+)$/i);
@@ -7237,8 +7259,12 @@ function renderLeader(player, areaId) {
         img.classList.add("board-card-rested");
     }
 
-    applyCardAnimationClass(img, takeCardAnimationClass(player.leader));
-    applyCardAnimationClass(img, getBoardStateAnimationClass(player.leader, renderKey));
+    // Both one-shot animation classes are consumed on read, so grab them once and
+    // give the same ones to the twin (Dual Leader) so both faces animate together.
+    const playAnimation = takeCardAnimationClass(player.leader);
+    const stateAnimation = getBoardStateAnimationClass(player.leader, renderKey);
+    applyCardAnimationClass(img, playAnimation);
+    applyCardAnimationClass(img, stateAnimation);
 
     leaderArea.classList.toggle("don-attach-target", isDonAttachmentTarget(playerKey, player.leader));
     leaderArea.onclick = async (event) => {
@@ -7249,8 +7275,35 @@ function renderLeader(player, areaId) {
         }
     };
 
-     leaderArea.appendChild(img);
+    leaderArea.appendChild(img);
+
+    // Dual Leader: the second leader is a LINKED TWIN of the stats leader, not a
+    // second body. It is drawn from the same state (rested/active, attached DON!!)
+    // and carries the same board-leader-card class + data attributes, so every
+    // leader interaction (select, rest, attack, attach DON!!) resolves to the one
+    // real leader in gameState - "rest one, rest both; DON!! on one, DON!! on both".
+    // It is appended AFTER the real leader so first-match lookups
+    // (querySelector(".board-leader-card[data-player=…]")) still find the real one.
+    const twin = player.leader2;
+    leaderArea.classList.toggle("has-leader-twin", Boolean(twin));
+    if (twin) {
+        const twinImg = document.createElement("img");
+        twinImg.src = cardArtSrc(twin);
+        twinImg.alt = twin.name;
+        twinImg.className = "leader-card-img board-leader-card leader-twin-img";
+        twinImg.setAttribute("data-card-image", cardArtSrc(twin));
+        twinImg.setAttribute("data-player", playerKey);
+        twinImg.setAttribute("data-board-card-type", "leader");
+        twinImg.dataset.cardState = leaderState;
+        if (leaderState === "rested") twinImg.classList.add("board-card-rested");
+        applyCardAnimationClass(twinImg, playAnimation);
+        applyCardAnimationClass(twinImg, stateAnimation);
+        leaderArea.appendChild(twinImg);
+    }
+
     renderKeywordTags(player.leader, leaderArea);
+    // One shared attached-DON!! count for the pair (it is one leader), drawn once
+    // under the pair rather than duplicated per face.
     renderAttachedDonBadge(player.leader, leaderArea);
 
     setupCardPreview();
