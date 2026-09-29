@@ -402,7 +402,12 @@ export async function loadSharedCards(options = {}) {
         return card;
     }).filter(Boolean);
 
-    const downloaded = [];
+    // Full card bodies (base64 art) are written to the cache PER BATCH and dropped
+    // from memory immediately — never accumulated into one giant array. A cold
+    // full-library sync is hundreds of MB of art; holding it all in RAM at once
+    // OOM-crashed iOS Safari on the online board ("a problem repeatedly occurred").
+    // The in-memory pool keeps only LIGHT copies (forReturn), so RAM stays bounded.
+    let fetchedCount = 0;
     const CONCURRENCY = 16;
     // A live queue (not a fixed-order loop) so we can re-sort by the collection
     // the user is currently viewing BEFORE each batch - open a collection while
@@ -428,21 +433,26 @@ export async function loadSharedCards(options = {}) {
                 .then(snapshot => [key, snapshot.val()])
                 .catch(() => [key, null])
         ));
+        const batchFull = [];   // this batch's heavy cards, flushed below then GC'd
         for (const [key, card] of results) {
             if (!card) continue;
             card.updatedAt = Number(index[key]?.updatedAt || 0);
             // Stamp the storage key so it's the cache keyPath and the load hint.
             card[CACHE_KEY_PATH] = key;
-            downloaded.push(card);                     // full card -> written to cache (keeps art)
-            cachedByKey.set(key, forReturn(card, key)); // light in the builder's in-memory pool
+            batchFull.push(card);                       // full card -> written to cache (keeps art)
+            cachedByKey.set(key, forReturn(card, key)); // light in the in-memory pool
         }
+        // Persist this batch NOW and let the base64 art be collected, so peak RAM is
+        // ~CONCURRENCY cards instead of the whole library.
+        if (batchFull.length) { await writeCachedCards(batchFull); fetchedCount += batchFull.length; }
         // Stream what we have so far so the grid fills in as cards land.
         if (onProgress) {
             try { onProgress({ cards: snapshotCardsSoFar(), deleted }); } catch (_) {}
         }
     }
 
-    await writeCachedCards(downloaded, removed);
+    // Apply tombstone removals once (no card bodies involved).
+    if (removed.length) await writeCachedCards([], removed);
     removed.forEach(key => cachedByKey.delete(key));
 
     return {
@@ -458,8 +468,8 @@ export async function loadSharedCards(options = {}) {
         // Callers merge the repo's bundled JSON with this library; they need the
         // tombstones so a deleted bundled card doesn't come back from the file.
         deleted,
-        fetched: downloaded.length,
-        cached: liveKeys.filter(keyWanted).length - downloaded.length
+        fetched: fetchedCount,
+        cached: liveKeys.filter(keyWanted).length - fetchedCount
     };
 }
 

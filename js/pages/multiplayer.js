@@ -570,7 +570,7 @@ async function ensureDraftCollections() {
         if (packable(c) && c.collection) slugs.add(c.collection);
     });
     try {
-        const mod = await import("../firebase/cardLibraryService.js?v=draft-3");
+        const mod = await import("../firebase/cardLibraryService.js?v=draft-4");
         // The AUTHORITATIVE list of every collection (built-ins were only a partial
         // hardcoded catalog, which is why newer collections were missing). Also
         // capture their real display names.
