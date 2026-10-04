@@ -1,0 +1,446 @@
+/* Deck Builder - new layout (opt-in).
+   Everything below is scoped to html.deck-v2, so the classic layout is untouched
+   unless someone switches it on ("Try the new layout" in the Deck Builder, or
+   ?deckv2=1). One slim filter row on top, the whole width for cards, and the deck
+   docked along the bottom. See js/deck-v2.js for the DOM it moves around. */
+
+/* The switch button only exists in the classic layout. */
+.v2-try {
+  margin-left: auto;
+  align-self: center;
+  min-height: 26px;
+  padding: 2px 12px;
+  border: 1px solid rgba(77, 255, 158, .5);
+  border-radius: 999px;
+  background: rgba(16, 185, 129, .16);
+  color: #d9ffe9;
+  font-size: .76rem;
+  font-weight: 800;
+}
+.card-remove-action { display: none; }
+
+html.deck-v2 {
+  --v2-bg: #07090a;
+  --v2-surface: #0e1411;
+  --v2-surface-2: #141c18;
+  --v2-surface-3: #1c2621;
+  --v2-ink: #eef6f2;
+  --v2-muted: #8fa398;
+  --v2-line: #222d27;
+  --v2-accent: #10b981;
+  --v2-accent-hi: #4dff9e;
+  --v2-accent-ink: #04120b;
+  --v2-gold: #e2b451;
+  --v2-ok: #35d07f;
+  --v2-warn: #e2b451;
+  --v2-danger: #e0555a;
+}
+html.deck-v2 .v2-hide,
+html.deck-v2 [hidden].v2-menu { display: none !important; }
+
+/* ── Frame: filter bar / card pool / deck dock ─────────── */
+html.deck-v2 .builder-window {
+  display: flex !important;
+  flex-direction: column;
+  grid-template-columns: none !important;
+  height: 100% !important;
+  gap: 0 !important;
+  padding: 0 !important;
+  --v2-dock: 236px;
+}
+html.deck-v2 .builder-window.deck-sized { --v2-dock: var(--builder-deck-h, 236px); }
+
+/* Filter bar */
+html.deck-v2 .filter-stack {
+  flex: none;
+  position: relative;
+  z-index: 8;
+  display: block !important;
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  overflow: visible !important;
+  padding: 10px 16px !important;
+  gap: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+html.deck-v2 .filter-stack > .color-wheel-wrap,
+html.deck-v2 .filter-stack > #runSearch { display: none !important; }
+.v2-fb { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.v2-search { display: flex; align-items: center; gap: 8px; flex: 1 1 200px; max-width: 300px; min-width: 0; }
+html.deck-v2 .v2-search #searchInput { width: 100%; min-height: 38px; padding: 8px 12px; border: 0; border-radius: 10px; background: var(--v2-surface-2); color: var(--v2-ink); }
+html.deck-v2 .v2-search #searchInput:focus { outline: 2px solid var(--v2-accent); }
+html.deck-v2 .v2-search .tip-button { flex: none; position: static; width: 28px; height: 28px; min-height: 0; padding: 0; border-radius: 50%; background: var(--v2-surface-2); border: 0; color: var(--v2-muted); }
+.v2-dots { display: flex; gap: 7px; }
+.v2-dot { width: 24px; height: 24px; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: var(--dot); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25); transition: transform .1s; }
+.v2-dot:hover { transform: scale(1.1); filter: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25); }
+.v2-dot[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--v2-bg), 0 0 0 4px var(--v2-ink); }
+.v2-chips { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--v2-surface-2); }
+.v2-chip { min-height: 30px; padding: 2px 11px; border: 0; border-radius: 8px; background: transparent; color: var(--v2-muted); font-weight: 650; font-size: .82rem; box-shadow: none; }
+.v2-chip:hover { color: var(--v2-ink); filter: none; box-shadow: none; }
+.v2-chip[aria-pressed="true"] { background: var(--v2-surface-3); color: var(--v2-accent-hi); box-shadow: inset 0 0 0 1px rgba(77, 255, 158, .45); }
+.v2-chips.costs .v2-chip { min-width: 25px; padding-inline: 0; text-align: center; }
+.v2-chip { min-height: 28px; }
+.v2-spacer { flex: 1 1 0; min-width: 0; }
+.v2-size { display: inline-flex; align-items: center; gap: 8px; color: var(--v2-muted); font-size: .75rem; font-weight: 650; }
+.v2-size input { width: 88px; min-height: 0; padding: 0; accent-color: var(--v2-accent); background: none; border: 0; }
+.v2-link { min-height: 0; padding: 4px 6px; border: 0; border-radius: 6px; background: none !important; color: var(--v2-accent-hi) !important; font-weight: 650; box-shadow: none; width: auto !important; }
+.v2-link:hover { text-decoration: underline; filter: none; box-shadow: none; }
+html.deck-v2 #resetFilters.v2-link { width: auto !important; }
+
+/* Buttons + popover menus (shared by the filter bar and the dock) */
+.v2-btn { min-height: 36px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--v2-surface-2); color: var(--v2-ink); font-weight: 650; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; box-shadow: none; }
+.v2-btn:hover { background: var(--v2-surface-3); filter: none; box-shadow: none; }
+.v2-btn.primary { background: linear-gradient(180deg, var(--v2-accent), #0e9f70); color: var(--v2-accent-ink); font-weight: 850; }
+.v2-btn.primary:hover { box-shadow: 0 0 14px rgba(77, 255, 158, .4); background: linear-gradient(180deg, var(--v2-accent), #0e9f70); }
+.v2-btn.icon { width: 36px; padding: 0; }
+.v2-menu-wrap { position: relative; }
+.v2-menu { position: absolute; z-index: 90; top: calc(100% + 6px); right: 0; min-width: 250px; padding: 6px; border: 1px solid var(--v2-line); border-radius: 12px; background: #121a16; box-shadow: 0 16px 40px rgba(0, 0, 0, .55); display: grid; gap: 2px; color: var(--v2-ink); }
+.v2-menu.up { top: auto; bottom: calc(100% + 8px); }
+.v2-menu.left { right: auto; left: 0; }
+.v2-menu h5 { margin: 8px 10px 3px; font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--v2-muted); }
+.v2-menu .v2-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 36px; padding: 6px 10px; border: 0; border-radius: 8px; background: none; color: var(--v2-ink); text-align: left; font-weight: 650; box-shadow: none; }
+.v2-menu .v2-item:hover { background: var(--v2-surface-3); filter: none; box-shadow: none; }
+.v2-menu .v2-item.danger { color: #ffb3b3; }
+.v2-menu .v2-sep { height: 1px; margin: 4px 0; background: var(--v2-line); }
+.v2-menu .v2-confirm { display: grid; gap: 8px; padding: 8px 10px; }
+.v2-menu .v2-confirm div { display: flex; gap: 8px; }
+.v2-menu .deck-size-toggle, .v2-menu .builder-size-toggle { flex-direction: row-reverse; text-shadow: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; padding: 6px 10px; border-radius: 8px; color: var(--v2-ink); font-weight: 650; cursor: pointer; }
+.v2-menu .deck-size-toggle:hover, .v2-menu .builder-size-toggle:hover { background: var(--v2-surface-3); }
+.v2-menu .sort-buttons { display: flex !important; flex-wrap: wrap; gap: 6px; padding: 4px 10px 8px; grid-template-columns: none !important; border: 0 !important; background: none !important; }
+.v2-menu .sort-buttons span { display: none !important; }
+.v2-menu .sort-buttons button { min-height: 30px; padding: 2px 12px; border-radius: 8px; background: var(--v2-surface-2); color: var(--v2-muted); border: 0; font-size: .8rem; box-shadow: none; }
+.v2-menu .sort-buttons button.active { background: var(--v2-surface-3); color: var(--v2-accent-hi); box-shadow: inset 0 0 0 1px rgba(77, 255, 158, .45); }
+.v2-menu .filter-row { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; padding: 4px 10px 8px !important; border: 0 !important; background: none !important; }
+.v2-menu .filter-row select { width: 100%; min-height: 34px; border-radius: 9px; background: var(--v2-surface-2); color: var(--v2-ink); border: 1px solid var(--v2-line); font-size: .8rem; padding: 4px 8px; }
+
+/* ── Card pool ─────────────────────────────────────────── */
+html.deck-v2 .builder-main {
+  flex: 1 1 auto;
+  display: flex !important;
+  flex-direction: column;
+  grid-template-rows: none !important;
+  min-height: 0;
+  background: transparent !important;
+  border: 0 !important;
+}
+html.deck-v2 .collection-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex !important;
+  flex-direction: column;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+html.deck-v2 .collection-top { flex: none; min-height: 0 !important; padding: 0 16px 8px !important; background: transparent !important; border: 0 !important; }
+html.deck-v2 .collection-top h2 { color: var(--v2-ink); font-size: 1rem; text-shadow: none; }
+html.deck-v2 .collection-hint { color: var(--v2-muted); }
+html.deck-v2 .collection-panel .card-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none !important;
+  overflow-y: auto;
+  grid-template-columns: repeat(auto-fill, minmax(var(--v2-card-min, 132px), 1fr)) !important;
+  grid-auto-rows: max-content !important;
+  align-content: start !important;
+  gap: 18px 14px !important;
+  padding: 4px 16px 16px !important;
+  background: none !important;
+}
+html.deck-v2 .collection-picker { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+
+html.deck-v2 .collection-panel .card-tile {
+  position: relative;
+  display: grid !important;
+  grid-template-rows: auto auto;
+  gap: 7px;
+  height: auto !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+html.deck-v2 .card-tile .card-image {
+  grid-area: 1 / 1;
+  position: relative;
+  display: block;
+  aspect-ratio: 5 / 7;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--v2-surface-3);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .4);
+}
+html.deck-v2 .card-tile .card-image img, html.deck-v2 .card-tile .card-image .proxy-card { width: 100%; height: 100%; object-fit: cover; display: block; }
+html.deck-v2 .card-tile .card-image[data-qty]:not([data-qty="0"])::after {
+  content: "×" attr(data-qty);
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  padding: 1px 8px; border-radius: 999px;
+  background: var(--v2-accent); color: var(--v2-accent-ink);
+  font-weight: 800; font-size: .76rem; line-height: 1.5;
+}
+html.deck-v2 .collection-panel .card-body { grid-area: 2 / 1; display: block !important; min-width: 0; padding: 0 !important; background: none !important; }
+html.deck-v2 .collection-panel .card-body strong { display: block; font-size: .82rem; font-weight: 650; color: var(--v2-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html.deck-v2 .collection-panel .card-body span { display: none; }
+/* + / - and Inspect appear over the art on hover, so the grid stays calm. */
+html.deck-v2 .collection-panel .card-actions {
+  grid-area: 1 / 1;
+  align-self: end;
+  position: relative;
+  z-index: 3;
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 6px;
+  padding: 3px;
+  border-radius: 12px;
+  background: rgba(7, 9, 10, .92) !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .5);
+  opacity: 0;
+  transform: translateY(5px);
+  transition: opacity .12s, transform .12s;
+  pointer-events: none;
+}
+html.deck-v2 .card-tile:hover .card-actions, html.deck-v2 .card-tile:focus-within .card-actions { opacity: 1; transform: none; pointer-events: auto; }
+@media (hover: none) { html.deck-v2 .collection-panel .card-actions { opacity: 1; transform: none; pointer-events: auto; } }
+html.deck-v2 .collection-panel .card-actions button {
+  flex: 1 1 auto;
+  min-height: 30px !important;
+  padding: 2px 8px !important;
+  border: 0 !important;
+  border-radius: 9px !important;
+  background: transparent !important;
+  color: var(--v2-ink) !important;
+  font-size: .75rem !important;
+  font-weight: 700;
+  opacity: 1 !important;
+  box-shadow: none;
+}
+html.deck-v2 .collection-panel .card-actions button:hover { background: rgba(255, 255, 255, .1) !important; color: var(--v2-accent-hi) !important; filter: none; }
+html.deck-v2 .collection-panel .card-actions [data-action="add"] { color: var(--v2-gold) !important; }
+html.deck-v2 .collection-panel .card-actions .card-remove-action { display: inline-flex; flex: 0 0 34px; justify-content: center; font-size: 1.05rem !important; }
+html.deck-v2 .collection-panel .card-actions [hidden] { display: none !important; }
+html.deck-v2 .card-tile .card-alt-btn { z-index: 2; }
+
+/* ── Deck dock ─────────────────────────────────────────── */
+html.deck-v2 .deck-table {
+  flex: none !important;
+  display: flex !important;
+  flex-direction: column;
+  grid-template-rows: none !important;
+  position: relative;
+  height: var(--v2-dock) !important;
+  min-height: 176px;
+  border: 0 !important;
+  border-top: 1px solid var(--v2-line) !important;
+  background: var(--v2-surface) !important;
+  box-shadow: 0 -14px 30px rgba(0, 0, 0, .35);
+}
+html.deck-v2 .deck-table { overflow: visible !important; }
+html.deck-v2 .deck-table > .deck-tabs,
+html.deck-v2 .deck-table > .deck-toolbar,
+html.deck-v2 .deck-table > .warnings { display: none !important; }
+html.deck-v2 .builder-resizer {
+  position: absolute !important;
+  top: -8px;
+  left: 50%;
+  width: 84px;
+  height: 16px;
+  margin: 0 !important;
+  transform: translateX(-50%);
+  z-index: 6;
+  background: transparent !important;
+  border: 0 !important;
+  cursor: ns-resize;
+}
+html.deck-v2 .builder-resizer::after { content: ""; position: absolute; top: 6px; left: 16px; right: 16px; height: 4px; border-radius: 4px; background: var(--v2-line); transition: background .15s; }
+html.deck-v2 .builder-resizer:hover::after { background: var(--v2-accent); }
+html.deck-v2 .builder-window.size-locked .builder-resizer { cursor: default; opacity: .4; }
+
+.v2-dockhead { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; padding: 16px 16px 8px; position: relative; z-index: 4; color: var(--v2-ink); }
+.v2-dname { min-width: 0; flex: 0 1 230px; }
+html.deck-v2 .v2-dname #deckName { width: 100%; min-width: 0; min-height: 0; padding: 4px 8px; margin-left: -8px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--v2-ink); font-size: 1.05rem; font-weight: 800; letter-spacing: -.01em; }
+html.deck-v2 .v2-dname #deckName:hover { border-color: var(--v2-line); }
+html.deck-v2 .v2-dname #deckName:focus { border-color: var(--v2-accent); background: var(--v2-surface-2); outline: 0; }
+.v2-dcount { display: grid; gap: 6px; min-width: 120px; }
+.v2-dcount strong { font-size: 1.25rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; color: var(--v2-ink); text-shadow: none; }
+.v2-dcount strong #deckCountCap { font-size: .82rem; color: var(--v2-muted); font-weight: 600; }
+.v2-pbar { height: 5px; border-radius: 4px; background: var(--v2-surface-3); overflow: hidden; }
+.v2-pbar span { display: block; height: 100%; width: 0; border-radius: 4px; background: var(--v2-accent); transition: width .25s, background .2s; }
+.v2-pbar.full span { background: var(--v2-ok); }
+.v2-pbar.over span { background: var(--v2-danger); }
+.v2-pill { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 12px; border: 0; border-radius: 999px; font-weight: 750; box-shadow: none; }
+.v2-pill i { font-style: normal; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: .68rem; font-weight: 900; }
+.v2-pill.ok { background: rgba(53, 208, 127, .14); color: var(--v2-ok); }
+.v2-pill.ok i { background: rgba(53, 208, 127, .25); }
+.v2-pill.todo { background: rgba(226, 180, 81, .14); color: var(--v2-warn); }
+.v2-pill.todo i { background: rgba(226, 180, 81, .25); }
+.v2-pill.bad { background: rgba(224, 85, 90, .16); color: #ff9da1; }
+.v2-pill.bad i { background: rgba(224, 85, 90, .3); }
+.v2-pill:hover { filter: brightness(1.12); box-shadow: none; }
+.v2-mini-curve { display: grid; grid-template-columns: repeat(9, 8px); align-items: end; gap: 3px; height: 34px; }
+.v2-mini-curve span { display: block; min-height: 2px; border-radius: 2px 2px 1px 1px; background: var(--v2-accent); opacity: .85; }
+.v2-mini-curve span.zero { background: var(--v2-surface-3); opacity: 1; }
+.v2-dactions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.v2-dactions #saveDeckMini { min-width: 104px; min-height: 38px; padding: 0 16px; border: 0; border-radius: 10px; background: linear-gradient(180deg, var(--v2-accent), #0e9f70) !important; color: var(--v2-accent-ink) !important; font-weight: 850; }
+
+.v2-checks { display: grid; gap: 10px; list-style: none; margin: 0; padding: 8px 10px 6px; }
+.v2-checks li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; align-items: center; font-weight: 650; }
+.v2-ck { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: .68rem; font-weight: 900; }
+.v2-ck.ok { background: rgba(53, 208, 127, .2); color: var(--v2-ok); box-shadow: inset 0 0 0 1px var(--v2-ok); }
+.v2-ck.todo { background: rgba(226, 180, 81, .16); color: var(--v2-warn); box-shadow: inset 0 0 0 1px var(--v2-warn); }
+.v2-ck.bad { background: rgba(224, 85, 90, .18); color: var(--v2-danger); box-shadow: inset 0 0 0 1px var(--v2-danger); }
+.v2-checks small { color: var(--v2-muted); font-weight: 500; }
+.v2-bars { display: grid; grid-template-columns: repeat(9, 1fr); align-items: end; gap: 5px; height: 64px; padding: 14px 10px 0; }
+.v2-bar { position: relative; display: flex; align-items: flex-end; height: 100%; }
+.v2-bar span { width: 100%; min-height: 3px; border-radius: 4px 4px 2px 2px; background: linear-gradient(180deg, var(--v2-accent-hi), var(--v2-accent)); position: relative; }
+.v2-bar span.zero { background: var(--v2-surface-3); }
+.v2-bar em { position: absolute; bottom: calc(100% + 1px); left: 50%; transform: translateX(-50%); font-style: normal; font-size: .62rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.v2-axis { display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; padding: 3px 10px 0; text-align: center; font-size: .62rem; font-weight: 700; color: var(--v2-muted); }
+.v2-typebar { display: flex; height: 7px; margin: 0 10px; border-radius: 999px; overflow: hidden; background: var(--v2-surface-3); gap: 2px; }
+.v2-typebar span { height: 100%; }
+.v2-typelegend { display: flex; flex-wrap: wrap; gap: 2px 14px; padding: 6px 10px 8px; font-size: .75rem; color: var(--v2-muted); font-weight: 650; }
+.v2-typelegend b { color: var(--v2-ink); }
+.v2-typelegend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+
+/* Dock body: leader + a strip of the deck's cards */
+html.deck-v2 .deck-board-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex !important;
+  gap: 16px;
+  padding: 6px 16px 14px !important;
+  overflow: hidden !important;
+  background: none !important;
+}
+html.deck-v2 .deck-table .leader-slot,
+html.deck-v2 .deck-table .leader-slot-2 {
+  flex: none;
+  display: block !important;
+  width: 90px;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+html.deck-v2 .deck-table .leader-slot-2[hidden] { display: none !important; }
+html.deck-v2 .deck-table .leader-slot::before,
+html.deck-v2 .deck-table .leader-slot-2::before { content: "Leader"; display: block; margin-bottom: 6px; color: var(--v2-gold); font-size: .68rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+html.deck-v2 .deck-table .leader-slot-2::before { content: "Leader 2"; }
+html.deck-v2 .deck-table .leader-slot .mini-card-art,
+html.deck-v2 .deck-table .leader-slot-2 .mini-card-art { box-shadow: 0 0 0 2px var(--v2-gold), 0 6px 16px rgba(0, 0, 0, .4) !important; }
+html.deck-v2 .deck-table .leader-slot .empty,
+html.deck-v2 .deck-table .leader-slot-2 .empty { display: grid; place-items: center; aspect-ratio: 5 / 7; padding: 8px; border: 1px dashed var(--v2-line); border-radius: 8px; color: var(--v2-muted); font-size: .72rem; text-align: center; background: none; }
+html.deck-v2 .deck-table .deck-list {
+  flex: 1 1 auto;
+  display: flex !important;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  gap: 10px !important;
+  width: auto !important;
+  min-width: 0 !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 2px 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--v2-surface-3) transparent;
+}
+html.deck-v2 .deck-table .deck-list.v2-wrap { flex-wrap: wrap; overflow-x: hidden; overflow-y: auto; }
+html.deck-v2 .deck-table .deck-list .empty { color: var(--v2-muted); padding: 8px 4px; align-self: center; background: none; border: 0; }
+html.deck-v2 .deck-table .deck-row {
+  flex: none;
+  position: relative;
+  display: block !important;
+  width: 82px;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  overflow: visible;
+}
+html.deck-v2 .builder-window.cards-big .deck-table .deck-row { width: 96px; }
+html.deck-v2 .deck-table .mini-card-art { width: 100% !important; border: 0 !important; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, .4) !important; }
+html.deck-v2 .deck-table .qty {
+  position: absolute;
+  top: 4px !important;
+  right: 4px !important;
+  left: auto !important;
+  width: auto !important;
+  height: 22px !important;
+  min-width: 22px;
+  padding: 0 7px;
+  border: 0 !important;
+  border-radius: 999px;
+  background: var(--v2-accent) !important;
+  color: var(--v2-accent-ink) !important;
+  font-size: .76rem;
+  font-weight: 800;
+  line-height: 22px;
+  text-align: center;
+}
+html.deck-v2 .deck-table .qty::before { content: "×"; }
+html.deck-v2 .deck-table .token-qty { background: var(--v2-gold) !important; }
+html.deck-v2 .deck-table .token-qty::before { content: none; }
+html.deck-v2 .deck-table .deck-row .deck-row-actions {
+  position: absolute !important;
+  left: 4px !important;
+  right: 4px !important;
+  bottom: 4px !important;
+  display: flex !important;
+  justify-content: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 10px;
+  background: rgba(7, 9, 10, .92);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .5);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .12s, transform .12s;
+}
+html.deck-v2 .deck-table .deck-row:hover .deck-row-actions,
+html.deck-v2 .deck-table .deck-row:focus-within .deck-row-actions { opacity: 1; transform: none; }
+@media (hover: none) { html.deck-v2 .deck-table .deck-row .deck-row-actions { opacity: 1; transform: none; } }
+html.deck-v2 .deck-table .deck-row .deck-row-actions button {
+  position: static !important;
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 8px;
+  background: transparent !important;
+  color: var(--v2-ink) !important;
+  font-size: .95rem !important;
+  font-weight: 800;
+  box-shadow: none;
+}
+html.deck-v2 .deck-table .deck-row .deck-row-actions button:hover { background: rgba(255, 255, 255, .1) !important; color: var(--v2-accent-hi) !important; filter: none; }
+html.deck-v2 .deck-table .deck-row .start-badge { z-index: 2; }
+
+/* Panels opened from "My decks" / "Export" keep floating over the page. */
+html.deck-v2 .saved-decks-panel, html.deck-v2 .don-deck-panel, html.deck-v2 .deck-share-panel { z-index: 70; }
+
+@media (max-width: 1180px) {
+  html.deck-v2 .builder-window { --v2-dock: 290px; }
+  .v2-mini-curve { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { html.deck-v2 * { transition: none !important; } }
+
+.v2-sizebox { padding: 4px 10px 8px; }
+.v2-sizebox input { width: 100%; min-height: 0; padding: 0; accent-color: var(--v2-accent); background: none; border: 0; }
+/* The line above the cards: collection name, the leader-first hint, View All, count. */
+html.deck-v2 .collection-top { gap: 10px; align-items: center; }
+html.deck-v2 .collection-top button { min-height: 30px !important; padding: 2px 12px !important; font-size: .78rem !important; border-radius: 8px !important; }
+html.deck-v2 .collection-top .count-pill { padding: 2px 10px; font-size: .75rem; }
+html.deck-v2 .collection-hint { font-size: .74rem; max-width: 52ch; line-height: 1.3; }
+
+/* Touch devices scroll the whole page, so keep the deck docked to the bottom of the screen. */
+html.deck-v2.touch-device .deck-table { position: sticky; bottom: 0; z-index: 30; }
+html.deck-v2.touch-device .collection-panel .card-grid { overflow-y: visible; }
