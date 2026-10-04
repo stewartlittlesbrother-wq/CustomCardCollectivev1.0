@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- Fixed width so phones render the desktop layout scaled to fit, like every
+         other page (desktop browsers ignore this). -->
+    <meta name="viewport" content="width=1280, user-scalable=no">
+    <title>Tournaments – Golds Customs</title>
+    <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
+    <link rel="stylesheet" href="../css/tournaments.css?v=tour-1">
+</head>
+<body>
+    <a href="../index.html" class="tn-back-link">← Home</a>
+
+    <main class="tn-page">
+        <header class="tn-head">
+            <div>
+                <h1>Tournaments</h1>
+                <p class="tn-sub">Join a bracket that hasn't started, or run your own. Every match is played in a real multiplayer room.</p>
+            </div>
+            <button type="button" class="tn-btn tn-btn-primary" id="tnCreateBtn">＋ Create tournament</button>
+        </header>
+
+        <!-- Connection / "rules not published" / errors -->
+        <div id="tnNotice" class="tn-notice" hidden></div>
+
+        <nav class="tn-filters" id="tnFilters" aria-label="Filter tournaments">
+            <button type="button" class="tn-filter active" data-filter="all">All</button>
+            <button type="button" class="tn-filter" data-filter="open">Open for sign-up</button>
+            <button type="button" class="tn-filter" data-filter="running">In progress</button>
+            <button type="button" class="tn-filter" data-filter="done">Finished</button>
+            <button type="button" class="tn-filter" data-filter="mine">My tournaments</button>
+        </nav>
+
+        <section id="tnList" class="tn-list" aria-live="polite">
+            <div class="tn-empty">Loading tournaments…</div>
+        </section>
+    </main>
+
+    <!-- ══════════ Create a tournament ══════════ -->
+    <div class="tn-overlay" id="tnCreateOverlay" hidden>
+        <div class="tn-modal" role="dialog" aria-modal="true" aria-labelledby="tnCreateTitle">
+            <div class="tn-modal-head">
+                <h2 id="tnCreateTitle">Create a tournament</h2>
+                <button type="button" class="tn-x" id="tnCreateClose" aria-label="Close">✕</button>
+            </div>
+
+            <form id="tnCreateForm" class="tn-form" autocomplete="off">
+                <label class="tn-field">
+                    <span>Name</span>
+                    <input type="text" id="tnName" maxlength="60" placeholder="e.g. Friday Night Brawl" required>
+                </label>
+
+                <div class="tn-field">
+                    <span>Card pool <small>— which collections may be used</small></span>
+                    <label class="tn-check">
+                        <input type="checkbox" id="tnAllCollections" checked>
+                        All collections
+                    </label>
+                    <div id="tnCollectionPicker" class="tn-picker" hidden>
+                        <input type="text" id="tnCollectionSearch" placeholder="Search collections…" autocomplete="off">
+                        <div id="tnCollectionList" class="tn-picker-list"></div>
+                        <div id="tnCollectionCount" class="tn-hint"></div>
+                    </div>
+                </div>
+
+                <div class="tn-field">
+                    <span>Match type</span>
+                    <div class="tn-choice" id="tnMatchType">
+                        <label class="tn-choice-card">
+                            <input type="radio" name="tnMatchType" value="regular" checked>
+                            <strong>Regular matches</strong>
+                            <small>Players bring their own deck, built only from the chosen collections.</small>
+                        </label>
+                        <label class="tn-choice-card">
+                            <input type="radio" name="tnMatchType" value="draft">
+                            <strong>Draft battle</strong>
+                            <small>Each match is a Draft Battle: both players open packs from the pool, then build a 40-card deck.</small>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="tn-field">
+                    <span>Format</span>
+                    <div class="tn-choice" id="tnFormat">
+                        <label class="tn-choice-card">
+                            <input type="radio" name="tnFormat" value="elimination" checked>
+                            <strong>Single elimination</strong>
+                            <small>Lose once and you're out. Byes fill an uneven bracket.</small>
+                        </label>
+                        <label class="tn-choice-card">
+                            <input type="radio" name="tnFormat" value="swiss">
+                            <strong>Swiss</strong>
+                            <small>Everyone plays every round against someone with a similar record. Most wins takes it.</small>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="tn-row">
+                    <label class="tn-field">
+                        <span>Starts</span>
+                        <input type="datetime-local" id="tnStart" required>
+                    </label>
+                    <label class="tn-field">
+                        <span>Each round lasts</span>
+                        <select id="tnRoundLength"></select>
+                    </label>
+                    <label class="tn-field">
+                        <span>Max players</span>
+                        <select id="tnMaxPlayers"></select>
+                    </label>
+                </div>
+
+                <label class="tn-check">
+                    <input type="checkbox" id="tnJoinSelf" checked>
+                    I'm playing in it too
+                </label>
+
+                <p class="tn-hint" id="tnRulesHint"></p>
+
+                <div id="tnCreateError" class="tn-error" hidden></div>
+                <div class="tn-modal-actions">
+                    <button type="button" class="tn-btn" id="tnCreateCancel">Cancel</button>
+                    <button type="submit" class="tn-btn tn-btn-primary" id="tnCreateSubmit">Create tournament</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ══════════ Tournament details ══════════ -->
+    <div class="tn-overlay" id="tnDetailOverlay" hidden>
+        <div class="tn-modal tn-modal-wide" role="dialog" aria-modal="true" aria-labelledby="tnDetailTitle">
+            <div class="tn-modal-head">
+                <h2 id="tnDetailTitle">Tournament</h2>
+                <button type="button" class="tn-x" id="tnDetailClose" aria-label="Close">✕</button>
+            </div>
+            <div id="tnDetailBody" class="tn-detail"></div>
+        </div>
+    </div>
+
+    <div id="tnToast" class="tn-toast" hidden></div>
+
+    <script src="../js/cards/cardCollections.js?v=draft-1"></script>
+    <script type="module" src="../js/pages/tournaments.js?v=tour-1"></script>
+    <script src="../js/rotate-prompt.js"></script>
+
+    <script src="../js/version.js?v=246"></script>
+    <script src="../js/auth-ui.js?v=246"></script>
+</body>
+</html>

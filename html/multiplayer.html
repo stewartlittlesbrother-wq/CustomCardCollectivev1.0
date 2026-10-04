@@ -8,7 +8,7 @@
     <title>Multiplayer – Golds Customs</title>
     <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
     <link rel="stylesheet" href="../css/style.css">
-    <link rel="stylesheet" href="../css/multiplayer.css?v=lobby-8">
+    <link rel="stylesheet" href="../css/multiplayer.css?v=lobby-9">
 </head>
 <body>
     <a href="../index.html" class="mp-back-link">← Back</a>
@@ -111,6 +111,9 @@
                     <h2 id="lobbyTitle">Room</h2>
                 </div>
 
+                <!-- Tournament matches only: which tournament/round this is + card pool. -->
+                <div id="lobbyTournamentBanner" class="mp-tournament-banner" hidden></div>
+
                 <div id="lobbyCodeBox" class="lobby-code-box hidden">
                     <span class="lobby-code-label">Room code — share with friend</span>
                     <span id="lobbyCodeDisplay" class="lobby-code-value"></span>
@@ -174,10 +177,10 @@
     <script src="../js/cards/cardDatabase.js?v=cardnum-18"></script>
     <script src="../js/cards/decks.js?v=ry-ichigo-3"></script>
     <script src="../js/core/deckParser.js?v=starting-1"></script>
-    <script type="module" src="../js/pages/multiplayer.js?v=lobby-18"></script>
+    <script type="module" src="../js/pages/multiplayer.js?v=lobby-21"></script>
   <script src="../js/rotate-prompt.js"></script>
 
-  <script src="../js/version.js?v=245"></script>
-  <script src="../js/auth-ui.js?v=245"></script>
+  <script src="../js/version.js?v=246"></script>
+  <script src="../js/auth-ui.js?v=246"></script>
 </body>
 </html>

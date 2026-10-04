@@ -557,3 +557,18 @@
 .mp-spectate-watch {
     flex: 0 0 auto;
 }
+
+/* Tournament match banner (lobby). */
+.mp-tournament-banner {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 0 0 14px;
+    padding: 11px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(226, 180, 81, .6);
+    background: rgba(226, 180, 81, .12);
+    text-align: left;
+}
+.mp-tournament-banner strong { color: #ffe29a; }
+.mp-tournament-banner span { color: rgba(255, 255, 255, .72); font-size: .82rem; }

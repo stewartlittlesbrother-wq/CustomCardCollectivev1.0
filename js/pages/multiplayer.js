@@ -9,7 +9,7 @@ import {
     setPlayerReady,
     getMatch,
     clearMatchStartError
-} from "../firebase/multiplayerService.js?v=draft-4";
+} from "../firebase/multiplayerService.js?v=draft-6";
 
 // ── State ────────────────────────────────────────────
 let currentUser = null;
@@ -311,6 +311,93 @@ function applyLobbyMode(mode, draftCollection) {
     if (lobbyDraftPanel) lobbyDraftPanel.hidden = !draft;
 }
 
+// ── Tournament matches ────────────────────────────────
+// A room opened from the Tournaments page carries `match.tournament` (which
+// tournament + round it belongs to, who may play, and the card pool decks are
+// restricted to). Show it, and for regular matches check decks against the pool.
+let tournamentMeta = null;
+const lobbyTournamentBanner = $("lobbyTournamentBanner");
+
+// Real collection names (e.g. "Pig's Deltarune") come from the shared registry; load
+// them once so the banner doesn't have to guess from the slug.
+let collectionNamesRequested = false;
+async function loadCollectionNamesOnce() {
+    if (collectionNamesRequested) return;
+    collectionNamesRequested = true;
+    try {
+        const mod = await import("../firebase/cardLibraryService.js?v=draft-4");
+        const registry = mod.loadSharedCollections ? await mod.loadSharedCollections() : [];
+        (registry || []).forEach(c => { if (c && c.slug && c.name) sharedCollectionNames[c.slug] = c.name; });
+        if (tournamentMeta) applyTournamentLobby(tournamentMeta);
+    } catch { /* the slug-based fallback name is fine */ }
+}
+
+function applyTournamentLobby(meta) {
+    tournamentMeta = meta;
+    loadCollectionNamesOnce();
+    const pool = Object.values(meta.collections || {});
+    if (lobbyTournamentBanner) {
+        lobbyTournamentBanner.hidden = false;
+        lobbyTournamentBanner.innerHTML =
+            `<strong>🏆 ${escapeHtml(meta.name || "Tournament")} — Round ${escapeHtml(meta.round)}</strong>` +
+            `<span>${meta.format === "swiss" ? "Swiss" : "Single elimination"} · ` +
+            `${meta.matchType === "draft" ? "Draft battle" : "Regular match"} · ` +
+            `Card pool: ${pool.length ? escapeHtml(pool.map(prettyCollectionName).join(", ")) : "all collections"}</span>`;
+    }
+    if (lobbyTitle) lobbyTitle.textContent = "Tournament match";
+    if (btnBackFromLobby) btnBackFromLobby.textContent = "← Tournaments";
+}
+
+// Cards in a deck that aren't from the tournament's collections ("" = no problem).
+//
+// The in-game card database does NOT record which collection a card belongs to, so
+// this asks the shared card library instead, for just the deck's card numbers. A deck
+// only stores card NUMBERS, and the same number can exist in more than one collection,
+// so a card is accepted if ANY card with that number is in the tournament's pool.
+async function tournamentDeckProblem(deck) {
+    const pool = new Set(Object.values((tournamentMeta && tournamentMeta.collections) || {}));
+    if (!pool.size) return "";
+
+    const ids = new Set();
+    String(deck.deckText || "").split(/\n+/).forEach(line => {
+        const m = line.trim().match(/^\d+x(.+)$/i);
+        if (m) ids.add(m[1].trim());
+    });
+    [deck.leaderKey, deck.leaderKey2].forEach(id => { if (id) ids.add(id); });
+    if (!ids.size) return "";
+
+    const fallback = window.COLLECTION_DEFAULT || "golds-bleach";
+    const collectionsByCard = new Map();   // card number -> Set of collections that have it
+    const nameByCard = new Map();
+    try {
+        const library = await import("../firebase/cardLibraryService.js?v=draft-4");
+        const { cards } = await library.loadSharedCards({ onlyNumbers: ids });
+        (cards || []).forEach(card => {
+            [card.cardNumber, card.id].filter(Boolean).forEach(key => {
+                if (!collectionsByCard.has(key)) collectionsByCard.set(key, new Set());
+                collectionsByCard.get(key).add(card.collection || fallback);
+                if (card.name && !nameByCard.has(key)) nameByCard.set(key, card.name);
+            });
+        });
+    } catch {
+        return "Couldn't check your deck against the card pool right now. Check your connection and try again.";
+    }
+
+    const bad = [];
+    ids.forEach(id => {
+        const collections = collectionsByCard.get(id);
+        // Unknown to the shared library: a bundled card (default collection) or a card
+        // that doesn't exist - only the default collection can vouch for those.
+        const allowed = collections
+            ? [...collections].some(c => pool.has(c))
+            : Boolean((window.cardDatabase || {})[id]) && pool.has(fallback);
+        if (!allowed) bad.push(nameByCard.get(id) || ((window.cardDatabase || {})[id] || {}).name || id);
+    });
+    if (!bad.length) return "";
+    const shown = bad.slice(0, 6).join(", ") + (bad.length > 6 ? `, and ${bad.length - 6} more` : "");
+    return `This deck has cards outside the tournament's card pool (${[...pool].map(prettyCollectionName).join(", ")}): ${shown}.`;
+}
+
 function goToDraft() {
     if (!currentRoomCode || !playerSlot) return;
     isRedirecting = true;
@@ -333,6 +420,7 @@ function handleMatchUpdate(match) {
 
     // Learn the room's mode from match data (the joiner didn't set it locally).
     if (match.mode !== undefined) applyLobbyMode(match.mode, match.draftCollection);
+    if (match.tournament) applyTournamentLobby(match.tournament);
 
     const p1 = match.players?.p1;
     const p2 = match.players?.p2;
@@ -487,6 +575,16 @@ async function init() {
         watchActiveGames();
     } catch (e) {
         setStatus("Connection failed", "error");
+    }
+
+    // Sent here from the Tournaments page: the room already exists (or was just
+    // created) for this player, so go straight to its lobby.
+    const params = new URLSearchParams(window.location.search);
+    const roomParam = (params.get("room") || "").trim().toUpperCase();
+    if (currentUser && roomParam) {
+        currentRoomCode = roomParam;
+        playerSlot = params.get("slot") === "p2" ? "p2" : "p1";
+        openLobbyView();
     }
 }
 
@@ -709,6 +807,16 @@ btnReady.addEventListener("click", async () => {
     const selectedDeck = window.getDeckById?.(lobbyDeckSelect.value);
     if (!selectedDeck) { showError(mpLobbyError, "Choose a deck first."); return; }
 
+    // Tournament with a card pool: the deck must stay inside it.
+    if (tournamentMeta && tournamentMeta.matchType !== "draft") {
+        btnReady.disabled = true;
+        btnReady.textContent = "Checking deck…";
+        const problem = await tournamentDeckProblem(selectedDeck);
+        btnReady.disabled = false;
+        btnReady.textContent = "Ready Up";
+        if (problem) { showError(mpLobbyError, problem); return; }
+    }
+
     btnReady.disabled = true;
     btnReady.textContent = "Saving…";
     isReady = true;
@@ -760,6 +868,8 @@ btnStart.addEventListener("click", async () => {
 
 // Lobby — leave
 btnBackFromLobby.addEventListener("click", () => {
+    // A tournament match has nowhere to go but back to the tournament.
+    if (tournamentMeta) { window.location.href = "tournaments.html"; return; }
     if (unsubscribeMatch) { unsubscribeMatch(); unsubscribeMatch = null; }
     stopStartWatchdog();
     currentRoomCode = null;

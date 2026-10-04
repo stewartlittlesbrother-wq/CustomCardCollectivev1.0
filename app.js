@@ -7056,7 +7056,10 @@ let packCollectionFilter = "";
 function pickPackCards(n) {
   let pool = (state.cards || []).filter(isPackableCard);
   if (packCollectionFilter) {
-    pool = pool.filter(c => (c.collection || COLLECTION_DEFAULT) === packCollectionFilter);
+    // One collection, or several joined by commas (a draft tournament can draft
+    // from more than one).
+    const allowed = new Set(String(packCollectionFilter).split(",").map(s => s.trim()).filter(Boolean));
+    pool = pool.filter(c => allowed.has(c.collection || COLLECTION_DEFAULT));
   }
   if (!pool.length) return [];
   const picks = [];
@@ -7618,7 +7621,7 @@ async function maybeStartMultiplayerDraft() {
   try {
     [firebaseApp, svc] = await Promise.all([
       import("./js/firebase/firebaseApp.js"),
-      import("./js/firebase/multiplayerService.js?v=draft-4")
+      import("./js/firebase/multiplayerService.js?v=draft-6")
     ]);
     await firebaseApp.signInGuest();
   } catch (e) {
@@ -8807,6 +8810,13 @@ function bindEvents() {
   // Nav: Multiplayer tab -> lobby page
   document.getElementById("navMultiplayer")?.addEventListener("click", () => {
     window.location.href = "html/multiplayer.html";
+  });
+
+  // Tournaments: nav tab and the home card both open the tournaments page.
+  ["navTournaments", "tournamentsButton"].forEach(id => {
+    document.getElementById(id)?.addEventListener("click", () => {
+      window.location.href = "html/tournaments.html";
+    });
   });
 
   // Nav: Card Creator tab -> Deck Builder view with the Card Creation panel open.

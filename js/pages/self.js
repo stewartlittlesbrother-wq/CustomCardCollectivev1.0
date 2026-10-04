@@ -1355,12 +1355,61 @@ function handleOnlineGameOver() {
         ? `${winnerLabel} Wins`
         : (onlinePublicState.winner === playerSlot ? "You Won" : "You Lost");
 
+    // A tournament match: write the winner into the bracket now (before anyone can
+    // press anything on the game-over screen).
+    reportTournamentResult(onlinePublicState.winner);
+
     showGameOverPopup(
         winnerPlayer,
         onlinePublicState.gameOverReasonTitle || "Victory",
         onlinePublicState.gameOverReasonText || `${winnerPlayer.name} won the online match.`,
         outcomeText
     );
+}
+
+// ── Tournament matches ───────────────────────────────────
+// A room opened from the Tournaments page has `match.tournament` (which tournament,
+// round and pairing it is). Its winner must be recorded in the tournament, and it
+// can't offer a rematch - a rematch re-deals the room and would wipe the result.
+let tournamentContext = null;   // { meta, uids: { p1, p2 } } for a tournament match
+
+async function loadTournamentContext() {
+    if (!isOnlineMatch || isSpectator || !onlineFirebaseApp) return;
+    try {
+        const db = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
+        const read = (path) => db.get(db.ref(onlineFirebaseApp.database, `matches/${roomCode}/${path}`)).then(s => s.val());
+        const [meta, p1, p2] = await Promise.all([read("tournament"), read("players/p1/uid"), read("players/p2/uid")]);
+        if (meta) tournamentContext = { meta, uids: { p1, p2 } };
+    } catch (error) {
+        console.warn("Couldn't check for a tournament match:", error);
+    }
+}
+
+function reportTournamentResult(winnerSlot) {
+    if (!tournamentContext || isSpectator) return;
+    const winnerUid = tournamentContext.uids[winnerSlot];
+    if (!winnerUid) return;
+    import("../firebase/tournamentService.js?v=tour-1")
+        .then(service => service.reportMatchResult(tournamentContext.meta, winnerUid))
+        .catch(error => console.warn("Couldn't record the tournament result:", error));
+}
+
+function buildTournamentGameOverPanel() {
+    const meta = tournamentContext.meta;
+    const panel = document.createElement("div");
+    panel.className = "rematch-panel";
+
+    const heading = document.createElement("h4");
+    heading.className = "rematch-heading";
+    heading.textContent = `🏆 ${meta.name || "Tournament"} — Round ${meta.round}`;
+
+    const note = document.createElement("p");
+    note.textContent = "Your result has been recorded. There's no rematch in tournament games — " +
+        "head back to the tournament to see your next round.";
+
+    panel.appendChild(heading);
+    panel.appendChild(note);
+    return panel;
 }
 
 async function publishOnlineReveal(cards, verb = "revealed:") {
@@ -1957,7 +2006,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-4");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-6");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -1974,6 +2023,7 @@ async function initializeOnlineMultiplayer() {
         setupOnlinePresence();
         setupOnlinePlayerNames();
         setupOnlineCosmetics();
+        loadTournamentContext();   // is this room a tournament match? (fire and forget)
 
         // Multiplayer code reads public board/count state plus this user's private zones only.
         onlineMatchUnsubscribe = onlineMultiplayerService.subscribeToPublicState(
@@ -2024,7 +2074,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-4");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-6");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -3778,6 +3828,13 @@ function showGameOverPopup(winnerPlayer, reasonTitle = "Victory", reasonText = "
             window.location.href = "multiplayer.html";
         });
         buttons.appendChild(mainMenuButton);
+    } else if (isOnlineMatch && tournamentContext) {
+        // Tournament match: no rematch, just back to the tournament.
+        popup.appendChild(buildTournamentGameOverPanel());
+        popup.appendChild(buildGameOverChat());
+        mainMenuButton.href = "tournaments.html";
+        mainMenuButton.textContent = "Back to Tournament";
+        buttons.appendChild(mainMenuButton);
     } else if (isOnlineMatch) {
         // Online: ready up (optionally with a different deck) and rematch in
         // place once BOTH players are ready. Handled by the rematch panel.
@@ -3798,7 +3855,7 @@ function showGameOverPopup(winnerPlayer, reasonTitle = "Victory", reasonText = "
     overlay.appendChild(popup);
     document.body.appendChild(overlay);
 
-    if (isOnlineMatch && !isSpectator) startRematchWatch();
+    if (isOnlineMatch && !isSpectator && !tournamentContext) startRematchWatch();
 }
 
 // ── Rematch panel (online game-over screen) ──────────────

@@ -377,12 +377,16 @@ export async function createRoom(user, opts = {}) {
         throw new Error("No user found. Guest login did not finish.");
     }
 
-    const roomCode = generateRoomCode();
+    // A tournament pairing passes a FIXED room code, so both players compute the same
+    // code and whoever arrives first creates the room while the other just joins it.
+    const fixedCode = opts.roomCode ? cleanRoomCode(opts.roomCode) : "";
+    const roomCode = fixedCode || generateRoomCode();
     const nickname = opts.nickname || "Player 1";
     const isPublic = Boolean(opts.isPublic);
     const lobbyName = opts.lobbyName || (nickname + "'s Game");
     // Room mode: "regular" (default, unchanged) or "draft" (booster draft battle).
-    // draftCollection = "" for all cards, or a collection slug to draft from.
+    // draftCollection = "" for all cards, a collection slug, or several slugs joined
+    // by commas (tournaments can draft from more than one collection).
     const mode = opts.mode === "draft" ? "draft" : "regular";
     const draftCollection = mode === "draft" ? String(opts.draftCollection || "") : "";
 
@@ -390,14 +394,17 @@ export async function createRoom(user, opts = {}) {
 
     const matchRef = ref(database, `matches/${roomCode}`);
 
-    await set(matchRef, {
+    const matchDocument = (createdAt) => ({
         status: "waiting",
-        createdAt: serverTimestamp(),
+        createdAt,
         hostUid: user.uid,
         isPublic,
         lobbyName,
         mode,
         draftCollection,
+        // Tournament matches: who may play, which tournament/round this is, and the
+        // card pool the decks are restricted to. Absent for ordinary rooms.
+        ...(opts.tournament ? { tournament: opts.tournament } : {}),
 
         players: {
             p1: {
@@ -427,6 +434,20 @@ export async function createRoom(user, opts = {}) {
         }
     });
 
+    if (fixedCode) {
+        // Create only if nobody has yet: two players pressing "Play" at the same
+        // moment must not overwrite each other's room.
+        const outcome = await runTransaction(matchRef, current =>
+            current === null ? matchDocument(Date.now()) : undefined);
+        if (!outcome.committed) {
+            const exists = new Error("That room already exists.");
+            exists.code = "ROOM_EXISTS";
+            throw exists;
+        }
+    } else {
+        await set(matchRef, matchDocument(serverTimestamp()));
+    }
+
     // Rooms are private and joined by code. The public /lobbies listing was
     // removed - the database rules denied it and it was never usable.
     console.log("Firebase set() finished.");
@@ -444,6 +465,12 @@ export async function joinRoom(roomCode, user, nickname = "Player 2") {
     }
 
     const match = snapshot.val();
+
+    // A tournament match is for the two paired players only. The room code is
+    // derivable, so don't let anyone else take the empty seat.
+    if (match.tournament && match.tournament.players && !match.tournament.players[user.uid]) {
+        throw new Error("This is a tournament match - only the two players in this pairing can join it.");
+    }
 
     if (match.players?.p2 && match.players.p2.uid !== user.uid) {
         throw new Error("Room is already full.");
@@ -476,8 +503,9 @@ export async function joinRoom(roomCode, user, nickname = "Player 2") {
 export function subscribeToMatch(roomCode, callback) {
     const code = cleanRoomCode(roomCode);
     // `mode` + `draftCollection` let the lobby switch to the draft layout; they're
-    // small scalars so watching them adds no meaningful traffic.
-    const paths = ["status", "players", "isPublic", "lobbyName", "startError", "mode", "draftCollection"];
+    // small scalars so watching them adds no meaningful traffic. `tournament` is a
+    // small object (names + ids), present only on tournament matches.
+    const paths = ["status", "players", "isPublic", "lobbyName", "startError", "mode", "draftCollection", "tournament"];
     const latest = {};
     const unsubscribers = [];
 

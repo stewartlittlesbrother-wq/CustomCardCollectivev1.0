@@ -55,6 +55,20 @@
       "$name": {
         ".write": "auth != null && !data.exists()"
       }
+    },
+
+    "tournaments": {
+      ".read": true,
+      "$tid": {
+        ".write": "auth != null && auth.token.firebase.sign_in_provider !== 'anonymous' && ((!data.exists() && newData.child('createdBy').val() === auth.uid) || data.child('createdBy').val() === auth.uid || data.child('players').child(auth.uid).exists())",
+        ".validate": "newData.hasChildren(['name', 'createdBy', 'matchType', 'format', 'startAt', 'roundMinutes', 'maxPlayers', 'status']) && ((data.exists() && newData.child('createdBy').val() === data.child('createdBy').val()) || (!data.exists() && newData.child('createdBy').val() === auth.uid)) && newData.child('name').isString() && newData.child('name').val().length <= 60 && (newData.child('matchType').val() === 'regular' || newData.child('matchType').val() === 'draft') && (newData.child('format').val() === 'elimination' || newData.child('format').val() === 'swiss') && newData.child('startAt').isNumber() && newData.child('roundMinutes').isNumber() && newData.child('maxPlayers').isNumber() && (newData.child('status').val() === 'registration' || newData.child('status').val() === 'running' || newData.child('status').val() === 'complete' || newData.child('status').val() === 'cancelled')",
+        "players": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && auth.token.firebase.sign_in_provider !== 'anonymous' && root.child('tournaments').child($tid).child('status').val() === 'registration' && (data.exists() || root.child('tournaments').child($tid).child('players').numChildren() < root.child('tournaments').child($tid).child('maxPlayers').val())",
+            ".validate": "newData.hasChildren(['name', 'joinedAt']) && newData.child('name').isString() && newData.child('name').val().length <= 30"
+          }
+        }
+      }
     }
   }
 }
