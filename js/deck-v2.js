@@ -283,8 +283,9 @@
         addMenu(decksButton, decksMenu);
         head.append(decksWrap);
 
-        const nameWrap = make("div", "v2-dname");
-        nameWrap.append(el.deckName);
+        const nameWrap = make("label", "v2-dname");
+        nameWrap.append(make("span", "v2-dlabel", "Deck name"), el.deckName, make("span", "v2-dpencil", "✎"));
+        el.deckName.placeholder = "Name your deck";
         head.append(nameWrap);
 
         const countWrap = make("div", "v2-dcount");
@@ -320,9 +321,15 @@
         addMenu(pill, checkMenu);
         head.append(checkWrap);
 
+        const curveBox = make("div", "v2-curve");
+        curveBox.title = "Cost curve: how many cards you have at each cost (0 to 8+)";
         miniCurve = make("div", "v2-mini-curve");
         miniCurve.setAttribute("aria-hidden", "true");
-        head.append(miniCurve);
+        const curveAxis = make("div", "v2-curve-axis");
+        curveAxis.setAttribute("aria-hidden", "true");
+        ["0", "1", "2", "3", "4", "5", "6", "7", "8+"].forEach(label => curveAxis.append(make("span", "", label)));
+        curveBox.append(make("span", "v2-curve-cap", "Cost curve"), miniCurve, curveAxis);
+        head.append(curveBox);
 
         const actions = make("div", "v2-dactions");
 
