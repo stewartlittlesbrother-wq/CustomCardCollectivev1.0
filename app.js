@@ -482,6 +482,27 @@ const el = {
   scanProgressLabel: document.querySelector("#scanProgressLabel"),
   clearCreationForm: document.querySelector("#clearCreationForm"),
   creationImagePreview: document.querySelector("#creationImagePreview"),
+  creationTitle: document.querySelector("#creationTitle"),
+  creationSubtitle: document.querySelector("#creationSubtitle"),
+  creationTabs: document.querySelector("#creationTabs"),
+  creationBasicDone: document.querySelector("#creationBasicDone"),
+  creationDraftBanner: document.querySelector("#creationDraftBanner"),
+  creationDraftText: document.querySelector("#creationDraftText"),
+  creationDraftContinue: document.querySelector("#creationDraftContinue"),
+  creationDraftDiscard: document.querySelector("#creationDraftDiscard"),
+  creationFileName: document.querySelector("#creationFileName"),
+  creationCategorySeg: document.querySelector("#creationCategorySeg"),
+  creationCostLabel: document.querySelector("#creationCostLabel"),
+  creationDetailsHint: document.querySelector("#creationDetailsHint"),
+  creationTypeBox: document.querySelector("#creationTypeBox"),
+  creationTypeTags: document.querySelector("#creationTypeTags"),
+  creationTypeInput: document.querySelector("#creationTypeInput"),
+  creationTypeList: document.querySelector("#creationTypeList"),
+  creationSummary: document.querySelector("#creationSummary"),
+  creationQuickEffects: document.querySelector("#creationQuickEffects"),
+  creationCancel: document.querySelector("#creationCancel"),
+  creationSaveBtn: document.querySelector("#creationSaveBtn"),
+  creationSaveAnother: document.querySelector("#creationSaveAnother"),
   startGame: document.querySelector("#startGame"),
   drawCard: document.querySelector("#drawCard"),
   addDon: document.querySelector("#addDon"),
@@ -3617,6 +3638,500 @@ function setCreationAttributes(value) {
   });
 }
 
+// ── Card creator: layout, attribute badges, type tags, drafts ───────────────
+// The creator is split into Basic Info / Details / Effects, with a Preview that sits
+// beside the form on wide screens (and becomes a 4th tab on narrow ones).
+//
+// Fields that don't apply to the chosen card type are hidden - but only while they
+// are EMPTY. A field that already holds a value (e.g. when editing an older card)
+// always stays visible, so nothing is ever hidden together with its data.
+
+// The attribute badges as printed on the cards: a coloured dome with the kanji, and
+// the English word curved along the bottom. "???" is the plain dark "?" badge.
+const ATTRIBUTE_BADGES = {
+  strike:  { label: "Strike",  kanji: "打", color: "#c79a2a" },
+  slash:   { label: "Slash",   kanji: "斬", color: "#3a8dc4" },
+  ranged:  { label: "Ranged",  kanji: "射", color: "#c93b3f" },
+  special: { label: "Special", kanji: "特", color: "#6b3a8c" },
+  wisdom:  { label: "Wisdom",  kanji: "知", color: "#2f9a40" }
+};
+let attributeIconSeq = 0;
+
+function attributeIconSvg(name) {
+  const badge = ATTRIBUTE_BADGES[String(name || "").trim().toLowerCase()];
+  if (!badge) {
+    return `<svg class="attr-icon" viewBox="0 0 100 96" aria-hidden="true">
+      <circle cx="50" cy="48" r="43" fill="#14161a" stroke="#9aa0aa" stroke-width="6"/>
+      <circle cx="50" cy="48" r="38" fill="none" stroke="#fff" stroke-opacity=".16" stroke-width="2"/>
+      <text x="50" y="68" text-anchor="middle" font-size="58" font-weight="900" fill="#fff" font-family="Arial, Helvetica, sans-serif">?</text>
+    </svg>`;
+  }
+  const arc = `attr-arc-${++attributeIconSeq}`;
+  const shapes = `<path d="M30 46H70Q89 56 95 71Q50 108 5 71Q11 56 30 46Z"/><circle cx="50" cy="33" r="29"/>`;
+  return `<svg class="attr-icon" viewBox="0 0 100 96" aria-hidden="true">
+    <g fill="#fff" stroke="#fff" stroke-width="6" stroke-linejoin="round">${shapes}</g>
+    <g fill="${badge.color}">${shapes}</g>
+    <text x="50" y="45" text-anchor="middle" font-size="34" font-weight="900" fill="#fff" font-family="'Yu Gothic','Hiragino Sans','Noto Sans CJK JP','Meiryo','MS Gothic',sans-serif">${badge.kanji}</text>
+    <path id="${arc}" d="M13 69Q50 97 87 69" fill="none"/>
+    <text font-size="11.5" font-weight="900" fill="#fff" letter-spacing=".4" font-family="Arial, Helvetica, sans-serif"><textPath href="#${arc}" startOffset="50%" text-anchor="middle">${badge.label.toUpperCase()}</textPath></text>
+  </svg>`;
+}
+
+function buildCreationAttributeChips() {
+  const host = el.creationAttribute;
+  if (!host) return;
+  host.innerHTML = ["Strike", "Slash", "Ranged", "Special", "Wisdom", "???"].map(name =>
+    `<label class="attr-chip" title="${name}"><input type="checkbox" value="${name}">${attributeIconSvg(name)}<span>${name}</span></label>`
+  ).join("");
+}
+
+const CREATION_APPLICABLE_FIELDS = {
+  leader:    ["power", "attribute", "types"],
+  character: ["power", "counter", "attribute", "types", "keywords", "copies"],
+  event:     ["types", "copies"],
+  stage:     ["types", "copies"],
+  token:     ["power", "counter", "attribute", "types", "keywords"]
+};
+const CREATION_CONDITIONAL_FIELDS = new Set(["power", "counter", "attribute", "types", "keywords", "copies"]);
+const CREATION_CATEGORY_LABELS = { leader: "Leader", character: "Character", event: "Event", stage: "Stage", token: "Token" };
+const CREATION_COLOR_HEX = {
+  red: "#d94c4c", green: "#35d07f", blue: "#3b8eea", purple: "#8b65df", black: "#2b2e35", yellow: "#e6c84a"
+};
+
+function creationFieldHasValue(field) {
+  switch (field) {
+    case "power": return Boolean(el.creationPower && el.creationPower.value.trim() !== "");
+    case "counter": return Boolean(el.creationCounter && el.creationCounter.value !== "");
+    case "attribute": return getCreationAttributes() !== "";
+    case "types": return creationTypeList().length > 0;
+    case "keywords": return Boolean(el.creationKeywords && el.creationKeywords.value !== "");
+    case "copies": return Boolean(el.creationCopyLimit && el.creationCopyLimit.value !== String(DEFAULT_COPY_LIMIT));
+    default: return false;
+  }
+}
+
+function creationFieldVisible(field, category) {
+  if (!CREATION_CONDITIONAL_FIELDS.has(field) || !category) return true;
+  return (CREATION_APPLICABLE_FIELDS[category] || []).includes(field) || creationFieldHasValue(field);
+}
+
+// ── Types as tags ───────────────────────────────────────
+function creationTypeList() {
+  return String(el.creationTypes ? el.creationTypes.value : "")
+    .split(/[\/,]/).map(part => part.trim()).filter(Boolean);
+}
+
+function renderCreationTypeTags() {
+  if (!el.creationTypeTags) return;
+  el.creationTypeTags.innerHTML = creationTypeList().map(type =>
+    `<span class="cc-tag">${escapeHtml(type)}<button type="button" class="cc-tag-x" data-remove-type="${escapeAttr(type)}" aria-label="Remove ${escapeAttr(type)}">×</button></span>`
+  ).join("");
+}
+
+function setCreationTypeList(list) {
+  const unique = [];
+  list.forEach(type => {
+    if (type && !unique.some(other => other.toLowerCase() === type.toLowerCase())) unique.push(type);
+  });
+  if (el.creationTypes) el.creationTypes.value = unique.join("/");
+  renderCreationTypeTags();
+}
+
+function commitCreationTypeInput() {
+  const input = el.creationTypeInput;
+  if (!input) return;
+  const parts = input.value.split(/[\/,]/).map(part => part.trim()).filter(Boolean);
+  input.value = "";
+  if (!parts.length) return;
+  setCreationTypeList([...creationTypeList(), ...parts]);
+  onCreationFieldChanged();
+}
+
+// Offer the types other cards already use, so spellings stay consistent.
+function refreshCreationTypeSuggestions() {
+  if (!el.creationTypeList) return;
+  const seen = new Map();
+  (state.cards || []).forEach(card => {
+    String(card && card.type || "").split(/[\/,]/).forEach(part => {
+      const type = part.trim();
+      if (type && !seen.has(type.toLowerCase())) seen.set(type.toLowerCase(), type);
+    });
+  });
+  el.creationTypeList.innerHTML = [...seen.values()].sort((a, b) => a.localeCompare(b)).slice(0, 500)
+    .map(type => `<option value="${escapeAttr(type)}"></option>`).join("");
+}
+
+// ── Syncing the screen with the form ────────────────────
+function creationHasImage() {
+  return Boolean(
+    (el.creationImageUrl && el.creationImageUrl.value.trim())
+    || (el.creationImage && el.creationImage.files && el.creationImage.files[0])
+    || state.creationImageData
+  );
+}
+
+function creationBasicComplete() {
+  return Boolean(
+    creationHasImage()
+    && el.creationName.value.trim()
+    && el.creationCardNumber.value.trim()
+    && el.creationCategory.value
+    && csvValues(el.creationColors.value).length
+    && el.creationCost.value !== ""
+  );
+}
+
+function renderCreationSummary() {
+  const host = el.creationSummary;
+  if (!host) return;
+  const category = el.creationCategory.value;
+  const visible = field => creationFieldVisible(field, category);
+  const name = el.creationName.value.trim();
+  const number = el.creationCardNumber.value.trim();
+  const colors = csvValues(el.creationColors.value).map(color => color.toLowerCase());
+  const pills = [];
+
+  if (category) pills.push(`<span class="cc-pill cc-pill-strong">${escapeHtml(CREATION_CATEGORY_LABELS[category] || category)}</span>`);
+  if (colors.length) {
+    const label = colors.length > 2 ? "Rainbow" : colors.map(c => c.charAt(0).toUpperCase() + c.slice(1)).join(" / ");
+    pills.push(`<span class="cc-pill">${colors.map(c => `<i class="cc-dot" style="background:${CREATION_COLOR_HEX[c] || "#888"}"></i>`).join("")}${escapeHtml(label)}</span>`);
+  }
+  if (el.creationCost.value !== "") pills.push(`<span class="cc-pill">${category === "leader" ? "Life" : "Cost"} <b>${escapeHtml(el.creationCost.value)}</b></span>`);
+  if (visible("power") && el.creationPower.value.trim() !== "") pills.push(`<span class="cc-pill">Power <b>${Number(el.creationPower.value).toLocaleString()}</b></span>`);
+  if (visible("counter") && el.creationCounter.value !== "") pills.push(`<span class="cc-pill">Counter <b>${el.creationCounter.value === "0" ? "0" : `+${escapeHtml(el.creationCounter.value)}`}</b></span>`);
+  if (el.creationRarity.value) pills.push(`<span class="cc-pill">Rarity <b>${escapeHtml(el.creationRarity.value)}</b></span>`);
+  if (visible("copies") && el.creationCopyLimit.value !== String(DEFAULT_COPY_LIMIT)) {
+    pills.push(`<span class="cc-pill">Max <b>${el.creationCopyLimit.value === "0" ? "∞" : escapeHtml(el.creationCopyLimit.value)}</b></span>`);
+  }
+  if (visible("keywords") && el.creationKeywords.value) pills.push(`<span class="cc-pill">${escapeHtml(csvValues(el.creationKeywords.value).join(" / "))}</span>`);
+  if (visible("attribute")) {
+    getCreationAttributes().split(",").map(a => a.trim()).filter(Boolean).forEach(attr => {
+      pills.push(`<span class="cc-pill cc-pill-attr">${attributeIconSvg(attr)}${escapeHtml(attr)}</span>`);
+    });
+  }
+  creationTypeList().forEach(type => pills.push(`<span class="cc-pill cc-pill-type">${escapeHtml(type)}</span>`));
+
+  const effect = (el.creationEffectText ? el.creationEffectText.value.trim() : "");
+  host.innerHTML = `
+    <div class="cc-summary-head"><strong>${escapeHtml(name || "Untitled card")}</strong><span>${escapeHtml(number)}</span></div>
+    <div class="cc-pills">${pills.join("") || `<span class="cc-summary-empty">Fill in the form and it shows up here.</span>`}</div>
+    ${effect ? `<p class="cc-summary-effect">${escapeHtml(effect.length > 220 ? `${effect.slice(0, 217)}…` : effect)}</p>` : ""}`;
+}
+
+function syncCreationUi() {
+  const panel = el.cardCreationPanel;
+  if (!panel || !el.creationCategory) return;
+  const category = el.creationCategory.value;
+
+  if (el.creationCategorySeg) {
+    el.creationCategorySeg.querySelectorAll("[data-category]").forEach(button => {
+      const on = button.dataset.category === category;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-checked", on ? "true" : "false");
+    });
+  }
+
+  panel.querySelectorAll("[data-field]").forEach(box => {
+    box.hidden = !creationFieldVisible(box.dataset.field, category);
+  });
+
+  if (el.creationCostLabel) el.creationCostLabel.textContent = category === "leader" ? "Life" : "Cost";
+  const placeholderOption = el.creationCost && el.creationCost.querySelector("option[value='']");
+  if (placeholderOption) placeholderOption.textContent = category === "leader" ? "Choose life…" : "Choose cost…";
+  if (el.creationDetailsHint) {
+    el.creationDetailsHint.textContent = category ? `— showing what a ${CREATION_CATEGORY_LABELS[category] || category} uses` : "";
+  }
+
+  renderCreationTypeTags();
+
+  const editing = Boolean(state.editingCardId);
+  if (el.creationTitle) el.creationTitle.textContent = editing ? "Edit Card" : "Create Card";
+  if (el.creationSubtitle) {
+    el.creationSubtitle.textContent = editing
+      ? `Editing “${el.creationName.value.trim() || state.editingCardId}” — changes only apply when you save.`
+      : "Fill in the basics, then add details and effects.";
+  }
+  if (el.creationSaveBtn) el.creationSaveBtn.textContent = editing ? "Save Changes" : "Save Card";
+  if (el.creationBasicDone) el.creationBasicDone.hidden = !creationBasicComplete();
+
+  renderCreationSummary();
+}
+
+function showCreationTab(name) {
+  const panel = el.cardCreationPanel;
+  if (!panel) return;
+  const wide = window.matchMedia("(min-width: 1100px)").matches;
+  let tab = ["basic", "details", "effects", "preview"].includes(name) ? name : "basic";
+  if (wide && tab === "preview") tab = "basic";     // the preview is already beside the form
+  panel.dataset.tab = tab;
+  if (el.creationTabs) {
+    el.creationTabs.querySelectorAll("[data-cc-tab]").forEach(button => {
+      const on = button.dataset.ccTab === tab;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
+  const body = panel.querySelector(".cc-body");
+  if (body) body.scrollTop = 0;
+}
+
+// ── Drafts: an unfinished NEW card is kept until it's saved or discarded ─
+const CREATION_DRAFT_KEY = "custom-cards-creator-draft-v1";
+let creationDraftTimer = null;
+
+function creationDraftSnapshot() {
+  const imageUrl = el.creationImageUrl ? el.creationImageUrl.value.trim() : "";
+  return {
+    imageUrl: /^data:/i.test(imageUrl) ? "" : imageUrl,
+    hadUpload: Boolean(el.creationImage && el.creationImage.files && el.creationImage.files[0]),
+    number: el.creationCardNumber.value.trim(),
+    name: el.creationName.value.trim(),
+    category: el.creationCategory.value,
+    collection: el.creationCollection ? el.creationCollection.value : "",
+    colors: el.creationColors.value,
+    cost: el.creationCost.value,
+    power: el.creationPower.value,
+    counter: el.creationCounter.value,
+    attribute: getCreationAttributes(),
+    types: el.creationTypes.value,
+    rarity: el.creationRarity.value,
+    copyLimit: el.creationCopyLimit ? el.creationCopyLimit.value : "",
+    keywords: el.creationKeywords.value,
+    effect: el.creationEffectText ? el.creationEffectText.value : "",
+    altArts: el.creationAltArtList
+      ? [...el.creationAltArtList.querySelectorAll(".alt-art-url")].map(input => input.value.trim()).filter(Boolean)
+      : []
+  };
+}
+
+// The auto-filled number and the default collection/copies don't count as "work".
+function isMeaningfulCreationDraft(draft) {
+  return Boolean(draft && (
+    draft.imageUrl || draft.hadUpload || draft.name || draft.category || draft.colors || draft.cost !== ""
+    || draft.power || draft.counter || draft.attribute || draft.types || draft.rarity || draft.keywords
+    || String(draft.effect || "").trim() || (draft.altArts && draft.altArts.length)
+  ));
+}
+
+function readCreationDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(CREATION_DRAFT_KEY) || "null");
+    return isMeaningfulCreationDraft(draft) ? draft : null;
+  } catch { return null; }
+}
+
+function clearCreationDraft() {
+  clearTimeout(creationDraftTimer);
+  try { localStorage.removeItem(CREATION_DRAFT_KEY); } catch { /* storage unavailable */ }
+  if (el.creationDraftBanner) el.creationDraftBanner.hidden = true;
+}
+
+function saveCreationDraftNow() {
+  if (state.editingCardId || !el.cardCreationPanel || el.cardCreationPanel.hidden) return;
+  try {
+    const draft = creationDraftSnapshot();
+    if (!isMeaningfulCreationDraft(draft)) { localStorage.removeItem(CREATION_DRAFT_KEY); return; }
+    draft.savedAt = Date.now();
+    localStorage.setItem(CREATION_DRAFT_KEY, JSON.stringify(draft));
+    if (el.creationStatus && /^(Ready|Draft saved)/.test(el.creationStatus.textContent)) {
+      el.creationStatus.textContent = "Draft saved automatically";
+    }
+  } catch { /* storage full or unavailable - the draft just isn't kept */ }
+}
+
+function scheduleCreationDraftSave() {
+  if (state.editingCardId) return;
+  clearTimeout(creationDraftTimer);
+  creationDraftTimer = setTimeout(saveCreationDraftNow, 700);
+}
+
+function onCreationFieldChanged() {
+  syncCreationUi();
+  scheduleCreationDraftSave();
+}
+
+function creationTimeAgo(ms) {
+  const minutes = Math.max(0, Math.round((Date.now() - Number(ms || 0)) / 60000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} days ago`;
+}
+
+function updateCreationDraftBanner() {
+  const banner = el.creationDraftBanner;
+  if (!banner) return;
+  const draft = readCreationDraft();
+  if (!draft || state.editingCardId || isMeaningfulCreationDraft(creationDraftSnapshot())) {
+    banner.hidden = true;
+    return;
+  }
+  if (el.creationDraftText) {
+    el.creationDraftText.textContent = `📝 You have an unfinished card${draft.name ? `: “${draft.name}”` : ""} (saved ${creationTimeAgo(draft.savedAt)}).${draft.hadUpload ? " Its uploaded image wasn't kept — add it again." : ""} Continue editing it?`;
+  }
+  banner.hidden = false;
+}
+
+function restoreCreationDraft() {
+  const draft = readCreationDraft();
+  if (!draft) { updateCreationDraftBanner(); return; }
+  clearCreationForm(true);
+
+  // Keep the draft's card number only if nothing has taken it since (saving would
+  // otherwise overwrite that card).
+  if (draft.number) {
+    const collection = normalizeCollectionSlug(draft.collection || COLLECTION_DEFAULT);
+    const taken = (state.cards || []).some(card =>
+      String(card.cardNumber || card.id || "").toLowerCase() === draft.number.toLowerCase()
+      && normalizeCollectionSlug(card.collection || COLLECTION_DEFAULT) === collection);
+    if (!taken) el.creationCardNumber.value = draft.number;
+  }
+  el.creationName.value = draft.name || "";
+  if (draft.collection && el.creationCollection) el.creationCollection.value = draft.collection;
+  setSelectValueWithFallback(el.creationCategory, draft.category || "");
+  setSelectValueWithFallback(el.creationColors, draft.colors || "");
+  setSelectValueWithFallback(el.creationCost, draft.cost || "");
+  el.creationPower.value = draft.power || "";
+  setSelectValueWithFallback(el.creationCounter, draft.counter || "");
+  setCreationAttributes(draft.attribute || "");
+  el.creationTypes.value = draft.types || "";
+  setSelectValueWithFallback(el.creationRarity, draft.rarity || "");
+  if (el.creationCopyLimit && draft.copyLimit !== "" && draft.copyLimit != null) el.creationCopyLimit.value = String(draft.copyLimit);
+  setSelectValueWithFallback(el.creationKeywords, draft.keywords || "");
+  if (el.creationEffectText) el.creationEffectText.value = draft.effect || "";
+  clearAltArtRows();
+  (draft.altArts || []).forEach(url => {
+    addAltArtRow();
+    const rows = el.creationAltArtList.querySelectorAll(".alt-art-row");
+    const input = rows[rows.length - 1] && rows[rows.length - 1].querySelector(".alt-art-url");
+    if (input) input.value = url;
+  });
+  if (draft.imageUrl && el.creationImageUrl) {
+    el.creationImageUrl.value = draft.imageUrl;
+    previewCreationImageUrl({ scan: false });
+  }
+  if (el.creationDraftBanner) el.creationDraftBanner.hidden = true;
+  syncCreationUi();
+  if (el.creationStatus) el.creationStatus.textContent = "Draft restored";
+}
+
+// ── Opening / closing the creator ───────────────────────
+function onCreationPanelOpened() {
+  initializeCardCreation();
+  preselectCreationCollection();
+  refreshCreationTypeSuggestions();
+  syncCreationUi();
+  showCreationTab(el.cardCreationPanel ? el.cardCreationPanel.dataset.tab : "basic");
+  updateCreationDraftBanner();
+}
+
+function closeCardCreationPanel({ reset = false } = {}) {
+  if (reset) clearCreationForm(true);
+  if (el.cardCreationPanel) el.cardCreationPanel.hidden = true;
+  // Panel closed but still in the Deck Builder view - restore its tab highlight.
+  el.navTabs.forEach(tab => tab.classList.toggle("active", tab.dataset.view === "builder"));
+}
+
+function cancelCardCreation() {
+  const working = isMeaningfulCreationDraft(creationDraftSnapshot());
+  if (working && !window.confirm(state.editingCardId
+    ? "Discard your changes to this card?"
+    : "Discard this card? What you've filled in so far will be lost.")) return;
+  clearCreationDraft();
+  closeCardCreationPanel({ reset: true });
+}
+
+function confirmClearCreationForm() {
+  if (isMeaningfulCreationDraft(creationDraftSnapshot())
+    && !window.confirm("Clear the whole form? Everything you've entered will be lost.")) return;
+  clearCreationDraft();
+  clearCreationForm(true);
+}
+
+function bindCreationUi() {
+  buildCreationAttributeChips();
+  renderCreationTypeTags();
+
+  el.creationTabs?.addEventListener("click", event => {
+    const button = event.target.closest("[data-cc-tab]");
+    if (button) showCreationTab(button.dataset.ccTab);
+  });
+  window.matchMedia("(min-width: 1100px)").addEventListener("change", () => {
+    if (el.cardCreationPanel) showCreationTab(el.cardCreationPanel.dataset.tab);
+  });
+
+  // Card type buttons drive the real <select> (which the scanner and editor also set).
+  el.creationCategorySeg?.addEventListener("click", event => {
+    const button = event.target.closest("[data-category]");
+    if (!button || !el.creationCategory) return;
+    el.creationCategory.value = button.dataset.category;
+    el.creationCategory.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
+  // Any edit anywhere in the creator refreshes the screen and the auto-saved draft.
+  ["input", "change"].forEach(type => {
+    el.cardCreationPanel?.addEventListener(type, event => {
+      if (event.target === el.creationTypeInput) return;   // a half-typed type isn't a field yet
+      onCreationFieldChanged();
+    });
+  });
+
+  // Types
+  el.creationTypeInput?.addEventListener("keydown", event => {
+    if (event.key === "Enter" || event.key === ",") {
+      event.preventDefault();      // Enter must not submit the whole card
+      commitCreationTypeInput();
+    } else if (event.key === "Backspace" && !el.creationTypeInput.value) {
+      const list = creationTypeList();
+      if (list.length) { list.pop(); setCreationTypeList(list); onCreationFieldChanged(); }
+    }
+  });
+  el.creationTypeInput?.addEventListener("input", event => {
+    if (/[\/,]$/.test(el.creationTypeInput.value) || event.inputType === "insertReplacementText") commitCreationTypeInput();
+  });
+  el.creationTypeInput?.addEventListener("blur", commitCreationTypeInput);
+  el.creationTypeTags?.addEventListener("click", event => {
+    const button = event.target.closest("[data-remove-type]");
+    if (!button) return;
+    setCreationTypeList(creationTypeList().filter(type => type !== button.dataset.removeType));
+    onCreationFieldChanged();
+  });
+  el.creationTypeBox?.addEventListener("click", event => {
+    if (event.target === el.creationTypeBox) el.creationTypeInput?.focus();
+  });
+
+  // Quick "add an effect line" buttons.
+  el.creationQuickEffects?.addEventListener("click", event => {
+    const button = event.target.closest("[data-effect-line]");
+    const area = el.creationEffectText;
+    if (!button || !area) return;
+    const needsBreak = area.value && !area.value.endsWith("\n");
+    area.value += (needsBreak ? "\n" : "") + button.dataset.effectLine;
+    area.focus();
+    area.setSelectionRange(area.value.length, area.value.length);
+    onCreationFieldChanged();
+  });
+
+  // Live preview while a link is being pasted/typed (scanning waits for "change").
+  let linkPreviewTimer = null;
+  el.creationImageUrl?.addEventListener("input", () => {
+    clearTimeout(linkPreviewTimer);
+    linkPreviewTimer = setTimeout(() => {
+      if (el.creationImageUrl.value.trim()) previewCreationImageUrl({ scan: false });
+    }, 450);
+  });
+
+  el.closeCardCreation?.addEventListener("click", () => closeCardCreationPanel({ reset: Boolean(state.editingCardId) }));
+  el.creationCancel?.addEventListener("click", cancelCardCreation);
+  el.clearCreationForm?.addEventListener("click", confirmClearCreationForm);
+  el.creationDraftContinue?.addEventListener("click", restoreCreationDraft);
+  el.creationDraftDiscard?.addEventListener("click", clearCreationDraft);
+
+  syncCreationUi();
+}
+
 function creationCardFromForm(imageDataUrl, altArts = []) {
   const cardNumber = el.creationCardNumber.value.trim() || nextImportedCardNumber();
   const category = normalizeCategory(el.creationCategory.value);
@@ -3661,51 +4176,76 @@ function creationCardFromForm(imageDataUrl, altArts = []) {
   };
 }
 
+let creationSaving = false;
+
+function setCreationSaving(saving) {
+  creationSaving = saving;
+  [el.creationSaveBtn, el.creationSaveAnother].forEach(button => { if (button) button.disabled = saving; });
+  if (saving && el.creationStatus) el.creationStatus.textContent = "Saving…";
+}
+
 async function saveCreatedCard(event) {
   event.preventDefault();
+  if (creationSaving) return;
+  // "Save Card" saves and closes the creator; "Save & Create Another" saves and
+  // starts a fresh card.
+  const mode = event.submitter && event.submitter.dataset && event.submitter.dataset.saveMode === "another" ? "another" : "close";
+  setCreationSaving(true);
+  try {
+    await saveCreatedCardInner(mode);
+  } finally {
+    setCreationSaving(false);
+    if (el.creationStatus && el.creationStatus.textContent === "Saving…") {
+      el.creationStatus.textContent = state.editingCardId ? `Editing ${el.creationName.value.trim()}` : "Ready";
+    }
+  }
+}
 
+async function saveCreatedCardInner(mode) {
   // Adding/altering a card publishes to the shared library, so it needs an
   // account. Guests are prompted to sign in instead.
   if (!window.ccAccount || !window.ccAccount.requireAccount("You need an account to create or edit cards.")) {
     return;
   }
 
+  // Everything required lives on the Basic Info tab: jump there and point at the gap.
+  const missing = (message, field) => {
+    toast(message);
+    showCreationTab("basic");
+    const target = field === "category" ? el.creationCategorySeg && el.creationCategorySeg.querySelector("button") : field;
+    if (target && target.focus) target.focus();
+  };
+
   const file = el.creationImage.files?.[0];
   const imageUrl = el.creationImageUrl?.value.trim() || "";
 
   if (!imageUrl && !file && !state.creationImageData) {
-    toast("Provide an image URL or upload a card image first");
-    return;
+    return missing("Provide an image URL or upload a card image first", el.creationImageUrl);
   }
 
   if (!el.creationName.value.trim()) {
-    toast("Name is required");
-    return;
+    return missing("Name is required", el.creationName);
   }
 
   // Set / card number is required.
   if (!el.creationCardNumber.value.trim()) {
-    toast("Set / card number is required (e.g. JJBA-001)");
-    return;
+    return missing("Set / card number is required (e.g. JJBA-001)", el.creationCardNumber);
   }
 
-  // Card type must be chosen (the dropdown starts on a blank placeholder).
+  // Card type must be chosen (the picker starts with nothing selected).
   if (!el.creationCategory.value) {
-    toast("Choose a card type");
-    return;
+    return missing("Choose a card type", "category");
   }
 
   // A colour is required (there's no "colorless" any more) - a card with no
   // colour would be hidden the moment a leader is picked.
   if (!csvValues(el.creationColors.value).length) {
-    toast("Choose a color for the card");
-    return;
+    return missing("Choose a color for the card", el.creationColors);
   }
 
   // Cost (or Life, for leaders) must be chosen.
   if (el.creationCost.value === "") {
-    toast(el.creationCategory.value === "leader" ? "Choose a life value" : "Choose a cost");
-    return;
+    return missing(el.creationCategory.value === "leader" ? "Choose a life value" : "Choose a cost", el.creationCost);
   }
 
   // Discord attachment links (media.discordapp.net / cdn.discordapp.com) carry a
@@ -3789,7 +4329,14 @@ async function saveCreatedCard(event) {
   // overwrite this card. (That's the "new card replaces the last one" bug.)
   toast(`${card.name} saved`);
   await loadCardPool();
+  clearCreationDraft();
   clearCreationForm(true);
+  if (mode === "close") {
+    closeCardCreationPanel();
+  } else {
+    // Ready for the next card.
+    if (el.creationImageUrl) el.creationImageUrl.focus();
+  }
 }
 
 function clearCreationForm(resetNumber = true) {
@@ -3797,6 +4344,10 @@ function clearCreationForm(resetNumber = true) {
   state.editingCardId = "";
   state.creationImageData = "";
   if (el.creationImageUrl) el.creationImageUrl.value = "";
+  // Hidden inputs aren't touched by reset().
+  if (el.creationTypes) el.creationTypes.value = "";
+  if (el.creationTypeInput) el.creationTypeInput.value = "";
+  if (el.creationFileName) { el.creationFileName.hidden = true; el.creationFileName.textContent = ""; }
   if (resetNumber && el.creationCardNumber) el.creationCardNumber.value = nextImportedCardNumber();
   if (el.creationImagePreview) el.creationImagePreview.innerHTML = `<span>No image yet</span>`;
   if (el.creationStatus) el.creationStatus.textContent = "Ready";
@@ -3804,6 +4355,8 @@ function clearCreationForm(resetNumber = true) {
   clearAltArtRows();
   // Keep filing new cards into whatever collection you're browsing.
   preselectCreationCollection();
+  syncCreationUi();
+  showCreationTab("basic");
 }
 
 // Default the creation form's Collection dropdown to the collection currently
@@ -3814,14 +4367,16 @@ function preselectCreationCollection() {
   el.creationCollection.value = state.activeCollection;
 }
 
-function previewCreationImageUrl() {
+function previewCreationImageUrl(options = {}) {
   const url = el.creationImageUrl?.value.trim();
   if (!url || !el.creationImagePreview) return;
   state.creationImageData = url;
   el.creationImagePreview.innerHTML = `<img src="${escapeAttr(url)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'Could not load image URL'}))">`;
+  syncCreationUi();
   // OCR works on URL images too when the host allows cross-origin reads;
-  // runCardOcr degrades gracefully when it doesn't.
-  runCardOcr(url);
+  // runCardOcr degrades gracefully when it doesn't. (Typing a link only previews it;
+  // the scan waits for the box to be committed.)
+  if (options.scan !== false) runCardOcr(url);
 }
 
 async function previewCreationImage() {
@@ -3830,6 +4385,11 @@ async function previewCreationImage() {
   const imageDataUrl = await readFileAsDataUrl(file);
   state.creationImageData = imageDataUrl;
   el.creationImagePreview.innerHTML = `<img src="${escapeAttr(imageDataUrl)}" alt="">`;
+  if (el.creationFileName) {
+    el.creationFileName.textContent = `📎 ${file.name}`;
+    el.creationFileName.hidden = false;
+  }
+  syncCreationUi();
   // OCR: try to auto-fill fields from the uploaded image (assist only).
   runCardOcr(imageDataUrl);
 }
@@ -4246,6 +4806,7 @@ async function runCardOcr(source) {
       }
     }
 
+    onCreationFieldChanged();
     if (el.creationStatus) {
       el.creationStatus.textContent = filled.length
         ? `Scan complete — read ${filled.join(", ")}. Please review.`
@@ -4662,6 +5223,12 @@ async function openCardForEditing(card) {
   if (el.creationStatus) el.creationStatus.textContent = `Editing ${card.name}`;
   if (el.savedDecksPanel) el.savedDecksPanel.hidden = true;
   if (el.cardCreationPanel) el.cardCreationPanel.hidden = false;
+  clearTimeout(creationDraftTimer);
+  if (el.creationFileName) { el.creationFileName.hidden = true; el.creationFileName.textContent = ""; }
+  refreshCreationTypeSuggestions();
+  syncCreationUi();
+  showCreationTab("basic");
+  updateCreationDraftBanner();
 }
 
 async function clearImportedCards() {
@@ -8857,6 +9424,7 @@ function bindEvents() {
     if (el.cardCreationPanel) el.cardCreationPanel.hidden = false;
     el.navTabs.forEach(tab => tab.classList.remove("active"));
     document.getElementById("navCardCreator").classList.add("active");
+    onCreationPanelOpened();
   });
 
   document.querySelectorAll("[data-open-self]").forEach(button => {
@@ -9280,17 +9848,13 @@ function bindEvents() {
     if (index !== undefined) loadNamedDeck(Number(index));
   });
   el.cardCreationTab?.addEventListener("click", () => {
-    initializeCardCreation();
     el.savedDecksPanel.hidden = true;
     el.cardCreationPanel.hidden = false;
-    // If you're browsing a collection, new cards default into it.
-    preselectCreationCollection();
+    // Also: new cards default into the collection you're browsing, and an
+    // unfinished draft is offered back.
+    onCreationPanelOpened();
   });
-  el.closeCardCreation?.addEventListener("click", () => {
-    el.cardCreationPanel.hidden = true;
-    // Panel closed but still in Deck Builder view - restore its tab highlight.
-    el.navTabs.forEach(tab => tab.classList.toggle("active", tab.dataset.view === "builder"));
-  });
+  // (Back / Cancel / Clear are wired in bindCreationUi.)
 
   // DON!! decks tab
   el.donDeckTab?.addEventListener("click", () => {
@@ -9352,12 +9916,7 @@ function bindEvents() {
       creationOcrToggle.checked = homeOcrToggle.checked;
     });
   }
-  el.clearCreationForm?.addEventListener("click", () => clearCreationForm());
-  el.creationCategory?.addEventListener("change", () => {
-    el.creationCost.placeholder = el.creationCategory.value === "leader"
-      ? "Life total"
-      : "Cost";
-  });
+  bindCreationUi();
   el.startGame?.addEventListener("click", startPractice);
   el.startPracticeTop?.addEventListener("click", startPractice);
   el.endGame?.addEventListener("click", endPractice);

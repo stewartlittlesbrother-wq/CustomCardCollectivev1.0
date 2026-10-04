@@ -25,7 +25,7 @@
   </script>
   <title>Golds Customs</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=draft-mp-18">
+  <link rel="stylesheet" href="styles.css?v=creator-1">
 </head>
 <body>
   <div class="app-shell">
@@ -437,201 +437,280 @@
                 </div>
                 <div id="savedDeckList" class="saved-deck-list"></div>
               </section>
-              <section class="card-creation-panel" id="cardCreationPanel" hidden>
-                <div class="saved-decks-header">
-                  <strong>Card Creation</strong>
-                  <div class="creation-header-actions">
-                    <button type="submit" form="cardCreationForm">Save Card</button>
-                    <button class="red-button" type="button" id="openUntapImport">Import JSON</button>
-                    <button class="ghost" type="button" id="closeCardCreation">Close</button>
+              <section class="card-creation-panel" id="cardCreationPanel" hidden data-tab="basic">
+                <!-- Header: where you are + the two actions you reach for most. -->
+                <header class="cc-header">
+                  <button class="ghost cc-back" type="button" id="closeCardCreation">← Back to Cards</button>
+                  <div class="cc-title">
+                    <h2 id="creationTitle">Create Card</h2>
+                    <p id="creationSubtitle">Fill in the basics, then add details and effects.</p>
                   </div>
+                  <div class="creation-header-actions">
+                    <button class="red-button" type="button" id="openUntapImport">Import JSON</button>
+                    <button type="submit" form="cardCreationForm" id="creationSaveBtn" data-save-mode="close">Save Card</button>
+                  </div>
+                </header>
+
+                <!-- Four sections instead of one long form. On a wide screen the
+                     Preview is always visible beside the form, so its tab only
+                     appears on narrow screens. -->
+                <nav class="cc-tabs" id="creationTabs" role="tablist" aria-label="Card creator sections">
+                  <button type="button" class="cc-tab active" role="tab" data-cc-tab="basic"><b>1</b> Basic Info <i class="cc-tab-done" id="creationBasicDone" hidden>✓</i></button>
+                  <button type="button" class="cc-tab" role="tab" data-cc-tab="details"><b>2</b> Details</button>
+                  <button type="button" class="cc-tab" role="tab" data-cc-tab="effects"><b>3</b> Effects</button>
+                  <button type="button" class="cc-tab cc-tab-preview" role="tab" data-cc-tab="preview"><b>4</b> Preview</button>
+                </nav>
+
+                <!-- Shown when an unfinished card was auto-saved earlier. -->
+                <div class="cc-draft-banner" id="creationDraftBanner" hidden>
+                  <span id="creationDraftText">You have an unfinished card.</span>
+                  <span class="cc-draft-actions">
+                    <button type="button" class="ghost" id="creationDraftContinue">Continue editing</button>
+                    <button type="button" class="ghost" id="creationDraftDiscard">Discard</button>
+                  </span>
                 </div>
 
-                <div class="creation-layout">
-                  <form id="cardCreationForm" class="card-creation-form">
-                    <div class="import-grid">
-                      <label>
-                        Image URL <small style="opacity:.65">(recommended — stores only the link)</small>
-                        <input id="creationImageUrl" type="url" placeholder="https://example.com/card.png">
-                      </label>
-                      <label>
-                        Or upload image <small style="opacity:.65">(scanned locally)</small>
-                        <input id="creationImage" type="file" accept="image/png,image/jpeg,image/webp">
-                      </label>
-                      <label class="ocr-toggle-row" title="Reads cost, name and set number from the image and pre-fills the fields. You can always edit them.">
-                        <input id="creationOcrToggle" type="checkbox">
-                        <span>Auto-scan card images (OCR)</span>
-                      </label>
-                      <div class="alt-arts-block">
-                        <div class="alt-arts-head">
-                          <span>Alt Arts <small style="opacity:.65">(optional — extra images players can cycle through in-game)</small></span>
-                          <button type="button" id="creationAddAltArt" class="ghost">+ Add alt art</button>
+                <div class="cc-body">
+                  <form id="cardCreationForm" class="card-creation-form" novalidate>
+
+                    <!-- ① Basic Info -->
+                    <section class="cc-pane" data-pane="basic">
+                      <div class="cc-card">
+                        <h3 class="cc-section-title">Card image</h3>
+                        <div class="cc-image-row">
+                          <input id="creationImageUrl" type="url" placeholder="Paste an image URL (recommended — stores only the link)">
+                          <label class="cc-upload-btn" title="Upload an image from your device (scanned locally)">
+                            ⬆ Upload
+                            <input id="creationImage" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+                          </label>
                         </div>
-                        <div id="creationAltArtList" class="alt-arts-list"></div>
+                        <div class="cc-file-name" id="creationFileName" hidden></div>
+                        <label class="ocr-toggle-row" title="Reads cost, name and set number from the image and pre-fills the fields. You can always edit them.">
+                          <input id="creationOcrToggle" type="checkbox">
+                          <span>Auto-fill card information from the image (OCR)</span>
+                        </label>
+                        <!-- Scan progress: the reader takes a few seconds per card,
+                             so it reports each field as it goes. -->
+                        <div class="scan-progress" id="scanProgress" hidden>
+                          <div class="scan-progress-bar"><span id="scanProgressFill"></span></div>
+                          <span class="scan-progress-label" id="scanProgressLabel">Preparing…</span>
+                        </div>
                       </div>
-                      <label>
-                        Card #
-                        <input id="creationCardNumber" type="text" placeholder="JJBA-001" required>
-                      </label>
-                      <label>
-                        Name
-                        <input id="creationName" type="text" placeholder="Character name" required>
-                      </label>
-                      <label>
-                        Card Type
-                        <select id="creationCategory" required>
-                          <option value="" disabled selected hidden>Choose card type…</option>
-                          <option value="leader">Leader</option>
-                          <option value="character">Character</option>
-                          <option value="event">Event</option>
-                          <option value="stage">Stage</option>
-                          <option value="token">Token</option>
-                        </select>
-                      </label>
-                      <label>
-                        Collection
-                        <select id="creationCollection"></select>
-                      </label>
-                      <label>
-                        Colors
-                        <select id="creationColors">
-                          <option value="" disabled selected hidden>Choose a color…</option>
-                          <option value="red, green, blue, purple, black, yellow">🌈 Rainbow (all colors)</option>
-                          <option value="red">Red</option>
-                          <option value="green">Green</option>
-                          <option value="blue">Blue</option>
-                          <option value="purple">Purple</option>
-                          <option value="black">Black</option>
-                          <option value="yellow">Yellow</option>
-                          <option value="red, green">Red / Green</option>
-                          <option value="red, blue">Red / Blue</option>
-                          <option value="red, purple">Red / Purple</option>
-                          <option value="red, black">Red / Black</option>
-                          <option value="red, yellow">Red / Yellow</option>
-                          <option value="green, blue">Green / Blue</option>
-                          <option value="green, purple">Green / Purple</option>
-                          <option value="green, black">Green / Black</option>
-                          <option value="green, yellow">Green / Yellow</option>
-                          <option value="blue, purple">Blue / Purple</option>
-                          <option value="blue, black">Blue / Black</option>
-                          <option value="blue, yellow">Blue / Yellow</option>
-                          <option value="purple, black">Purple / Black</option>
-                          <option value="purple, yellow">Purple / Yellow</option>
-                          <option value="black, yellow">Black / Yellow</option>
-                        </select>
-                      </label>
-                      <label>
-                        Cost / Life
-                        <select id="creationCost" required>
-                          <option value="" disabled selected hidden>Choose cost / life…</option>
-                          <option value="0">0</option>
-                          <option value="1">1</option>
-                          <option value="2">2</option>
-                          <option value="3">3</option>
-                          <option value="4">4</option>
-                          <option value="5">5</option>
-                          <option value="6">6</option>
-                          <option value="7">7</option>
-                          <option value="8">8</option>
-                          <option value="9">9</option>
-                          <option value="10">10</option>
-                        </select>
-                      </label>
-                      <label>
-                        Power
-                        <input id="creationPower" type="number" min="0" step="1000" placeholder="5000">
-                      </label>
-                      <label>
-                        Counter
-                        <select id="creationCounter">
-                          <option value="">None</option>
-                          <option value="0">0</option>
-                          <option value="1000">+1000</option>
-                          <option value="2000">+2000</option>
-                        </select>
-                      </label>
-                      <label class="attr-multi-label">
-                        Attribute <small style="opacity:.6">(pick one or more)</small>
-                        <div id="creationAttribute" class="attr-multi">
-                          <label><input type="checkbox" value="Strike"><span>Strike</span></label>
-                          <label><input type="checkbox" value="Slash"><span>Slash</span></label>
-                          <label><input type="checkbox" value="Ranged"><span>Ranged</span></label>
-                          <label><input type="checkbox" value="Special"><span>Special</span></label>
-                          <label><input type="checkbox" value="Wisdom"><span>Wisdom</span></label>
-                          <label><input type="checkbox" value="???"><span>???</span></label>
+
+                      <div class="cc-card">
+                        <h3 class="cc-section-title">Card info</h3>
+                        <div class="cc-grid">
+                          <label class="cc-field cc-span-2">
+                            <span>Name</span>
+                            <input id="creationName" type="text" placeholder="Character name" required>
+                          </label>
+                          <label class="cc-field">
+                            <span>Card #</span>
+                            <input id="creationCardNumber" type="text" placeholder="JJBA-001" required>
+                          </label>
+
+                          <div class="cc-field cc-span-3">
+                            <span>Card type</span>
+                            <div class="cc-segmented" id="creationCategorySeg" role="radiogroup" aria-label="Card type">
+                              <button type="button" role="radio" data-category="leader">Leader</button>
+                              <button type="button" role="radio" data-category="character">Character</button>
+                              <button type="button" role="radio" data-category="event">Event</button>
+                              <button type="button" role="radio" data-category="stage">Stage</button>
+                              <button type="button" role="radio" data-category="token">Token</button>
+                            </div>
+                            <!-- The real value lives here (the scanner and the editor set it). -->
+                            <select id="creationCategory" class="cc-sr-only" tabindex="-1" aria-hidden="true" required>
+                              <option value="" disabled selected hidden>Choose card type…</option>
+                              <option value="leader">Leader</option>
+                              <option value="character">Character</option>
+                              <option value="event">Event</option>
+                              <option value="stage">Stage</option>
+                              <option value="token">Token</option>
+                            </select>
+                          </div>
+
+                          <label class="cc-field cc-span-2">
+                            <span>Collection</span>
+                            <select id="creationCollection"></select>
+                          </label>
+                          <label class="cc-field">
+                            <span>Color</span>
+                            <select id="creationColors">
+                              <option value="" disabled selected hidden>Choose a color…</option>
+                              <option value="red, green, blue, purple, black, yellow">🌈 Rainbow (all colors)</option>
+                              <option value="red">Red</option>
+                              <option value="green">Green</option>
+                              <option value="blue">Blue</option>
+                              <option value="purple">Purple</option>
+                              <option value="black">Black</option>
+                              <option value="yellow">Yellow</option>
+                              <option value="red, green">Red / Green</option>
+                              <option value="red, blue">Red / Blue</option>
+                              <option value="red, purple">Red / Purple</option>
+                              <option value="red, black">Red / Black</option>
+                              <option value="red, yellow">Red / Yellow</option>
+                              <option value="green, blue">Green / Blue</option>
+                              <option value="green, purple">Green / Purple</option>
+                              <option value="green, black">Green / Black</option>
+                              <option value="green, yellow">Green / Yellow</option>
+                              <option value="blue, purple">Blue / Purple</option>
+                              <option value="blue, black">Blue / Black</option>
+                              <option value="blue, yellow">Blue / Yellow</option>
+                              <option value="purple, black">Purple / Black</option>
+                              <option value="purple, yellow">Purple / Yellow</option>
+                              <option value="black, yellow">Black / Yellow</option>
+                            </select>
+                          </label>
+
+                          <label class="cc-field">
+                            <span id="creationCostLabel">Cost</span>
+                            <select id="creationCost" required>
+                              <option value="" disabled selected hidden>Choose cost / life…</option>
+                              <option value="0">0</option>
+                              <option value="1">1</option>
+                              <option value="2">2</option>
+                              <option value="3">3</option>
+                              <option value="4">4</option>
+                              <option value="5">5</option>
+                              <option value="6">6</option>
+                              <option value="7">7</option>
+                              <option value="8">8</option>
+                              <option value="9">9</option>
+                              <option value="10">10</option>
+                            </select>
+                          </label>
+                          <label class="cc-field" data-field="power">
+                            <span>Power</span>
+                            <input id="creationPower" type="number" min="0" step="1000" placeholder="5000">
+                          </label>
                         </div>
-                      </label>
-                      <label>
-                        Types
-                        <input id="creationTypes" type="text" placeholder="Hamon/Bizarre">
-                      </label>
-                      <label>
-                        Rarity
-                        <select id="creationRarity">
-                          <option value="">None</option>
-                          <option value="C">C</option>
-                          <option value="UC">UC</option>
-                          <option value="R">R</option>
-                          <option value="SR">SR</option>
-                          <option value="SEC">SEC</option>
-                          <option value="L">L</option>
-                          <option value="P">P</option>
-                        </select>
-                      </label>
-                      <label>
-                        Copies allowed
-                        <select id="creationCopyLimit">
-                          <option value="4" selected>4 (standard)</option>
-                          <option value="1">1</option>
-                          <option value="2">2</option>
-                          <option value="3">3</option>
-                          <option value="5">5</option>
-                          <option value="6">6</option>
-                          <option value="8">8</option>
-                          <option value="10">10</option>
-                          <option value="0">Unlimited</option>
-                        </select>
-                      </label>
-                      <label>
-                        Keywords
-                        <select id="creationKeywords">
-                          <option value="">None</option>
-                          <option value="Blocker">Blocker</option>
-                          <option value="Rush">Rush</option>
-                          <option value="Rush:Characters">Rush:Character</option>
-                          <option value="Banish">Banish</option>
-                          <option value="Double Attack">Double Attack</option>
-                          <option value="Unblockable">Unblockable</option>
-                          <option value="Blocker, Rush">Blocker / Rush</option>
-                        </select>
-                      </label>
-                    </div>
+                      </div>
+                    </section>
 
-                    <label class="import-effect-field">
-                      Card Effect Text
-                      <textarea id="creationEffectText" spellcheck="false" placeholder="On Play: Draw 1 card.&#10;Activate: Main Once Per Turn: Rest 1 DON!!: ...&#10;(For reference only - effects not executed in manual mode)"></textarea>
-                    </label>
+                    <!-- ② Details -->
+                    <section class="cc-pane" data-pane="details">
+                      <div class="cc-card">
+                        <h3 class="cc-section-title">Card details <small id="creationDetailsHint"></small></h3>
+                        <div class="cc-grid">
+                          <label class="cc-field" data-field="counter">
+                            <span>Counter</span>
+                            <select id="creationCounter">
+                              <option value="">None</option>
+                              <option value="0">0</option>
+                              <option value="1000">+1000</option>
+                              <option value="2000">+2000</option>
+                            </select>
+                          </label>
+                          <label class="cc-field" data-field="rarity">
+                            <span>Rarity</span>
+                            <select id="creationRarity">
+                              <option value="">None</option>
+                              <option value="C">C</option>
+                              <option value="UC">UC</option>
+                              <option value="R">R</option>
+                              <option value="SR">SR</option>
+                              <option value="SEC">SEC</option>
+                              <option value="L">L</option>
+                              <option value="P">P</option>
+                            </select>
+                          </label>
+                          <label class="cc-field" data-field="copies">
+                            <span>Copies allowed</span>
+                            <select id="creationCopyLimit">
+                              <option value="4" selected>4 (standard)</option>
+                              <option value="1">1</option>
+                              <option value="2">2</option>
+                              <option value="3">3</option>
+                              <option value="5">5</option>
+                              <option value="6">6</option>
+                              <option value="8">8</option>
+                              <option value="10">10</option>
+                              <option value="0">Unlimited</option>
+                            </select>
+                          </label>
+                        </div>
 
-                    <!-- Scan progress: the reader takes a few seconds per card,
-                         so it reports each field as it goes. -->
-                    <div class="scan-progress" id="scanProgress" hidden>
-                      <div class="scan-progress-bar"><span id="scanProgressFill"></span></div>
-                      <span class="scan-progress-label" id="scanProgressLabel">Preparing…</span>
-                    </div>
+                        <div class="cc-field" data-field="attribute">
+                          <span>Attribute <small>(pick one or more)</small></span>
+                          <!-- Filled with the real attribute badges by JS. -->
+                          <div id="creationAttribute" class="attr-multi" role="group" aria-label="Attribute"></div>
+                        </div>
 
-                    <div class="import-actions">
-                      <span id="creationStatus">Ready</span>
-                      <button class="ghost" id="clearCreationForm" type="button">Clear</button>
-                    </div>
+                        <div class="cc-field" data-field="types">
+                          <span>Types <small>(type and press Enter)</small></span>
+                          <div class="cc-tag-box" id="creationTypeBox">
+                            <div class="cc-tags" id="creationTypeTags"></div>
+                            <input id="creationTypeInput" type="text" list="creationTypeList" placeholder="+ Add type" autocomplete="off">
+                          </div>
+                          <datalist id="creationTypeList"></datalist>
+                          <!-- The saved value (A/B/C) - the editor and the draft use it. -->
+                          <input id="creationTypes" type="hidden">
+                        </div>
+                      </div>
+                    </section>
+
+                    <!-- ③ Effects -->
+                    <section class="cc-pane" data-pane="effects">
+                      <div class="cc-card">
+                        <h3 class="cc-section-title">Card effects</h3>
+                        <label class="cc-field" data-field="keywords">
+                          <span>Keywords</span>
+                          <select id="creationKeywords">
+                            <option value="">None</option>
+                            <option value="Blocker">Blocker</option>
+                            <option value="Rush">Rush</option>
+                            <option value="Rush:Characters">Rush:Character</option>
+                            <option value="Banish">Banish</option>
+                            <option value="Double Attack">Double Attack</option>
+                            <option value="Unblockable">Unblockable</option>
+                            <option value="Blocker, Rush">Blocker / Rush</option>
+                          </select>
+                        </label>
+                        <div class="cc-field">
+                          <span>Effect text</span>
+                          <div class="cc-quick" id="creationQuickEffects" aria-label="Add an effect line">
+                            <small>Add:</small>
+                            <button type="button" class="ghost" data-effect-line="On Play: ">On Play</button>
+                            <button type="button" class="ghost" data-effect-line="When Attacking: ">When Attacking</button>
+                            <button type="button" class="ghost" data-effect-line="Activate: Main: ">Activate: Main</button>
+                            <button type="button" class="ghost" data-effect-line="Your Turn: ">Your Turn</button>
+                            <button type="button" class="ghost" data-effect-line="On K.O.: ">On K.O.</button>
+                            <button type="button" class="ghost" data-effect-line="Counter: ">Counter</button>
+                            <button type="button" class="ghost" data-effect-line="Trigger: ">Trigger</button>
+                          </div>
+                          <textarea id="creationEffectText" spellcheck="false" placeholder="On Play: Draw 1 card.&#10;Activate: Main Once Per Turn: Rest 1 DON!!: ...&#10;(For reference only - effects not executed in manual mode)"></textarea>
+                        </div>
+                      </div>
+                    </section>
                   </form>
 
-                  <aside class="creation-preview">
-                    <strong>Image Preview</strong>
-                    <div id="creationImagePreview" class="creation-image-preview">
-                      <span>No image yet</span>
+                  <!-- ④ Preview - sticks beside the form while you scroll -->
+                  <aside class="creation-preview" data-pane="preview">
+                    <div class="cc-card cc-preview-card">
+                      <h3 class="cc-section-title">Live preview</h3>
+                      <div id="creationImagePreview" class="creation-image-preview">
+                        <span>No image yet</span>
+                      </div>
+                      <div id="creationSummary" class="cc-summary"></div>
+                    </div>
+                    <div class="cc-card alt-arts-block">
+                      <div class="alt-arts-head">
+                        <span>Alt arts <small>(optional — extra images players can cycle through in-game)</small></span>
+                        <button type="button" id="creationAddAltArt" class="ghost">+ Add alt art</button>
+                      </div>
+                      <div id="creationAltArtList" class="alt-arts-list"></div>
                     </div>
                   </aside>
                 </div>
+
+                <footer class="cc-footer">
+                  <button class="ghost cc-clear" id="clearCreationForm" type="button">Clear form</button>
+                  <span id="creationStatus" class="cc-status">Ready</span>
+                  <span class="cc-footer-actions">
+                    <button class="ghost" type="button" id="creationCancel">Cancel</button>
+                    <button class="red-button" type="submit" form="cardCreationForm" id="creationSaveAnother" data-save-mode="another">Save &amp; Create Another</button>
+                  </span>
+                </footer>
               </section>
 
               <!-- Custom DON!! decks. Works like the deck builder but for DON!!:
@@ -884,13 +963,13 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=248"></script>
+  <script src="js/version.js?v=250"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=248"></script>
+  <script src="js/auth-ui.js?v=250"></script>
   <script src="js/cards/cardCollections.js?v=draft-1"></script>
   <script src="js/cards/decks.js?v=creation-10"></script>
   <script src="js/manual-play.js?v=manual-28"></script>
-  <script src="app.js?v=creation-127"></script>
+  <script src="app.js?v=creation-128"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).
