@@ -28,7 +28,7 @@
   <!-- Deck Builder new layout: on for everyone unless someone switched back to the classic one
        (decided before first paint so there is no flash). ?deckv2=0 / ?deckv2=1 switch it. -->
   <script>(function(){var on=true;try{var p=new URLSearchParams(location.search).get("deckv2");if(p==="1"||p==="0"){localStorage.setItem("cc_deck_v2",p);var u=new URL(location.href);u.searchParams.delete("deckv2");history.replaceState(null,"",u.pathname+u.search+u.hash);}if(localStorage.getItem("cc_deck_v2")==="0")on=false;}catch(e){}if(on)document.documentElement.classList.add("deck-v2");})();</script>
-  <link rel="stylesheet" href="styles.css?v=creator-1">
+  <link rel="stylesheet" href="styles.css?v=news-1">
   <link rel="stylesheet" href="css/deck-v2.css?v=deckv2-4">
 </head>
 <body>
@@ -131,9 +131,12 @@
           <section class="home-section" aria-labelledby="homeNewTitle">
             <h2 class="home-section-title" id="homeNewTitle">What's new</h2>
             <ul class="home-news">
-              <li><span class="home-news-badge">NEW</span><div><strong>Dual Leader decks</strong><span>Switch on Dual Leader in the Deck Builder, pick two leaders and build from both color pools.</span></div></li>
-              <li><span class="home-news-badge">NEW</span><div><strong>Print your deck</strong><span>Export proxy sheets at true card size as a PDF, with cut lines, and remove any card you don't want.</span></div></li>
-              <li><span class="home-news-badge">NEW</span><div><strong>Draft Battle</strong><span>Create a Draft Battle room: both players open packs, then race to build the best deck.</span></div></li>
+              <li><span class="home-news-badge">NEW</span><div><strong>Tournaments</strong><span>Run or join a bracket: single elimination or Swiss, best of 1, 3 or 5, deck lists, ban lists and password-protected events. Open the Tournaments tab.</span></div></li>
+              <li><span class="home-news-badge">NEW</span><div><strong>Overall UI improvements</strong><span>A cleaner Deck Builder with your deck docked at the bottom and a My decks menu, a redesigned Card Creator with tabs and a live preview, and a fresher home page.</span></div></li>
+              <li><span class="home-news-badge fix">FIXED</span><div><strong>Alt arts in online games</strong><span>Your alt arts now stay on your own cards when you join a game or play again, instead of swapping with your opponent's.</span></div></li>
+              <li><span class="home-news-badge old">EARLIER</span><div><strong>Dual Leader decks</strong><span>Switch on Dual Leader in the Deck Builder, pick two leaders and build from both color pools.</span></div></li>
+              <li><span class="home-news-badge old">EARLIER</span><div><strong>Print your deck</strong><span>Export proxy sheets at true card size as a PDF, with cut lines, and remove any card you don't want.</span></div></li>
+              <li><span class="home-news-badge old">EARLIER</span><div><strong>Draft Battle</strong><span>Create a Draft Battle room: both players open packs, then race to build the best deck.</span></div></li>
             </ul>
           </section>
 
@@ -968,9 +971,9 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=254"></script>
+  <script src="js/version.js?v=255"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=254"></script>
+  <script src="js/auth-ui.js?v=255"></script>
   <script src="js/cards/cardCollections.js?v=draft-1"></script>
   <script src="js/cards/decks.js?v=creation-10"></script>
   <script src="js/manual-play.js?v=manual-28"></script>

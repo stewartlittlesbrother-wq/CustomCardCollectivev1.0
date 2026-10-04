@@ -511,6 +511,9 @@ main {
   font-weight: 900;
   letter-spacing: .12em;
 }
+.home-news-badge.fix { background: #e2b451; }
+.home-news-badge.old { background: var(--surface-3); color: var(--muted); border: 1px solid var(--line); }
+.home-news li:has(.home-news-badge.old) { background: rgba(16, 22, 20, .38); }
 .home-news strong {
   display: block;
   margin-bottom: 3px;
