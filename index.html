@@ -25,7 +25,7 @@
   </script>
   <title>Golds Customs</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=draft-mp-12">
+  <link rel="stylesheet" href="styles.css?v=draft-mp-15">
 </head>
 <body>
   <div class="app-shell">
@@ -55,29 +55,75 @@
 
     <main>
       <section class="view active" id="homeView" data-view-panel="home">
-        <section class="home-launch">
-          <img src="images/basic/custom-sim-logo.svg" alt="">
-          <h1>Golds Customs</h1>
-          <div class="home-launch-actions">
-            <button type="button" data-view="builder">Deck Builder</button>
-            <button type="button" data-view="game">Practice VS Self</button>
-            <button type="button" id="multiplayerButton">Multiplayer</button>
-            <button type="button" id="openPackBtn">Open a Pack</button>
-            <button type="button" id="draftSoloBtn">Draft (Solo)</button>
-          </div>
+        <div class="home-page">
 
-          <div class="home-hidden-stats" aria-hidden="true">
-            <span id="homeLeader">None</span>
-            <span id="homeDeckCount">0</span>
-            <span id="homePoolCount">Loading</span>
-            <span id="leaderTotal">0</span>
-            <span id="characterTotal">0</span>
-            <span id="eventTotal">0</span>
-            <span id="stageTotal">0</span>
-            <button type="button" id="quickBuild"></button>
-            <button type="button" id="clearDeckHome"></button>
-          </div>
-        </section>
+          <!-- Hero: who we are + the library at a glance (numbers filled in by
+               renderHome as the shared library finishes loading). -->
+          <section class="home-launch">
+            <img class="home-logo" src="images/basic/custom-sim-logo.svg" alt="">
+            <p class="home-eyebrow">Custom card simulator</p>
+            <h1>Golds Customs</h1>
+            <p class="home-tagline">Build decks from thousands of community-made cards, then play online or test solo.</p>
+            <ul class="home-stats" aria-label="The card library at a glance">
+              <li><strong id="homeStatCards">…</strong><span>cards</span></li>
+              <li><strong id="homeStatCollections">…</strong><span>collections</span></li>
+              <li><strong id="homeStatLeaders">…</strong><span>leaders</span></li>
+            </ul>
+
+            <!-- The app's code writes to these; they must stay in the page. -->
+            <div class="home-hidden-stats" aria-hidden="true">
+              <span id="homeLeader">None</span>
+              <span id="homeDeckCount">0</span>
+              <span id="homePoolCount">Loading</span>
+              <span id="leaderTotal">0</span>
+              <span id="characterTotal">0</span>
+              <span id="eventTotal">0</span>
+              <span id="stageTotal">0</span>
+              <button type="button" id="quickBuild"></button>
+              <button type="button" id="clearDeckHome"></button>
+            </div>
+          </section>
+
+          <section class="home-section" aria-labelledby="homeModesTitle">
+            <h2 class="home-section-title" id="homeModesTitle">Jump in</h2>
+            <div class="home-launch-actions">
+              <button type="button" id="multiplayerButton" class="home-mode featured">
+                <span class="home-mode-icon" aria-hidden="true">🌐</span>
+                <span class="home-mode-body"><strong>Multiplayer</strong><small>Make a room, share the code, and play a live match — regular or Draft Battle.</small></span>
+              </button>
+              <button type="button" data-view="builder" class="home-mode">
+                <span class="home-mode-icon" aria-hidden="true">🃏</span>
+                <span class="home-mode-body"><strong>Deck Builder</strong><small>Browse every collection, pick your leader (or two) and build your deck.</small></span>
+              </button>
+              <button type="button" data-forward-click="navCardCreator" class="home-mode">
+                <span class="home-mode-icon" aria-hidden="true">✨</span>
+                <span class="home-mode-body"><strong>Card Creator</strong><small>Design your own cards and add them to the shared library for everyone.</small></span>
+              </button>
+              <button type="button" data-view="game" class="home-mode">
+                <span class="home-mode-icon" aria-hidden="true">🎯</span>
+                <span class="home-mode-body"><strong>Practice vs Self</strong><small>Test a deck on the full play board. You control both sides.</small></span>
+              </button>
+              <button type="button" id="openPackBtn" class="home-mode">
+                <span class="home-mode-icon" aria-hidden="true">🎁</span>
+                <span class="home-mode-body"><strong>Open a Pack</strong><small>Rip open booster packs from any collection, animation and all.</small></span>
+              </button>
+              <button type="button" id="draftSoloBtn" class="home-mode">
+                <span class="home-mode-icon" aria-hidden="true">🎴</span>
+                <span class="home-mode-body"><strong>Solo Draft</strong><small>Open 10 packs, then build a 40-card deck from your pulls.</small></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="home-section" aria-labelledby="homeNewTitle">
+            <h2 class="home-section-title" id="homeNewTitle">What's new</h2>
+            <ul class="home-news">
+              <li><span class="home-news-badge">NEW</span><div><strong>Dual Leader decks</strong><span>Switch on Dual Leader in the Deck Builder, pick two leaders and build from both color pools.</span></div></li>
+              <li><span class="home-news-badge">NEW</span><div><strong>Print your deck</strong><span>Export proxy sheets at true card size as a PDF, with cut lines, and remove any card you don't want.</span></div></li>
+              <li><span class="home-news-badge">NEW</span><div><strong>Draft Battle</strong><span>Create a Draft Battle room: both players open packs, then race to build the best deck.</span></div></li>
+            </ul>
+          </section>
+
+        </div>
       </section>
 
       <section class="view" id="settingsView" data-view-panel="settings">
@@ -885,13 +931,13 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=242"></script>
+  <script src="js/version.js?v=243"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=242"></script>
+  <script src="js/auth-ui.js?v=243"></script>
   <script src="js/cards/cardCollections.js?v=draft-1"></script>
   <script src="js/cards/decks.js?v=creation-10"></script>
   <script src="js/manual-play.js?v=manual-28"></script>
-  <script src="app.js?v=creation-122"></script>
+  <script src="app.js?v=creation-123"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).

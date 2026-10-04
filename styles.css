@@ -224,72 +224,81 @@ main {
   min-height: min(620px, calc(100vh - 180px));
 }
 
-.home-launch {
-  min-height: calc(100vh - 150px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 26px;
-  text-align: center;
-  background:
-    linear-gradient(135deg, rgba(226, 180, 81, .11), transparent 34%),
-    linear-gradient(315deg, rgba(59, 142, 234, .10), transparent 36%),
-    rgba(21, 24, 29, .72);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
-  padding: clamp(32px, 7vw, 86px);
+/* ═════════════════════════════════════════════════════════════════════════════
+   Home page
+   The desktop shell is locked to one screen (html/body overflow:hidden), so the
+   home view scrolls INSIDE itself; on touch devices the whole page scrolls instead
+   (html.touch-device rules further down). Keeps the Zoro / Brook artwork, the
+   emerald theme and every id the app's code writes to (see .home-hidden-stats).
+   ═════════════════════════════════════════════════════════════════════════════ */
+#homeView.view.active {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(77, 255, 158, .35) transparent;
 }
 
-/* Large faded character artwork flanking the home panel: Zoro down the left,
-   Brook down the right. Purely decorative: both sit behind the content, ignore
-   pointer events, and simply don't paint if an image file is absent.
-   Drop the artwork at:
-     images/basic/zoro-bg.png   (left)
-     images/basic/brook-bg.png  (right) */
+.home-page {
+  max-width: 1120px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(16px, 2vw, 24px);
+  padding-bottom: 36px;
+}
+
+/* ── Hero ── */
 .home-launch {
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  padding: clamp(20px, 2.6vw, 30px) clamp(20px, 4vw, 48px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background:
+    radial-gradient(900px 280px at 50% 0%, rgba(77, 255, 158, .17), transparent 70%),
+    linear-gradient(135deg, rgba(226, 180, 81, .10), transparent 36%),
+    linear-gradient(315deg, rgba(59, 142, 234, .10), transparent 38%),
+    rgba(16, 22, 20, .8);
+  box-shadow: var(--shadow);
 }
 
-.home-launch::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: min(48%, 620px);
-  background-image: url("images/basic/zoro-bg.png");
-  background-repeat: no-repeat;
-  background-position: left center;
-  background-size: cover;
-  opacity: .18;
-  filter: saturate(1.1);
-  pointer-events: none;
-  z-index: 0;
-  /* Fade the inner edge so it blends toward the centre of the panel */
-  -webkit-mask-image: linear-gradient(to right, rgba(0, 0, 0, 1) 45%, rgba(0, 0, 0, 0) 100%);
-  mask-image: linear-gradient(to right, rgba(0, 0, 0, 1) 45%, rgba(0, 0, 0, 0) 100%);
-}
-
+/* Large faded character artwork flanking the hero: Zoro down the left, Brook down
+   the right. Purely decorative: both sit behind the content, ignore pointer events,
+   and simply don't paint if an image file is absent.
+     images/basic/zoro-bg.png   (left)
+     images/basic/brook-bg.png  (right) */
+.home-launch::before,
 .home-launch::after {
   content: "";
   position: absolute;
-  right: 0;
   top: 0;
   bottom: 0;
-  width: min(48%, 620px);
-  background-image: url("images/basic/brook-bg.png");
+  width: min(44%, 540px);
   background-repeat: no-repeat;
-  background-position: right center;
   background-size: cover;
-  opacity: .18;
+  opacity: .2;
   filter: saturate(1.1);
   pointer-events: none;
   z-index: 0;
-  -webkit-mask-image: linear-gradient(to left, rgba(0, 0, 0, 1) 45%, rgba(0, 0, 0, 0) 100%);
-  mask-image: linear-gradient(to left, rgba(0, 0, 0, 1) 45%, rgba(0, 0, 0, 0) 100%);
+}
+.home-launch::before {
+  left: 0;
+  background-image: url("images/basic/zoro-bg.png");
+  background-position: left center;
+  -webkit-mask-image: linear-gradient(to right, #000 45%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 45%, transparent 100%);
+}
+.home-launch::after {
+  right: 0;
+  background-image: url("images/basic/brook-bg.png");
+  background-position: right center;
+  -webkit-mask-image: linear-gradient(to left, #000 45%, transparent 100%);
+  mask-image: linear-gradient(to left, #000 45%, transparent 100%);
 }
 
 /* Keep all real content above the artwork */
@@ -298,33 +307,243 @@ main {
   z-index: 1;
 }
 
-.home-launch img {
-  width: clamp(78px, 10vw, 132px);
-  height: clamp(78px, 10vw, 132px);
+.home-logo {
+  width: clamp(52px, 5vw, 64px);
+  height: clamp(52px, 5vw, 64px);
+  object-fit: contain;
+  filter: drop-shadow(0 0 18px rgba(77, 255, 158, .45));
+}
+
+.home-eyebrow {
+  margin: 4px 0 0;
+  font-size: .76rem;
+  font-weight: 800;
+  letter-spacing: .24em;
+  text-transform: uppercase;
+  color: var(--accent-neon);
 }
 
 .home-launch h1 {
-  max-width: 1000px;
   margin: 0;
-  font-size: clamp(2.5rem, 7vw, 6.8rem);
-  line-height: .95;
+  font-size: clamp(2.3rem, 4.6vw, 3.5rem);
+  line-height: 1;
+  letter-spacing: -.02em;
+  color: #fff;
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .home-launch h1 {
+    background: linear-gradient(180deg, #ffffff 35%, #aef0cd 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
 }
 
+.home-tagline {
+  max-width: 780px;
+  margin: 0 0 4px;
+  color: var(--silver);
+  font-size: clamp(.95rem, 1.35vw, 1.08rem);
+  line-height: 1.5;
+}
+
+.home-stats {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+.home-stats li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 116px;
+  padding: 7px 18px;
+  border-radius: 12px;
+  background: rgba(7, 9, 10, .58);
+  border: 1px solid var(--line);
+}
+.home-stats strong {
+  font-size: 1.35rem;
+  line-height: 1.1;
+  color: var(--accent-neon);
+  font-variant-numeric: tabular-nums;
+}
+.home-stats span {
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ── Section headings ── */
+.home-section-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 12px;
+  font-size: .78rem;
+  font-weight: 800;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.home-section-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line), transparent);
+}
+
+/* ── Mode cards (the original five buttons + Card Creator) ── */
 .home-launch-actions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-  width: min(820px, 100%);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  width: 100%;
 }
 
-.home-launch-actions button {
-  min-height: 58px;
-  font-size: 1.04rem;
+.home-mode {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 98px;
+  padding: 16px 18px;
+  text-align: left;
+  font-weight: 400;
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: none;
+  transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.home-mode:hover {
+  transform: translateY(-3px);
+  filter: none;
+  background: linear-gradient(180deg, #1b2622, #121a17);
+  border-color: rgba(77, 255, 158, .55);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .45), 0 0 22px rgba(77, 255, 158, .18);
+}
+.home-mode:focus-visible {
+  outline: 2px solid var(--accent-neon);
+  outline-offset: 2px;
+}
+.home-mode.featured {
+  background:
+    linear-gradient(135deg, rgba(16, 185, 129, .24), transparent 60%),
+    linear-gradient(180deg, var(--surface-2), var(--surface));
+  border-color: rgba(77, 255, 158, .45);
+}
+
+.home-mode-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 13px;
+  font-size: 1.65rem;
+  background: linear-gradient(135deg, rgba(16, 185, 129, .3), rgba(16, 185, 129, .08));
+  border: 1px solid rgba(77, 255, 158, .28);
+}
+.home-mode-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.home-mode-body strong {
+  font-size: 1.08rem;
+  font-weight: 850;
+}
+.home-mode-body small {
+  color: var(--muted);
+  font-size: .84rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* ── What's new ── */
+.home-news {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.home-news li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(16, 22, 20, .62);
+  border: 1px solid var(--line);
+}
+.home-news-badge {
+  flex: none;
+  margin-top: 2px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #04120b;
+  font-size: .62rem;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+.home-news strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: .96rem;
+}
+.home-news span:not(.home-news-badge) {
+  color: var(--muted);
+  font-size: .82rem;
+  line-height: 1.45;
+}
+
+/* Gentle entrance. `backwards` (not `both`) so the final frame doesn't pin the
+   transform and fight the cards' hover lift. */
+@keyframes homeRise {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: none; }
+}
+.home-launch { animation: homeRise .5s ease backwards; }
+.home-mode,
+.home-news li { animation: homeRise .45s ease backwards; }
+.home-mode:nth-child(1) { animation-delay: .06s; }
+.home-mode:nth-child(2) { animation-delay: .11s; }
+.home-mode:nth-child(3) { animation-delay: .16s; }
+.home-mode:nth-child(4) { animation-delay: .21s; }
+.home-mode:nth-child(5) { animation-delay: .26s; }
+.home-mode:nth-child(6) { animation-delay: .31s; }
+.home-news li:nth-child(1) { animation-delay: .3s; }
+.home-news li:nth-child(2) { animation-delay: .35s; }
+.home-news li:nth-child(3) { animation-delay: .4s; }
+@media (prefers-reduced-motion: reduce) {
+  .home-launch, .home-mode, .home-news li { animation: none; }
+  .home-mode { transition: none; }
+}
+
+@media (max-width: 960px) {
+  .home-launch-actions,
+  .home-news { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .home-launch-actions,
+  .home-news { grid-template-columns: minmax(0, 1fr); }
 }
 
 .home-hidden-stats {
   display: none;
 }
+
 
 .home-settings {
   width: min(520px, 100%);

@@ -6594,6 +6594,16 @@ function renderHome() {
   el.characterTotal.textContent = String(counts.character);
   el.eventTotal.textContent = String(counts.event);
   el.stageTotal.textContent = String(counts.stage);
+
+  // The visible "library at a glance" numbers on the home page. Collections counts
+  // the real sets (the catch-all "Everything else" bucket isn't one).
+  const setStat = (id, value) => {
+    const node = document.getElementById(id);
+    if (node) node.textContent = Number(value).toLocaleString();
+  };
+  setStat("homeStatCards", state.cards.length || 0);
+  setStat("homeStatLeaders", counts.leader);
+  setStat("homeStatCollections", CARD_COLLECTIONS.filter(entry => entry.slug !== "everything-else").length);
 }
 
 function renderBuilder() {
@@ -9135,6 +9145,14 @@ function bindEvents() {
 
   document.getElementById("openPackBtn")?.addEventListener("click", openPack);
   document.getElementById("draftSoloBtn")?.addEventListener("click", startSoloDraft);
+
+  // Home cards that just do what another control already does (e.g. the Card
+  // Creator card = the Card Creator nav tab), so there's one code path for each.
+  document.querySelectorAll("[data-forward-click]").forEach(button => {
+    button.addEventListener("click", () => {
+      document.getElementById(button.dataset.forwardClick)?.click();
+    });
+  });
 
   // Nav: Multiplayer tab -> lobby page
   document.getElementById("navMultiplayer")?.addEventListener("click", () => {
