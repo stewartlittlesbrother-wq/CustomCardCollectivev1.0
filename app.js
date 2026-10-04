@@ -7643,7 +7643,7 @@ async function maybeStartMultiplayerDraft() {
   try {
     [firebaseApp, svc] = await Promise.all([
       import("./js/firebase/firebaseApp.js"),
-      import("./js/firebase/multiplayerService.js?v=draft-6")
+      import("./js/firebase/multiplayerService.js?v=draft-7")
     ]);
     await firebaseApp.signInGuest();
   } catch (e) {

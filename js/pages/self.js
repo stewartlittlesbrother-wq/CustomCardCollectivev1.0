@@ -39,6 +39,19 @@ function altArtIndexForGame(card) {
     return idx;
 }
 
+// This device's saved art pick for a card number, as saved (not limited to the art
+// the card currently has loaded). Only ever read for cards THIS player owns.
+function ownArtIndexRaw(card) {
+    const key = card?.cardNumber || card?.id;
+    if (!key) return 0;
+    try {
+        const prefs = JSON.parse(localStorage.getItem("custom-cards-alt-art-prefs-v1") || "{}") || {};
+        const raw = prefs[key];
+        const idx = raw === true ? 1 : (Number(raw) || 0);
+        return Number.isInteger(idx) && idx > 0 ? idx : 0;
+    } catch { return 0; }
+}
+
 function cardArtSrc(card) {
     const list = cardArtListForGame(card);
     // A synced card carries the OWNER'S chosen art index (see stripCardForSync),
@@ -388,7 +401,10 @@ function createPublicCardSnapshot(card) {
         effects: card.effects || [],
         instanceId: card.instanceId,
         state: card.state || "active",
-        faceUp: Boolean(card.faceUp)
+        faceUp: Boolean(card.faceUp),
+        // Always say which art this is (even the default), or the opponent would
+        // fall back to THEIR OWN pick for the same card number.
+        artIndex: ownArtIndexRaw(card)
     };
 }
 
@@ -1555,10 +1571,12 @@ function applyOnlinePrivateState(privateState = {}) {
     onlinePrivateState = {
         selectedDeck: privateState.selectedDeck || null,
         zonesJson: privateState.zonesJson || null,
-        // Rebuild artwork locally - it's intentionally not transmitted.
-        hand: hydrateCards(zones.hand || []),
-        deck: hydrateCards(zones.deck || []),
-        life: hydrateCards(zones.life || [])
+        // Rebuild artwork locally - it's intentionally not transmitted. These are MY
+        // cards, so they always use MY alt-art picks (the browser that dealt the
+        // game may have been my opponent's).
+        hand: useOwnArtPicks(hydrateCards(zones.hand || [])),
+        deck: useOwnArtPicks(hydrateCards(zones.deck || [])),
+        life: useOwnArtPicks(hydrateCards(zones.life || []))
     };
 
     applyOnlineStateToGame();
@@ -1569,6 +1587,12 @@ function applyOnlinePrivateState(privateState = {}) {
             `${onlinePublicState.currentPlayer}:${onlinePublicState.turnNumber}`
         );
     }
+}
+
+function useOwnArtPicks(cards) {
+    return Array.isArray(cards)
+        ? cards.map(card => (card && typeof card === "object" ? { ...card, artIndex: ownArtIndexRaw(card) } : card))
+        : cards;
 }
 
 // Artwork is never sent over the wire (see stripCardForSync) - it's rebuilt from
@@ -2056,7 +2080,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-6");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-7");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2124,7 +2148,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-6");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-7");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();

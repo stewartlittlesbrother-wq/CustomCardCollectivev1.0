@@ -49,7 +49,37 @@ function ownAltArtIndex(cardNumber) {
     } catch { return 0; }
 }
 
-export function stripCardForSync(card) {
+// A snapshot of THIS device's alt-art picks, sent with the player's deck. Whoever
+// deals the game (the host, or whichever browser re-deals on "Play again") may be the
+// OTHER player, so the dealer must use each player's own picks - never its own.
+// Keys are made Firebase-safe; only real alts (index > 0) are listed.
+const artPrefKey = (value) => String(value).replace(/[.#$/\[\]]/g, "-");
+
+export function snapshotOwnArtPrefs() {
+    try {
+        const prefs = JSON.parse(localStorage.getItem(ALT_ART_PREFS_KEY) || "{}") || {};
+        const out = {};
+        let count = 0;
+        for (const [key, raw] of Object.entries(prefs)) {
+            const idx = raw === true ? 1 : Number(raw) || 0;
+            if (key && Number.isInteger(idx) && idx > 0 && count < 400) {
+                out[artPrefKey(key)] = idx;
+                count++;
+            }
+        }
+        return out;
+    } catch { return {}; }
+}
+
+function artIndexFromPrefs(prefs, cardNumber) {
+    if (!prefs || !cardNumber) return 0;
+    const idx = Number(prefs[artPrefKey(cardNumber)]) || 0;
+    return Number.isInteger(idx) && idx > 0 ? idx : 0;
+}
+
+// options.keepArtIndex: keep the art index already on the card (the dealer building
+// the OTHER player's board) instead of re-reading this device's own picks.
+export function stripCardForSync(card, options) {
     if (!card || typeof card !== "object") return card;
 
     const slim = { ...card };
@@ -60,7 +90,9 @@ export function stripCardForSync(card) {
     // back to ITS OWN local alt-art preference for this card - so if you had alts
     // on, every opponent card looked like YOUR alt. An explicit 0 means "owner
     // chose the default art", so the viewer never substitutes their own pick.
-    slim.artIndex = ownAltArtIndex(card.cardNumber || card.id);
+    const keepArt = Boolean(options && typeof options === "object" && options.keepArtIndex)
+        && Number.isInteger(card.artIndex);
+    slim.artIndex = keepArt ? card.artIndex : ownAltArtIndex(card.cardNumber || card.id);
     // Only base64 data URLs are too large to transmit (~88KB each). A plain
     // image URL is a few dozen bytes, so keep it - that way a custom card still
     // renders for an opponent whose local card pool doesn't contain it.
@@ -144,9 +176,13 @@ export function hydrateSyncedCards(cards) {
     return cards.map(card => (card ? hydrateSyncedCard(card) : card));
 }
 
-function createMultiplayerCard(card) {
+function createMultiplayerCard(card, artPrefs = null) {
+    const slim = stripCardForSync(cloneData(card));
+    // The browser dealing the game may belong to the OTHER player, so use the picks
+    // that came with THIS player's deck (none = the default art) - never the dealer's own.
+    slim.artIndex = artIndexFromPrefs(artPrefs, card.cardNumber || card.id);
     return {
-        ...stripCardForSync(cloneData(card)),
+        ...slim,
         keywords: card.keywords ? [...card.keywords] : [],
         instanceId: crypto.randomUUID(),
         state: card.state || "active",
@@ -165,7 +201,7 @@ function requireDeckTools() {
     }
 }
 
-function createInitialPrivateState(selectedDeck) {
+function createInitialPrivateState(selectedDeck, artPrefs = null) {
     requireDeckTools();
 
     // Saved decks store a custom leader id, which may not be a key in the
@@ -206,9 +242,9 @@ function createInitialPrivateState(selectedDeck) {
     }
 
     const deck = globalThis.shuffleDeck(globalThis.parseDeckText(selectedDeck.deckText))
-        .map(card => createMultiplayerCard(card));
-    const leader = createMultiplayerCard(leaderDefinition);
-    const leader2 = leader2Definition ? createMultiplayerCard(leader2Definition) : null;
+        .map(card => createMultiplayerCard(card, artPrefs));
+    const leader = createMultiplayerCard(leaderDefinition, artPrefs);
+    const leader2 = leader2Definition ? createMultiplayerCard(leader2Definition, artPrefs) : null;
 
     // Token TYPES the deck makes available. Resolved here so the board can show
     // the token zone without another database round-trip. Read the card map
@@ -217,7 +253,7 @@ function createInitialPrivateState(selectedDeck) {
     const tokenTypes = (selectedDeck.tokens || [])
         .map(id => cardMap[id])
         .filter(Boolean)
-        .map(card => createMultiplayerCard(card));
+        .map(card => createMultiplayerCard(card, artPrefs));
 
     const privateState = {
         selectedDeck,
@@ -318,26 +354,27 @@ function createPublicCardSnapshot(card) {
         state: card.state || "active",
         faceUp: Boolean(card.faceUp),
         // Carry the owner's chosen art (e.g. a revealed life card) so the opponent
-        // sees the alt you picked. 0/default is omitted to keep it slim.
-        ...(ownAltArtIndex(card.cardNumber || card.id) > 0
-            ? { artIndex: ownAltArtIndex(card.cardNumber || card.id) }
-            : {})
+        // sees the alt you picked. Always sent, even the default 0: when it was left
+        // out the viewer fell back to ITS OWN pick for that card number.
+        artIndex: Number.isInteger(card.artIndex) ? card.artIndex : 0
     };
 }
 
 function createInitialPublicPlayerState(privateState) {
     // Board is a JSON string for the same lossless-round-trip reason as
     // createPublicPlayerStateFromLocal in self.js - Firebase mangles arrays.
+    // The dealer may not be this player: keep the art index already on each card.
+    const strip = (card) => stripCardForSync(card, { keepArtIndex: true });
     const board = {
-        leader: stripCardForSync(privateState.leader || null),
-        leader2: stripCardForSync(privateState.leader2 || null),
-        characters: (privateState.characters || []).map(stripCardForSync),
-        stage: stripCardForSync(privateState.stage || null),
-        trash: (privateState.trash || []).map(stripCardForSync),
+        leader: strip(privateState.leader || null),
+        leader2: strip(privateState.leader2 || null),
+        characters: (privateState.characters || []).map(strip),
+        stage: strip(privateState.stage || null),
+        trash: (privateState.trash || []).map(strip),
         extraFaceUp: [],
         extraFaceDown: [],
         tokens: [],
-        tokenTypes: (privateState.tokenTypes || []).map(stripCardForSync),
+        tokenTypes: (privateState.tokenTypes || []).map(strip),
         floatingDon: [],
         don: 0,
         restedDon: 0
@@ -623,7 +660,9 @@ export async function updatePrivateState(roomCode, uid, partialState) {
 
 export async function setPlayerDeck(roomCode, playerSlot, deckData) {
     await update(ref(database, `matches/${cleanRoomCode(roomCode)}/players/${playerSlot}`), {
-        deck: deckData
+        deck: deckData,
+        // This player's alt-art picks, so whoever deals the game uses THEIRS.
+        artPrefs: snapshotOwnArtPrefs()
     });
 }
 
@@ -759,8 +798,8 @@ export async function initializeMultiplayerGame(roomCode) {
 // player who lost the last game) is pre-set as the dice "winner" so THEY get to
 // choose who goes first - no dice roll needed.
 function buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, rematchLoser = null) {
-    const p1Private = createInitialPrivateState(player1Deck);
-    const p2Private = createInitialPrivateState(player2Deck);
+    const p1Private = createInitialPrivateState(player1Deck, player1 && player1.artPrefs);
+    const p2Private = createInitialPrivateState(player2Deck, player2 && player2.artPrefs);
 
     const chooser = (rematchLoser === "p1" || rematchLoser === "p2") ? rematchLoser : null;
     const diceSetup = chooser
@@ -825,7 +864,9 @@ export async function setRematchReady(roomCode, playerSlot, ready, deck = null) 
     const code = cleanRoomCode(roomCode);
     const updates = {
         [`rematch/${playerSlot}/ready`]: Boolean(ready),
-        [`rematch/${playerSlot}/at`]: serverTimestamp()
+        [`rematch/${playerSlot}/at`]: serverTimestamp(),
+        // Refreshed every time: picks made in-game (art picker) count for the re-deal.
+        [`players/${playerSlot}/artPrefs`]: snapshotOwnArtPrefs()
     };
 
     // A deck swap also updates the lobby selection, so the re-deal picks it up.
