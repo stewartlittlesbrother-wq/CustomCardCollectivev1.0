@@ -236,7 +236,7 @@ html.deck-v2 .deck-table {
   grid-template-rows: none !important;
   position: relative;
   height: var(--v2-dock) !important;
-  min-height: 176px;
+  min-height: 184px;
   border: 0 !important;
   border-top: 1px solid var(--v2-line) !important;
   background: var(--v2-surface) !important;
@@ -444,3 +444,79 @@ html.deck-v2 .collection-hint { font-size: .74rem; max-width: 52ch; line-height:
 /* Touch devices scroll the whole page, so keep the deck docked to the bottom of the screen. */
 html.deck-v2.touch-device .deck-table { position: sticky; bottom: 0; z-index: 30; }
 html.deck-v2.touch-device .collection-panel .card-grid { overflow-y: visible; }
+
+/* ══ Green outlines (same neon-green lines as the home page) ═══════════════
+   Each area is its own outlined, rounded panel, and thin green lines separate
+   what is inside, so it is clear where one thing ends and the next begins. */
+html.deck-v2 { --v2-green-line: rgba(77, 255, 158, .34); --v2-green-soft: rgba(77, 255, 158, .2); --v2-green-strong: rgba(77, 255, 158, .6); }
+html.deck-v2 .builder-window { padding: 10px 12px 12px !important; gap: 10px !important; }
+
+/* The three panels */
+html.deck-v2 .filter-stack,
+html.deck-v2 .collection-panel,
+html.deck-v2 .deck-table {
+  border: 1px solid var(--v2-green-line) !important;
+  border-radius: 14px !important;
+  background: linear-gradient(180deg, var(--v2-surface-2), var(--v2-surface)) !important;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35), 0 10px 26px rgba(0, 0, 0, .35) !important;
+}
+html.deck-v2 .filter-stack { padding: 10px 14px !important; }
+html.deck-v2 .collection-panel { overflow: hidden; }
+html.deck-v2 .builder-main { gap: 10px; }
+html.deck-v2 .deck-table { border-top-width: 1px !important; }
+
+/* Lines inside the pool: under its header, around each card */
+html.deck-v2 .collection-top { padding: 8px 16px !important; margin-bottom: 8px; border-bottom: 1px solid var(--v2-green-soft) !important; }
+html.deck-v2 .card-tile .card-image,
+html.deck-v2 .deck-table .mini-card-art {
+  box-shadow: 0 0 0 1px var(--v2-green-soft), 0 6px 16px rgba(0, 0, 0, .4) !important;
+  transition: box-shadow .15s;
+}
+html.deck-v2 .card-tile:hover .card-image,
+html.deck-v2 .deck-table .deck-row:hover .mini-card-art {
+  box-shadow: 0 0 0 1px var(--v2-green-strong), 0 0 18px rgba(77, 255, 158, .22), 0 6px 16px rgba(0, 0, 0, .4) !important;
+}
+html.deck-v2 .deck-table .leader-slot .mini-card-art,
+html.deck-v2 .deck-table .leader-slot-2 .mini-card-art { box-shadow: 0 0 0 2px var(--v2-gold), 0 6px 16px rgba(0, 0, 0, .4) !important; }
+
+/* Lines inside the filter bar: each group sits in its own outline */
+html.deck-v2 .v2-search #searchInput { border: 1px solid var(--v2-green-soft); }
+html.deck-v2 .v2-search #searchInput:focus { outline: 0; border-color: var(--v2-green-strong); box-shadow: 0 0 0 3px rgba(77, 255, 158, .15); }
+.v2-dots { padding: 5px 10px; border: 1px solid var(--v2-green-soft); border-radius: 10px; background: var(--v2-surface-2); }
+.v2-chips { border: 1px solid var(--v2-green-soft); }
+.v2-btn { border: 1px solid var(--v2-green-soft); }
+.v2-btn:hover { border-color: var(--v2-green-strong); }
+.v2-btn.primary { border-color: transparent; }
+.v2-btn-green { border-color: var(--v2-green-line); background: rgba(16, 185, 129, .14); color: var(--v2-accent-hi); font-weight: 750; }
+.v2-btn-green:hover { background: rgba(16, 185, 129, .24); }
+.v2-pill { box-shadow: inset 0 0 0 1px currentColor; }
+
+/* Lines inside the dock: under the header, and between the leader and the cards */
+.v2-dockhead { border-bottom: 1px solid var(--v2-green-soft); padding: 14px 16px 10px; margin-bottom: 8px; }
+html.deck-v2 .deck-board-scroll { padding-top: 4px !important; }
+html.deck-v2 .deck-table .leader-slot,
+html.deck-v2 .deck-table .leader-slot-2 { padding-right: 16px; border-right: 1px solid var(--v2-green-soft) !important; }
+html.deck-v2 .builder-resizer::after { background: var(--v2-green-line); }
+html.deck-v2 .builder-resizer:hover::after { background: var(--v2-accent-hi); }
+.v2-dactions { padding-left: 14px; border-left: 1px solid var(--v2-green-soft); }
+.v2-dactions #saveDeckMini { border: 0; }
+.v2-mini-curve { padding: 0 14px; border-left: 1px solid var(--v2-green-soft); border-right: 1px solid var(--v2-green-soft); }
+
+/* Menus */
+.v2-menu { border-color: var(--v2-green-line); }
+.v2-menu .v2-sep { background: var(--v2-green-soft); }
+.v2-menu h5 { padding-top: 4px; }
+.v2-empty { padding: 10px; color: var(--v2-muted); font-size: .85rem; line-height: 1.4; max-width: 280px; }
+.v2-decks-menu { min-width: 320px; }
+.v2-decklist { display: grid; gap: 4px; max-height: 280px; overflow-y: auto; padding: 2px; }
+.v2-menu .v2-deck { border: 1px solid var(--v2-green-soft); border-radius: 10px; background: var(--v2-surface-2); min-height: 48px; }
+.v2-menu .v2-deck:hover { border-color: var(--v2-green-strong); background: var(--v2-surface-3); }
+.v2-deck-text { display: grid; gap: 1px; min-width: 0; }
+.v2-deck-text b { font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-deck-text small { color: var(--v2-muted); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-load { flex: none; padding: 3px 12px; border-radius: 8px; background: rgba(16, 185, 129, .2); color: var(--v2-accent-hi); font-size: .78rem; font-weight: 800; }
+
+/* The panels opened from the menus get the same outline. */
+html.deck-v2 .saved-decks-panel,
+html.deck-v2 .don-deck-panel,
+html.deck-v2 .deck-share-panel { border: 1px solid var(--v2-green-line); border-radius: 14px; background: var(--v2-surface) !important; box-shadow: 0 24px 60px rgba(0, 0, 0, .6); }

@@ -228,8 +228,36 @@
     }
 
     // ── Deck dock ───────────────────────────────────────────────────────────
-    let pill = null, pillText = null, fill = null, bar = null, checksList = null, barsBox = null,
+    let decksButton = null, pill = null, pillText = null, fill = null, bar = null, checksList = null, barsBox = null,
         typeBar = null, typeLegend = null, miniCurve = null, clearAsk = null, clearConfirm = null;
+
+    // Rebuilt every time it opens, so it always shows what is saved right now.
+    function fillDecksMenu(menu) {
+        const decks = typeof savedDecks === "function" ? savedDecks() : [];
+        menu.textContent = "";
+        menu.append(make("h5", "", decks.length ? `Saved decks (${decks.length}) - click one to load it` : "Saved decks"));
+        if (!decks.length) {
+            menu.append(make("div", "v2-empty", "Nothing saved yet. Build a deck, give it a name and press Save."));
+        } else {
+            const list = make("div", "v2-decklist");
+            decks.forEach((deck, index) => {
+                const item = make("button", "v2-item v2-deck");
+                item.type = "button";
+                const leader = getCard(deck.leaderId);
+                const count = typeof deckSnapshotCount === "function" ? deckSnapshotCount(deck.deck) : "";
+                const text = make("span", "v2-deck-text");
+                text.append(make("b", "", deck.name || `Deck ${index + 1}`),
+                    make("small", "", `${leader ? leader.name : "No leader"} · ${count}/50`));
+                item.append(text, make("span", "v2-load", "Load"));
+                item.addEventListener("click", () => { closeMenus(); loadNamedDeck(index); });
+                list.append(item);
+            });
+            menu.append(list);
+        }
+        menu.append(make("div", "v2-sep"),
+            menuItem("Manage or delete saved decks…", () => click("savedDecksTab")),
+            menuItem("DON!! decks…", () => click("donDeckTab")));
+    }
 
     function resetClearConfirm() {
         if (clearAsk) clearAsk.hidden = false;
@@ -242,6 +270,18 @@
         if (!table || !board) return;
 
         const head = make("div", "v2-dockhead");
+
+        // My decks: a clear green button that lists your saved decks, click one to load it.
+        const decksWrap = make("div", "v2-menu-wrap");
+        decksButton = make("button", "v2-btn v2-btn-green", "📂 My decks");
+        decksButton.type = "button";
+        decksButton.title = "Your saved decks: load one, or manage them";
+        const decksMenu = make("div", "v2-menu up left v2-decks-menu");
+        decksMenu.hidden = true;
+        decksButton.addEventListener("click", () => fillDecksMenu(decksMenu));
+        decksWrap.append(decksButton, decksMenu);
+        addMenu(decksButton, decksMenu);
+        head.append(decksWrap);
 
         const nameWrap = make("div", "v2-dname");
         nameWrap.append(el.deckName);
@@ -285,19 +325,6 @@
         head.append(miniCurve);
 
         const actions = make("div", "v2-dactions");
-
-        // My decks
-        const decksWrap = make("div", "v2-menu-wrap");
-        const decksButton = make("button", "v2-btn", "My decks ▾");
-        decksButton.type = "button";
-        const decksMenu = make("div", "v2-menu up");
-        decksMenu.hidden = true;
-        decksMenu.append(make("h5", "", "Decks"),
-            menuItem("Saved decks…", () => click("savedDecksTab")),
-            menuItem("DON!! decks…", () => click("donDeckTab")));
-        decksWrap.append(decksButton, decksMenu);
-        addMenu(decksButton, decksMenu);
-        actions.append(decksWrap);
 
         // Export / import
         const exportWrap = make("div", "v2-menu-wrap");
@@ -430,6 +457,11 @@
         typeLegend.innerHTML = Object.entries(types).map(([key, value]) =>
             `<span><i style="background:${typeColor[key]}"></i>${cap1(key)}s <b>${value}</b></span>`).join("");
 
+        if (decksButton) {
+            const saved = typeof savedDecks === "function" ? savedDecks().length : 0;
+            decksButton.textContent = saved ? `📂 My decks (${saved})` : "📂 My decks";
+        }
+
         // Names on the deck's cards (shown as a tooltip; the hover preview shows the art).
         $$(".deck-list .deck-row[data-card-id], #leaderSlot .deck-row[data-card-id]").forEach(row => {
             const card = getCard(row.dataset.cardId);
@@ -462,7 +494,7 @@
                 try { decorateGrid(); syncFilters(); refreshDock(); } catch (error) { console.warn("Deck layout refresh failed:", error); }
             });
         };
-        [el.cardGrid, el.deckList, el.leaderSlot, el.deckWarnings].forEach(node => {
+        [el.cardGrid, el.deckList, el.leaderSlot, el.deckWarnings, el.savedDeckList].forEach(node => {
             if (node) new MutationObserver(schedule).observe(node, { childList: true });
         });
         const stack = $(".filter-stack");
