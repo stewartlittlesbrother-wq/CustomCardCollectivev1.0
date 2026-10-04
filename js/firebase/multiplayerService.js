@@ -201,6 +201,87 @@ function requireDeckTools() {
     }
 }
 
+// Every card number a deck needs in order to be dealt properly: its leader(s),
+// the list, its token types and its "start in play" picks.
+function deckCardNumbers(deck) {
+    const nums = new Set();
+    if (!deck) return nums;
+    [deck.leaderKey, deck.leaderKey2].forEach(key => key && nums.add(key));
+    String(deck.deckText || "").split("\n").forEach(line => {
+        const match = line.trim().match(/^\d+x(.+)$/i);
+        if (match) nums.add(match[1].trim());
+    });
+    (Array.isArray(deck.tokens) ? deck.tokens : []).forEach(id => id && nums.add(id));
+    (Array.isArray(deck.startingCards) ? deck.startingCards : [])
+        .forEach(entry => entry && entry.id && nums.add(entry.id));
+    return nums;
+}
+
+// Read the maps directly - getCardById logs a console error on every miss.
+function isCardLoaded(number) {
+    const leaders = globalThis.leaders || {};
+    return Boolean(
+        leaders[number] ||
+        (globalThis.cardDatabase || {})[number] ||
+        Object.values(leaders).some(leader => leader?.cardNumber === number || leader?.id === number)
+    );
+}
+
+// The dealing browser builds BOTH players' decks, so it must have every card of
+// both decks loaded. A card that isn't loaded is silently dropped by
+// parseDeckText, and a "start in play" card that can't be found in the deck is
+// silently skipped by applyStartingCards - that's how starters went missing
+// "sometimes". Loads the full shared library (once more if a first try still
+// leaves gaps) and returns whatever is STILL missing; never throws, so a flaky
+// network can't strand a rematch.
+async function ensureDeckCardsLoaded(decks, { force = false } = {}) {
+    const load = globalThis.loadFullCardLibraryBlocking;
+    if (typeof load !== "function") return [];
+
+    const missingNow = () => {
+        const out = new Set();
+        decks.forEach(deck => deckCardNumbers(deck).forEach(number => {
+            if (!isCardLoaded(number)) out.add(number);
+        }));
+        return [...out];
+    };
+
+    let missing = missingNow();
+    if (force || missing.length) {
+        try { await load(); } catch (error) { console.warn("Card library load failed:", error); }
+        missing = missingNow();
+        if (missing.length) {
+            try { await load(); } catch (error) { console.warn("Card library retry failed:", error); }
+            missing = missingNow();
+        }
+    }
+    if (missing.length) {
+        console.warn("Dealing with cards that aren't loaded (they will be left out):", missing);
+    }
+    return missing;
+}
+
+// Console-only: say so when a "start in play" pick couldn't be placed, instead of
+// quietly dealing the match without it.
+function warnAboutMissingStarters(selectedDeck, privateState) {
+    const wanted = Array.isArray(selectedDeck?.startingCards) ? selectedDeck.startingCards : [];
+    if (!wanted.length) return;
+    const caps = { characters: 5, stage: 1 };
+    const used = {};
+    let expected = 0;
+    wanted.forEach(entry => {
+        if (!entry || !entry.id || !entry.zone) return;
+        used[entry.zone] = (used[entry.zone] || 0) + 1;
+        if (used[entry.zone] <= (caps[entry.zone] ?? Infinity)) expected++;
+    });
+    const placed = (privateState.characters || []).length + (privateState.stage ? 1 : 0)
+        + (privateState.trash || []).length + (privateState.life || []).length
+        + (privateState.hand || []).length;
+    if (placed < expected) {
+        console.warn(`"${selectedDeck.name}": ${expected - placed} of ${expected} "start in play" cards could not be placed (not in the deck or not loaded).`);
+    }
+}
+
 function createInitialPrivateState(selectedDeck, artPrefs = null) {
     requireDeckTools();
 
@@ -280,7 +361,14 @@ function createInitialPrivateState(selectedDeck, artPrefs = null) {
     if (typeof globalThis.applyStartingCards === "function") {
         globalThis.applyStartingCards(privateState, selectedDeck.startingCards);
     }
+    warnAboutMissingStarters(selectedDeck, privateState);
+
+    // Remember which hand cards were "start in hand" picks, so a mulligan keeps
+    // them (otherwise they were shuffled back into the deck and the starter
+    // "didn't work" whenever the player mulliganed).
+    const handStarters = (privateState.hand || []).map(card => card && card.instanceId).filter(Boolean);
     privateState.hand = privateState.deck.splice(0, 5).concat(privateState.hand);
+    if (handStarters.length) privateState.handStarters = handStarters;
 
     applyStartingZangetsuStage(privateState);
 
@@ -920,6 +1008,12 @@ export async function restartMatch(roomCode) {
 
     if (!claim.committed) return { committed: false };
 
+    // Whichever browser claims the re-deal builds BOTH decks, and it may not have
+    // the other player's cards loaded (the game page loads those in the
+    // background). Without them parseDeckText drops cards and "start in play"
+    // cards are silently skipped. Only loads when something is actually missing.
+    await ensureDeckCardsLoaded([player1Deck, player2Deck]);
+
     // The loser of the game that just ended chooses turn order for the rematch.
     const prevWinner = match.public?.winner;
     const rematchLoser = prevWinner === "p1" ? "p2" : (prevWinner === "p2" ? "p1" : null);
@@ -1141,8 +1235,13 @@ export async function setMultiplayerMulligan(roomCode, user, playerSlot, tookMul
     let deck = privateState.deck || [];
 
     if (tookMulligan) {
-        deck = shuffleCards([...deck, ...hand]);
-        hand = deck.splice(0, 5);
+        // "Start in hand" cards stay in hand: only the dealt cards go back into
+        // the deck and get redrawn, exactly like the opening deal.
+        const keepIds = Array.isArray(privateState.handStarters) ? privateState.handStarters : [];
+        const kept = hand.filter(card => card && keepIds.includes(card.instanceId));
+        const returned = hand.filter(card => !(card && keepIds.includes(card.instanceId)));
+        deck = shuffleCards([...deck, ...returned]);
+        hand = deck.splice(0, 5).concat(kept);
     }
 
     const publicPlayerKey = playerSlot === "p1" ? "player1" : "player2";
@@ -1312,10 +1411,14 @@ export async function startMatch(roomCode) {
         // which a fast/targeted load may not have. Without this, parseDeckText
         // silently drops the missing cards and applyStartingCards can't place
         // them, which is why starting cards were spotty online. Cached after the
-        // first load, so it's only slow once.
-        if (typeof globalThis.loadFullCardLibraryBlocking === "function") {
-            await globalThis.loadFullCardLibraryBlocking().catch(() => {});
-        }
+        // first load, so it's only slow once. A failed load used to be swallowed
+        // here; now a second attempt is made if either deck still has gaps.
+        const playersSnap = await get(ref(database, `matches/${code}/players`));
+        const players = playersSnap.val() || {};
+        await ensureDeckCardsLoaded(
+            [players.p1?.deck, players.p2?.deck].filter(Boolean),
+            { force: true }
+        );
 
         await initializeMultiplayerGame(code);
         // Release the claim and clear any previous failure so both clients unblock.

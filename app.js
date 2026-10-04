@@ -6564,15 +6564,49 @@ function addStartingCard(id, zone) {
   }
   state.startingCards.push({ id, zone });
   saveDeck(false);
+  syncStartersToSavedDeck();
 }
 function removeStartingCard(id, zone) {
   const i = state.startingCards.findIndex(e => e.id === id && e.zone === zone);
-  if (i !== -1) { state.startingCards.splice(i, 1); saveDeck(false); }
+  if (i !== -1) { state.startingCards.splice(i, 1); saveDeck(false); syncStartersToSavedDeck(); }
 }
 function clearStartingFor(id) {
   const before = state.startingCards.length;
   state.startingCards = state.startingCards.filter(e => e.id !== id);
-  if (state.startingCards.length !== before) saveDeck(false);
+  if (state.startingCards.length !== before) { saveDeck(false); syncStartersToSavedDeck(); }
+}
+
+// Games (multiplayer lobby, practice board) only ever read SAVED decks, never the
+// working draft - so a start-in-play change made after the deck was last saved
+// never reached a match ("start in play sometimes doesn't work"). When the draft
+// is the same deck as the saved copy with this name (same leader and card list),
+// carry just the starters across. If the card list was edited too, leave the
+// saved copy alone - that's what the Save button is for - and say so.
+function syncStartersToSavedDeck() {
+  const name = state.deckName || el.deckName.value.trim();
+  if (!name) return;
+  const decks = savedDecks();
+  const i = decks.findIndex(deck => deck.name === name);
+  if (i === -1) return;
+
+  const saved = decks[i];
+  const sameDeck = (saved.leaderId || "") === (state.leaderId || "")
+    && Boolean(saved.dualLeader) === Boolean(state.dualLeader)
+    && (saved.leaderId2 || "") === (state.leaderId2 || "")
+    && deckSnapshotCount(saved.deck) === deckSnapshotCount(state.deck)
+    && Object.keys(state.deck).every(id => (saved.deck?.[id] || 0) === state.deck[id]);
+
+  if (!sameDeck) {
+    toast(`Press Save to use this in games - "${name}" was changed since you saved it`);
+    return;
+  }
+  saved.startingCards = state.startingCards.map(e => ({ ...e }));
+  try {
+    localStorage.setItem(SAVED_DECKS_KEY, JSON.stringify(decks));
+    syncPush(SAVED_DECKS_KEY);
+  } catch (e) {
+    toast("Storage is full - couldn't update the saved deck's start-in-play cards");
+  }
 }
 // Drop any starting-card entries whose card is no longer in the deck, or that
 // now exceed the deck's copy count (e.g. after removing copies). Called from
@@ -8210,7 +8244,7 @@ async function maybeStartMultiplayerDraft() {
   try {
     [firebaseApp, svc] = await Promise.all([
       import("./js/firebase/firebaseApp.js"),
-      import("./js/firebase/multiplayerService.js?v=draft-7")
+      import("./js/firebase/multiplayerService.js?v=draft-8")
     ]);
     await firebaseApp.signInGuest();
   } catch (e) {

@@ -1121,22 +1121,26 @@ function clearFromLifeHighlights(player) {
 // top of the deck, face-down). Returns { laid, needsManual } - needsManual is
 // true when the leader has NO life value set (the player must deal life manually
 // and probably wants to set it in the card editor).
-function autoLayLifeForPlayer(player) {
+function autoLayLifeForPlayer(player, { topUp = false } = {}) {
     if (!player || !player.leader) return { laid: 0, needsManual: false };
-    if ((player.life || []).length > 0) return { laid: 0, needsManual: false };
+    const existing = (player.life || []).length;
+    // Already has life: normally leave it alone (a reload mid-game must not lay
+    // more). `topUp` is for the very start of a game, where the only life cards
+    // are "start in play" picks that should count toward the leader's life.
+    if (existing > 0 && !topUp) return { laid: 0, needsManual: false };
 
     const lifeValue = Number(player.leader.life || 0);
-    if (!lifeValue || Number.isNaN(lifeValue)) return { laid: 0, needsManual: true };
+    if (!lifeValue || Number.isNaN(lifeValue)) return { laid: 0, needsManual: existing === 0 };
 
     if (!Array.isArray(player.deck)) player.deck = [];
     const laid = [];
-    for (let i = 0; i < lifeValue && player.deck.length > 0; i++) {
+    for (let i = existing; i < lifeValue && player.deck.length > 0; i++) {
         const card = player.deck.pop(); // top of deck = end of array (draw order)
         if (!card) break;
         card.faceUp = false;
         laid.push(card);
     }
-    player.life = laid;
+    player.life = (player.life || []).concat(laid);
     return { laid: laid.length, needsManual: false };
 }
 
@@ -1159,7 +1163,11 @@ function maybeAutoLayOnlineLife() {
     if (!player) return;
 
     onlineLifeAutoLaid = true;
-    const { laid, needsManual } = autoLayLifeForPlayer(player);
+    const { laid, needsManual } = autoLayLifeForPlayer(player, {
+        // Only at the very start of the game: "start in life" picks count toward
+        // the leader's life, the rest is laid from the deck.
+        topUp: Number(onlinePublicState?.turnNumber || 1) <= 1
+    });
     if (laid > 0) {
         renderLifeCards();
         renderDecks();
@@ -1407,7 +1415,7 @@ function reportTournamentResult(winnerSlot) {
     if (!winnerUid) return;
     tournamentContext.iWon = winnerSlot === playerSlot;
     Promise.all([
-        import("../firebase/tournamentService.js?v=tour-3"),
+        import("../firebase/tournamentService.js?v=tour-4"),
         import("../core/tournamentEngine.js?v=tour-3")
     ])
         .then(async ([service, engine]) => {
@@ -2080,7 +2088,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-7");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-8");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2148,7 +2156,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-7");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-8");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -3493,7 +3501,7 @@ async function initializeGamePage() {
         // value. Online life is handled in maybeAutoLayOnlineLife after mulligan.
         if (!isOnlineMatch) {
             [gameState.player1, gameState.player2].forEach(player => {
-                const { laid, needsManual } = autoLayLifeForPlayer(player);
+                const { laid, needsManual } = autoLayLifeForPlayer(player, { topUp: true });
                 if (laid > 0) {
                     addGameLog(`${player.name}: ${laid} life placed.`);
                 } else if (needsManual) {
