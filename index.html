@@ -25,10 +25,11 @@
   </script>
   <title>Golds Customs</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <!-- Deck Builder new layout (opt-in): decide before first paint so there is no flash. -->
-  <script>(function(){try{var p=new URLSearchParams(location.search).get("deckv2");if(p==="1"||p==="0"){localStorage.setItem("cc_deck_v2",p);var u=new URL(location.href);u.searchParams.delete("deckv2");history.replaceState(null,"",u.pathname+u.search+u.hash);}if(localStorage.getItem("cc_deck_v2")==="1")document.documentElement.classList.add("deck-v2");}catch(e){}})();</script>
+  <!-- Deck Builder new layout: on for everyone unless someone switched back to the classic one
+       (decided before first paint so there is no flash). ?deckv2=0 / ?deckv2=1 switch it. -->
+  <script>(function(){var on=true;try{var p=new URLSearchParams(location.search).get("deckv2");if(p==="1"||p==="0"){localStorage.setItem("cc_deck_v2",p);var u=new URL(location.href);u.searchParams.delete("deckv2");history.replaceState(null,"",u.pathname+u.search+u.hash);}if(localStorage.getItem("cc_deck_v2")==="0")on=false;}catch(e){}if(on)document.documentElement.classList.add("deck-v2");})();</script>
   <link rel="stylesheet" href="styles.css?v=creator-1">
-  <link rel="stylesheet" href="css/deck-v2.css?v=deckv2-3">
+  <link rel="stylesheet" href="css/deck-v2.css?v=deckv2-4">
 </head>
 <body>
   <div class="app-shell">
@@ -967,14 +968,14 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=253"></script>
+  <script src="js/version.js?v=254"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=253"></script>
+  <script src="js/auth-ui.js?v=254"></script>
   <script src="js/cards/cardCollections.js?v=draft-1"></script>
   <script src="js/cards/decks.js?v=creation-10"></script>
   <script src="js/manual-play.js?v=manual-28"></script>
   <script src="app.js?v=creation-128"></script>
-  <script src="js/deck-v2.js?v=deckv2-3"></script>
+  <script src="js/deck-v2.js?v=deckv2-4"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).
