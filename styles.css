@@ -5970,6 +5970,18 @@ button.trash-area {
   text-transform: capitalize;
 }
 .untap-invalid-note { font-size: .74rem; color: #ff9b7a; }
+.untap-expiring-note { font-size: .74rem; color: #f3c969; }
+.untap-expiring-banner {
+  background: rgba(243, 201, 105, .12);
+  border: 1px solid rgba(243, 201, 105, .55);
+  color: #f3dca0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  font-size: .82rem;
+  line-height: 1.45;
+}
+.untap-expiring-banner strong { color: #ffe29a; }
 
 .untap-dup {
   display: flex;

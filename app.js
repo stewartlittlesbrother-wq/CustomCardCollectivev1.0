@@ -2040,7 +2040,15 @@ async function saveDonCard(event) {
   let image = "";
   try {
     if (file) image = await readFileAsDataUrl(file);
-    else image = (await fetchRemoteImageAsDataUrl(url)) || url; // permanent copy
+    else {
+      image = await fetchRemoteImageAsDataUrl(url); // permanent copy
+      if (!image && isExpiringImageUrl(url)) {
+        toast("That image link expires within a day and couldn't be copied — upload the file instead so it stays.");
+        if (el.donCardStatus) el.donCardStatus.textContent = "";
+        return;
+      }
+      image = image || url;
+    }
   } catch { image = url; }
   if (!image) { toast("Could not read that image"); if (el.donCardStatus) el.donCardStatus.textContent = ""; return; }
 
@@ -2404,30 +2412,81 @@ async function compressImportedCardImages(cards) {
 // them. Returns a data: URL, or null if the proxy/image is unreachable (caller
 // then keeps the original URL as a best-effort fallback).
 const IMAGE_PROXY = "https://wsrv.nl/";
-async function fetchRemoteImageAsDataUrl(url) {
+
+// Image links that STOP WORKING on their own: Ultimate TCG Card Maker signs its
+// picture URLs with a one-day token (utcgcm_media_token), Discord attachment links
+// carry an expiry, and cloud-storage signed URLs (S3/GCS) are time-limited too.
+// A card saved with one of these as its only picture goes blank within a day, which
+// is exactly what happened to 105 of Rin's Jojo's cards. Anything that matches must
+// either be copied into the card permanently or not be saved at all.
+function isExpiringImageUrl(url) {
+  const value = String(url || "");
+  if (!/^https?:\/\//i.test(value)) return false;
+  return /(?:^|\/\/)(?:[^/]*\.)?ultimatetcgcm\.com\//i.test(value)
+    || /[?&]utcgcm_media_token=/i.test(value)
+    || /(?:media|cdn)\.discordapp\.(?:net|com)/i.test(value)
+    || /[?&](?:X-Amz-Signature|X-Goog-Signature)=/i.test(value)
+    || (/[?&]Expires=/i.test(value) && /[?&]Signature=/i.test(value));
+}
+
+// Returns a data: URL, or null when the picture can't be copied. A refusal from the
+// image's own site (403/404 - e.g. an already-expired link) can't be fixed by trying
+// again, but a slow proxy, timeout or 5xx/429 can, so only those are retried.
+async function fetchRemoteImageAsDataUrl(url, attempts = 3) {
   if (!url || !/^https?:\/\//i.test(url)) return null;
   // Data URLs and already-permanent hosts don't need proxying.
   if (url.startsWith("data:")) return url;
 
   const proxied = `${IMAGE_PROXY}?url=${encodeURIComponent(url)}` +
     `&w=${IMPORT_IMAGE_MAX_WIDTH}&we&output=webp&q=82`;
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    const response = await fetch(proxied, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!response.ok) return null;
-    const blob = await response.blob();
-    if (!blob.size || !/^image\//.test(blob.type)) return null;
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
+  const pause = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const last = attempt === attempts;
+    try {
+      const controller = new AbortController();
+      // The proxy can take 8s+ for one picture, so 15s timed out on busy runs.
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      const response = await fetch(proxied, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!response.ok) {
+        if ((response.status >= 500 || response.status === 429) && !last) { await pause(800 * attempt); continue; }
+        return null;
+      }
+      const blob = await response.blob();
+      if (!blob.size || !/^image\//.test(blob.type)) return null;
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      // Timeout or a dropped connection: worth another try.
+      if (!last) await pause(800 * attempt);
+    }
   }
+  return null;
+}
+
+// Copy many pictures at once, a few at a time. The proxy needs several seconds per
+// picture, so doing a 100+ card import one image after another was painfully slow
+// and pushed later images toward the timeout. Results line up with `urls`.
+async function storeImagesPermanently(urls, onProgress, concurrency = 4) {
+  const results = new Array(urls.length).fill(null);
+  let next = 0;
+  let done = 0;
+  const worker = async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= urls.length) return;
+      results[index] = await fetchRemoteImageAsDataUrl(urls[index]);
+      done++;
+      if (onProgress) onProgress(done, urls.length);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, urls.length) }, worker));
+  return results;
 }
 
 function csvValues(value) {
@@ -3668,7 +3727,15 @@ async function collectAltArtSources() {
     const url = (row.querySelector(".alt-art-url")?.value || "").trim();
     let img = "";
     if (file) img = await compressImageDataUrl(await readFileAsDataUrl(file));
-    else if (url) img = await compressImageDataUrl((await fetchRemoteImageAsDataUrl(url)) || url);
+    else if (url) {
+      const stored = await fetchRemoteImageAsDataUrl(url);
+      if (!stored && isExpiringImageUrl(url)) {
+        // Skip it rather than save an alt art that will go blank.
+        toast("An alt-art link expires within a day and couldn't be copied — it was skipped. Upload the image file instead.");
+        continue;
+      }
+      img = await compressImageDataUrl(stored || url);
+    }
     else if (row._existingImage) img = row._existingImage;
     if (img) arts.push(img);
   }
@@ -3800,7 +3867,14 @@ async function saveCreatedCard(event) {
   // can't be reached, fall back to keeping the link.
   let imageSource;
   if (imageUrl) {
-    imageSource = (await fetchRemoteImageAsDataUrl(imageUrl)) || imageUrl;
+    const stored = await fetchRemoteImageAsDataUrl(imageUrl);
+    // A link that expires on its own (Ultimate TCG Card Maker, Discord, signed
+    // cloud URLs) must not be saved as the card's only picture - it would go blank.
+    if (!stored && isExpiringImageUrl(imageUrl)) {
+      toast("That image link expires within a day and a permanent copy couldn't be made — upload the image file instead so it stays.");
+      return;
+    }
+    imageSource = stored || imageUrl;
   } else if (file) {
     imageSource = await compressImageDataUrl(await readFileAsDataUrl(file));
   } else {
@@ -9952,9 +10026,24 @@ function renderUntapReview() {
     .map(entry => `<option value="${entry.slug}">${escapeHtml(entry.name)}</option>`)
     .join("");
 
+  // Heads-up BEFORE importing: pictures on expiring links get copied permanently
+  // at import time, and any that can't be copied are held back (not saved blank).
+  const expiringCount = untapReview.entries.filter(entry => isExpiringImageUrl(entry.card.image)).length;
+  if (expiringCount) {
+    const banner = document.createElement("div");
+    banner.className = "untap-expiring-banner";
+    const plural = expiringCount !== 1;
+    banner.innerHTML = `<strong>⏳ ${expiringCount} card${plural ? "s use" : " uses a"} temporary picture link${plural ? "s" : ""}.</strong> ` +
+      `${plural ? "They expire" : "It expires"} within a day, so the importer will save a permanent copy of ${plural ? "each picture" : "the picture"} now. ` +
+      `If a copy can't be made, ${plural ? "that card is" : "the card is"} <em>not</em> imported (so you never get blank cards) and ${plural ? "is" : "is"} listed at the end. ` +
+      `This can take a while for big batches — keep this window open.`;
+    list.appendChild(banner);
+  }
+
   untapReview.entries.forEach((entry, index) => {
     const card = entry.card;
     const invalid = untapEntryInvalid(entry);
+    const expiring = !invalid && isExpiringImageUrl(card.image);
     const row = document.createElement("div");
     row.className = "untap-card" + (entry.include ? "" : " is-excluded") + (invalid ? " is-invalid" : "");
     row.dataset.index = String(index);
@@ -9984,6 +10073,7 @@ function renderUntapReview() {
         <span class="untap-set">${escapeHtml(setLabel)} · ${escapeHtml(card.cardNumber)}</span>
         <div class="untap-chips">${chips}</div>
         ${invalid ? `<span class="untap-invalid-note">Missing name or image — can't import</span>` : ""}
+        ${expiring ? `<span class="untap-expiring-note">⏳ Temporary picture link — copied permanently on import</span>` : ""}
         ${dupBadge}
       </div>
       <div class="untap-row-actions">
@@ -10115,21 +10205,42 @@ async function runUntapImport() {
 
   summary.imageStored = 0;
   summary.imageKept = 0;
+  // Cards whose picture couldn't be copied AND sits on a link that expires on its
+  // own. Saving those would create cards that go blank within a day, so they are
+  // held back and listed in the summary instead.
+  summary.imageBlocked = [];
+
+  // Copy every picture that isn't already embedded, a few at a time, while any
+  // expiring token is still valid. Done up front so the save loop below is fast.
+  const needCopy = toImport.filter(entry => !String(entry.card.image || "").startsWith("data:"));
+  const copies = await storeImagesPermanently(
+    needCopy.map(entry => entry.card.image),
+    (finished, total) => {
+      if (untapEl.untapDoImport) untapEl.untapDoImport.textContent = `Saving pictures ${finished}/${total}…`;
+    }
+  );
+  needCopy.forEach((entry, index) => { entry.storedImage = copies[index]; });
+
   let done = 0;
   for (const entry of toImport) {
     done++;
     if (untapEl.untapDoImport) {
-      untapEl.untapDoImport.textContent = `Saving image ${done}/${toImport.length}…`;
+      untapEl.untapDoImport.textContent = `Saving card ${done}/${toImport.length}…`;
     }
 
-    // Store a PERMANENT copy of the image now, while any expiring token is still
-    // valid, so the card never goes blank later. Falls back to the original URL
-    // if the proxy can't reach it.
     let card = entry.card;
     if (!String(card.image || "").startsWith("data:")) {
-      const stored = await fetchRemoteImageAsDataUrl(card.image);
-      if (stored) { card = { ...card, image: stored }; summary.imageStored++; }
-      else summary.imageKept++;
+      if (entry.storedImage) {
+        card = { ...card, image: entry.storedImage };
+        summary.imageStored++;
+      } else if (isExpiringImageUrl(card.image)) {
+        // Don't save a card that is guaranteed to lose its picture.
+        summary.imageBlocked.push(card.name || card.cardNumber || "Unnamed card");
+        continue;
+      } else {
+        // A normal long-lived link (e.g. untap.in): keep it, but tell the user.
+        summary.imageKept++;
+      }
     }
 
     [card] = await compressImportedCardImages([card]);
@@ -10161,10 +10272,27 @@ function showUntapSummary(summary) {
       ["Invalid", summary.invalid]
     ];
     if (summary.imageStored) rows.push(["Images saved permanently", summary.imageStored]);
+    const blocked = Array.isArray(summary.imageBlocked) ? summary.imageBlocked : [];
+    if (blocked.length) rows.push(["NOT imported (picture link expires)", blocked.length]);
     if (summary.failed) rows.push(["Failed to save", summary.failed]);
     list.innerHTML = rows
       .map(([label, count]) => `<li><span>${label}</span><strong>${count}</strong></li>`)
       .join("");
+    // Spell out WHICH cards were held back and what to do - this is the case that
+    // used to slip through silently and leave blank cards behind.
+    if (blocked.length) {
+      const shown = blocked.slice(0, 12).map(escapeHtml).join(", ");
+      const more = blocked.length > 12 ? ` …and ${blocked.length - 12} more` : "";
+      const alert = document.createElement("li");
+      alert.className = "untap-summary-warn";
+      const one = blocked.length === 1;
+      alert.innerHTML = `<span>⛔ ${blocked.length} card${one ? " was" : "s were"} NOT imported: ` +
+        `${one ? "its picture uses a temporary link that stops" : "their pictures use temporary links that stop"} working within a day, ` +
+        `and a permanent copy couldn't be made (${shown}${more}). Saving ${one ? "it" : "them"} would have left ${one ? "a blank card" : "blank cards"}. ` +
+        `Re-export ${one ? "it" : "them"} from the share link with the importer extension while the link is still fresh ` +
+        `(it embeds the pictures), then import again.</span>`;
+      list.appendChild(alert);
+    }
     // Warn if some images couldn't be permanently stored - those still rely on an
     // external link that may expire.
     if (summary.imageKept) {
