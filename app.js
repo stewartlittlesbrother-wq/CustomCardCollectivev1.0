@@ -477,9 +477,6 @@ const el = {
   creationKeywords: document.querySelector("#creationKeywords"),
   creationEffectText: document.querySelector("#creationEffectText"),
   creationStatus: document.querySelector("#creationStatus"),
-  libraryStatus: document.querySelector("#libraryStatus"),
-  restoreCards: document.querySelector("#restoreCards"),
-  restoreHint: document.querySelector("#restoreHint"),
   scanProgress: document.querySelector("#scanProgress"),
   scanProgressFill: document.querySelector("#scanProgressFill"),
   scanProgressLabel: document.querySelector("#scanProgressLabel"),
@@ -1326,148 +1323,6 @@ function legacyProjectKey(card) {
 
 function isCardTombstoned(deleted, card) {
   return deleted.has(projectCardKey(card)) || deleted.has(legacyProjectKey(card));
-}
-
-// Work out exactly WHY the shared library isn't reachable, rather than just
-// echoing "Permission denied". The three things that actually go wrong are a
-// database URL pointing at the wrong region, unpublished rules, and Anonymous
-// sign-in being switched off - each needs a different fix, so name the right one.
-async function diagnoseSharedLibrary() {
-  let databaseURL = "";
-  try {
-    ({ databaseURL } = (await import("./js/firebase/firebaseConfig.js")).firebaseConfig);
-  } catch {
-    return "Firebase config missing (js/firebase/firebaseConfig.js).";
-  }
-
-  const base = String(databaseURL || "").replace(/\/+$/, "");
-  if (!base) return "No databaseURL set in js/firebase/firebaseConfig.js.";
-
-  // cardIndex is world-readable under the shipped rules, so this one request
-  // distinguishes "wrong database" from "rules not published".
-  let response;
-  try {
-    response = await fetch(`${base}/cardIndex.json?shallow=true`);
-  } catch {
-    return "Can't reach Firebase at all — check your internet connection.";
-  }
-
-  if (response.status === 404) {
-    const body = await response.json().catch(() => ({}));
-    return body.correctUrl
-      ? `Wrong database URL. Firebase says the real one is ${body.correctUrl} — put that in js/firebase/firebaseConfig.js as databaseURL.`
-      : `No database at ${base}. Check databaseURL in js/firebase/firebaseConfig.js.`;
-  }
-
-  if (response.status === 401 || response.status === 403) {
-    return `Rules not published on THIS database (${base}). ` +
-      "In Firebase Console → Realtime Database, use the dropdown at the top to select that exact URL, " +
-      "then paste database.rules.json into its Rules tab and Publish.";
-  }
-
-  if (!response.ok) return `Firebase returned HTTP ${response.status}.`;
-
-  // Reads work, so the rules are live and the database URL is right. That
-  // leaves sign-in - actually attempt it and report the real reason, because
-  // "domain not authorised" and "Anonymous turned off" need different fixes and
-  // both otherwise surface as a vague permission error.
-  try {
-    const { waitForUser } = await import("./js/firebase/firebaseApp.js");
-    await waitForUser();
-  } catch (error) {
-    const code = String(error?.code || error?.message || "");
-
-    if (/unauthorized-domain/i.test(code)) {
-      return `This site's domain isn't authorised. Add "${location.hostname}" in ` +
-        "Firebase Console → Authentication → Settings → Authorized domains. " +
-        "(localhost is allowed by default, which is why it works locally but not here.)";
-    }
-
-    if (/operation-not-allowed|configuration-not-found/i.test(code)) {
-      return "Anonymous sign-in is switched off. Enable it in Firebase Console → " +
-        "Authentication → Sign-in method → Anonymous. (GitHub sign-in is not used.)";
-    }
-
-    return `Sign-in failed (${code}).`;
-  }
-
-  return "Signed in and rules are readable — try reloading the page.";
-}
-
-// Settings -> Shared Card Library
-async function refreshLibraryStatus() {
-  if (!el.libraryStatus) return;
-
-  const library = await getCardLibrary();
-  if (!library) {
-    el.libraryStatus.textContent =
-      "Not connected — cards save to this browser only. Check the Firebase settings.";
-    return;
-  }
-
-  try {
-    const { cards, fetched } = await library.loadSharedCards();
-    el.libraryStatus.textContent =
-      `Connected — ${cards.length} shared card${cards.length === 1 ? "" : "s"}` +
-      (fetched ? ` (${fetched} downloaded just now)` : " (all cached)");
-  } catch (error) {
-    console.warn(error);
-    el.libraryStatus.textContent = "Not connected — checking why…";
-
-    // Probe the database directly to say which of the three setup steps is
-    // actually missing, instead of just repeating "Permission denied".
-    const reason = await diagnoseSharedLibrary();
-    el.libraryStatus.textContent =
-      `Not connected. ${reason} Until then, cards save to this browser only.`;
-  }
-}
-
-// Show how many cards this browser could put back, so the button isn't a
-// mystery when there's nothing to restore.
-async function refreshRestoreHint() {
-  if (!el.restoreHint) return;
-
-  const library = await getCardLibrary();
-  if (!library) return;
-
-  try {
-    const missing = await library.findRecoverableCards();
-    if (missing.length) {
-      el.restoreHint.textContent =
-        `${missing.length} card${missing.length === 1 ? "" : "s"} cached here are missing from the ` +
-        `shared library: ${missing.map(c => c.name || c.cardNumber).join(", ")}. Restore puts them back.`;
-    } else {
-      el.restoreHint.textContent =
-        "Nothing to restore — every card cached in this browser is already in the shared library.";
-    }
-  } catch (error) {
-    console.warn(error);
-  }
-}
-
-async function restoreCardsFromCache() {
-  const library = await getCardLibrary();
-  if (!library) {
-    toast("Shared library unavailable");
-    return;
-  }
-
-  const button = el.restoreCards;
-  if (button) { button.disabled = true; button.textContent = "Restoring…"; }
-
-  try {
-    const { restored, cards } = await library.restoreCardsFromCache();
-    toast(restored ? `Restored ${restored} card${restored === 1 ? "" : "s"}` : "Nothing to restore");
-    if (restored) console.info("Restored:", cards);
-    await refreshLibraryStatus();
-    await refreshRestoreHint();
-    await loadCardPool();
-  } catch (error) {
-    console.error(error);
-    toast(`Restore failed: ${error.message}`);
-  } finally {
-    if (button) { button.disabled = false; button.textContent = "Restore"; }
-  }
 }
 
 function readLocalProjectCards() {
@@ -4479,95 +4334,6 @@ async function deleteImportedCard(cardOrId) {
   toast(`${card.name} deleted`);
 }
 
-// Delete EVERY card in a collection from the shared library. Guarded by a
-// confirm because it affects all players and can't be undone. Used by the
-// code-locked collection tools in Settings.
-async function clearCollectionCards(slug) {
-  if (!slug) return true;
-
-  const name = collectionName(slug);
-  const cards = state.cards.filter(card => (card.collection || COLLECTION_DEFAULT) === slug);
-
-  if (!cards.length) {
-    toast(`${name} is already empty`);
-    return true;
-  }
-
-  if (!window.confirm(
-    `Are you sure you want to delete ALL ${cards.length} cards in "${name}"?\n\n` +
-    `This removes them from the shared library for everyone and can't be undone.`
-  )) return false;
-
-  const library = await getCardLibrary();
-  let failed = 0;
-
-  if (library) {
-    for (const card of cards) {
-      try {
-        await library.deleteSharedCard(card);
-      } catch (error) {
-        console.error("Failed to delete", card.cardNumber, error);
-        failed++;
-      }
-      delete state.deck[card.id];
-      if (state.leaderId === card.id) state.leaderId = "";
-    }
-  } else {
-    // Offline / static-only fallback: drop them from the local project store.
-    const remaining = (await loadProjectCards())
-      .filter(existing => (existing.collection || COLLECTION_DEFAULT) !== slug);
-    await saveProjectCardsLocally(remaining);
-  }
-
-  saveDeck(false);
-  await loadCardPool();
-  toast(failed
-    ? `Cleared ${name}, but ${failed} card${failed === 1 ? "" : "s"} may return (publish database.rules.json)`
-    : `Cleared all cards from ${name}`);
-  return true;
-}
-
-// Remove a collection entirely: clear its cards, then delete the collection
-// entry itself. Built-in collections can't be deleted (they're shipped in code)
-// so they just end up empty.
-async function removeCollectionEntirely(slug) {
-  if (!slug) return;
-  const name = collectionName(slug);
-  const isBuiltIn = BUILTIN_COLLECTIONS.some(entry => entry.slug === slug);
-
-  if (!window.confirm(
-    `Remove the collection "${name}"?\n\n` +
-    `This deletes all of its cards AND the collection itself for everyone.` +
-    (isBuiltIn ? `\n\n(This is a built-in set, so its tile stays but will be empty.)` : ``)
-  )) return;
-
-  // clearCollectionCards has its own confirm; skip a double prompt by clearing
-  // directly here.
-  const cards = state.cards.filter(card => (card.collection || COLLECTION_DEFAULT) === slug);
-  const library = await getCardLibrary();
-  if (library) {
-    for (const card of cards) {
-      try { await library.deleteSharedCard(card); } catch {}
-      delete state.deck[card.id];
-    }
-    try { if (library.deleteSharedCollection) await library.deleteSharedCollection(slug); } catch {}
-  }
-
-  // Drop it from the in-memory + local custom list (built-ins persist in code).
-  customCollections = customCollections.filter(entry => entry.slug !== slug);
-  saveLocalCustomCollections(customCollections);
-  applyCustomCollections(customCollections);
-
-  saveDeck(false);
-  await loadCardPool();
-  populateCollectionSelects();
-  populateCollectionManageSelect();
-  toast(isBuiltIn ? `Emptied ${name}` : `Removed ${name}`);
-}
-
-// ── Code-locked collection management (Settings) ─────────
-const COLLECTION_MANAGE_CODE = "5433";
-
 // The single admin account allowed to change a collection's "Allowed editors"
 // list. Matched on the signed-in account's email (case-insensitive).
 const ADMIN_EMAIL = "goldrush071710@gmail.com";
@@ -4581,18 +4347,6 @@ function isAdminAccount() {
     ? u.emails
     : [u.email].filter(Boolean);
   return emails.map(e => String(e).trim().toLowerCase()).includes(ADMIN_EMAIL);
-}
-
-function populateCollectionManageSelect() {
-  const select = document.getElementById("collectionManageSelect");
-  if (!select) return;
-  const previous = select.value;
-  select.innerHTML = CARD_COLLECTIONS
-    .map(entry => `<option value="${entry.slug}">${escapeHtml(entry.name)}</option>`)
-    .join("");
-  if (previous && CARD_COLLECTIONS.some(entry => entry.slug === previous)) {
-    select.value = previous;
-  }
 }
 
 // ── Custom board images (playmat / card back / DON!! back) ────────────────
@@ -4662,32 +4416,6 @@ function setupCustomImages() {
     btn.addEventListener("click", () => clearCustomImage(btn.getAttribute("data-custom-image-clear")));
   });
   Object.keys(CUSTOM_IMAGE_KEYS).forEach(refreshCustomImagePreview);
-}
-
-function setupCollectionManagement() {
-  const codeInput = document.getElementById("collectionManageCode");
-  const unlockBtn = document.getElementById("collectionManageUnlock");
-  const lockedRow = document.getElementById("collectionManageLocked");
-  const panel = document.getElementById("collectionManagePanel");
-  const select = document.getElementById("collectionManageSelect");
-  const clearBtn = document.getElementById("collectionClearContents");
-  const removeBtn = document.getElementById("collectionRemove");
-  if (!unlockBtn || !panel) return;
-
-  const unlock = () => {
-    if (String(codeInput?.value || "").trim() !== COLLECTION_MANAGE_CODE) {
-      toast("Wrong code");
-      return;
-    }
-    if (lockedRow) lockedRow.hidden = true;
-    panel.hidden = false;
-    populateCollectionManageSelect();
-  };
-  unlockBtn.addEventListener("click", unlock);
-  codeInput?.addEventListener("keydown", event => { if (event.key === "Enter") unlock(); });
-
-  clearBtn?.addEventListener("click", () => clearCollectionCards(select?.value));
-  removeBtn?.addEventListener("click", () => removeCollectionEntirely(select?.value));
 }
 
 // New / edit collection dialog. slug = null creates a new one; otherwise edits
@@ -9418,7 +9146,6 @@ function bindEvents() {
 
   el.clearDeck.addEventListener("click", clearDeck);
   el.clearDeckHome.addEventListener("click", clearDeck);
-  el.restoreCards?.addEventListener("click", restoreCardsFromCache);
   el.quickBuild.addEventListener("click", autoFillDeck);
   el.saveDeck?.addEventListener("click", saveDeckToLibrary);
   el.saveDeckMini.addEventListener("click", saveDeckToLibrary);
@@ -9439,7 +9166,6 @@ function bindEvents() {
     state.viewAll = !state.viewAll;
     renderCardGrid();
   });
-  setupCollectionManagement();
   setupCustomImages();
   el.resetFilters.addEventListener("click", () => {
     el.searchInput.value = "";
@@ -10292,9 +10018,6 @@ loadCollections()
   .then(() => { populateCollectionSelects(); })
   .catch(() => {})
   .finally(() => { loadCardPool(); });
-// Report shared-library connectivity in Settings without blocking startup.
-refreshLibraryStatus();
-refreshRestoreHint();
 // If this page was opened as a multiplayer draft (?draft=1&room=…), take over
 // and run the draft instead of the normal home screen. Safe no-op otherwise.
 maybeStartMultiplayerDraft().catch(err => console.warn("Multiplayer draft init failed:", err));

@@ -25,7 +25,7 @@
   </script>
   <title>Golds Customs</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=draft-mp-16">
+  <link rel="stylesheet" href="styles.css?v=draft-mp-17">
 </head>
 <body>
   <div class="app-shell">
@@ -254,39 +254,6 @@
             </div>
           </section>
 
-          <section class="settings-group" aria-label="Collection management">
-            <h2>Manage Collections</h2>
-            <p class="settings-group-note">
-              Clear a collection's cards or remove a collection entirely. Locked
-              behind a code because it deletes cards for everyone.
-            </p>
-
-            <div class="settings-row" id="collectionManageLocked">
-              <span class="label-text">
-                <strong>Enter code to unlock</strong>
-                <small>Ask an admin for the collection-management code.</small>
-              </span>
-              <div class="collection-manage-unlock">
-                <input type="password" id="collectionManageCode" inputmode="numeric" placeholder="Code" maxlength="8">
-                <button type="button" class="red-button" id="collectionManageUnlock">Unlock</button>
-              </div>
-            </div>
-
-            <div id="collectionManagePanel" hidden>
-              <div class="settings-row">
-                <span class="label-text">
-                  <strong>Collection</strong>
-                  <small>Pick which collection to manage.</small>
-                </span>
-                <select id="collectionManageSelect"></select>
-              </div>
-              <div class="settings-row settings-row-actions collection-manage-buttons">
-                <button type="button" class="red-button" id="collectionClearContents">Clear Contents</button>
-                <button type="button" class="red-button" id="collectionRemove">Remove Collection</button>
-              </div>
-            </div>
-          </section>
-
           <section class="settings-group" aria-label="Card importer settings">
             <h2>Card Importer</h2>
             <p class="settings-group-note">
@@ -299,30 +266,6 @@
                 <small>Read cost, name and set number from a card image and pre-fill the fields. You can always edit them.</small>
               </span>
             </label>
-          </section>
-
-          <section class="settings-group" aria-label="Shared card library">
-            <h2>Shared Card Library</h2>
-            <p class="settings-group-note">
-              Every card anyone saves is published here automatically, so all
-              players see it permanently — no server and no extra step needed.
-            </p>
-            <div class="settings-row">
-              <span>
-                <strong>Status</strong>
-                <small id="libraryStatus">Checking…</small>
-              </span>
-            </div>
-            <div class="settings-row settings-row-actions">
-              <span>
-                <strong>Restore cards from this browser</strong>
-                <small id="restoreHint">
-                  This browser keeps a full copy of every card it has downloaded.
-                  If cards are missing from the shared library, this puts them back.
-                </small>
-              </span>
-              <button class="red-button" type="button" id="restoreCards">Restore</button>
-            </div>
           </section>
         </div>
       </section>
@@ -936,13 +879,13 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=244"></script>
+  <script src="js/version.js?v=245"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=244"></script>
+  <script src="js/auth-ui.js?v=245"></script>
   <script src="js/cards/cardCollections.js?v=draft-1"></script>
   <script src="js/cards/decks.js?v=creation-10"></script>
   <script src="js/manual-play.js?v=manual-28"></script>
-  <script src="app.js?v=creation-124"></script>
+  <script src="app.js?v=creation-125"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).
