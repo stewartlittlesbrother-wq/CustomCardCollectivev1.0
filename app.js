@@ -7425,16 +7425,6 @@ function restoreNormalPackButtons() {
 }
 
 let currentPack = [];
-// Show the overlay with a fresh, unopened booster (plain pack opener).
-function openPack() {
-  if (!state.cards || !state.cards.length) { toast("Cards are still loading — try again in a moment."); return; }
-  packDraftMode = false;
-  packCollectionFilter = "";   // plain pack: any collection
-  const overlay = ensurePackOverlay();
-  restoreNormalPackButtons();
-  startPackOpen();
-  overlay.hidden = false;
-}
 
 // Reset to the unopened-booster state and draw a new pack.
 function startPackOpen() {
@@ -7477,11 +7467,12 @@ function revealPack() {
   }, 520);
 }
 
-// ── Solo Draft ──────────────────────────────────────────────────────────────
+// ── Draft (multiplayer only) ────────────────────────────────────────────────
 // Open 10 packs, keep everything you pull, then build a deck from ONLY those
-// cards with the all-colour "Ichigo & Luffy & Naruto" leader locked in, on a
-// 15-minute timer, and play it on the practice board. (Multiplayer draft - shared
-// packs/chat/ready with a real opponent - is the next stage, built on this.)
+// cards on a 15-minute timer. Draft is multiplayer-only now: the standalone Solo
+// Draft and plain "Open a Pack" entries were removed from the home page, and the
+// pack opener / builder below are driven by the multiplayer draft (see
+// beginMultiplayerDraft). Their solo-only branches are left in place, unreachable.
 const DRAFT_PACKS = 10;
 const DRAFT_MINUTES = 15;
 const DRAFT_DECK_SIZE = 40;   // draft decks are 40 cards (smaller than a normal 50)
@@ -7493,72 +7484,6 @@ let draftDeck = {};          // { cardId: qty } chosen for the deck
 let draftTimer = null;
 let draftAutoOpening = false; // "Open all packs" is auto-playing the reveals
 let draftPacksDone = false;   // packs finished → in (or entering) the builder
-
-// Collections that actually have packable cards, for the pre-draft pool chooser.
-function draftCollectionOptions() {
-  const slugs = new Set();
-  (state.cards || []).forEach(c => { if (isPackableCard(c)) slugs.add(c.collection || COLLECTION_DEFAULT); });
-  return [...slugs].sort().map(slug => ({ slug, name: collectionName(slug) }));
-}
-
-// Step 1 of a draft: pick the card pool (all cards, or one collection).
-function startSoloDraft() {
-  if (!state.cards || !state.cards.length) { toast("Cards are still loading — try again in a moment."); return; }
-  const opts = draftCollectionOptions();
-  const options = `<option value="">All cards</option>` +
-    opts.map(o => `<option value="${escapeAttr(o.slug)}">${escapeHtml(o.name)}</option>`).join("");
-  let dlg = document.getElementById("draftSetup");
-  if (!dlg) {
-    dlg = document.createElement("div");
-    dlg.className = "pack-overlay";
-    dlg.id = "draftSetup";
-    document.body.appendChild(dlg);
-  }
-  dlg.innerHTML = `
-    <div class="draft-setup-box">
-      <h2>Draft — choose your pool</h2>
-      <p>You'll open ${DRAFT_PACKS} packs, then build a ${DRAFT_DECK_SIZE}-card deck.</p>
-      <label class="draft-setup-field">Card pool
-        <select id="draftCollectionSelect">${options}</select>
-      </label>
-      <div class="pack-actions">
-        <button type="button" class="red-button" id="draftSetupStart">Start draft</button>
-        <button type="button" class="ghost" id="draftSetupCancel">Cancel</button>
-      </div>
-    </div>`;
-  dlg.hidden = false;
-  dlg.querySelector("#draftSetupCancel").onclick = () => { dlg.hidden = true; };
-  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.hidden = true; }, { once: true });
-  dlg.querySelector("#draftSetupStart").onclick = () => {
-    const slug = dlg.querySelector("#draftCollectionSelect").value || "";
-    dlg.hidden = true;
-    beginDraft(slug);
-  };
-}
-
-// Step 2: actually start opening the 10 packs from the chosen pool.
-function beginDraft(collectionSlug) {
-  packCollectionFilter = collectionSlug || "";
-  packDraftMode = true;
-  draftPool = [];
-  draftPacksOpened = 0;
-  draftDeck = {};
-  draftAutoOpening = false;
-  draftPacksDone = false;
-  const overlay = ensurePackOverlay();
-  startPackOpen();
-  overlay.hidden = false;
-  const again = overlay.querySelector("#packAgain");
-  const close = overlay.querySelector("#packClose");
-  const skip = overlay.querySelector("#packSkipAll");
-  // "Open pack" (individual) is always available; the pool tap also reveals.
-  again.hidden = false;
-  again.textContent = "Open pack";
-  again.onclick = draftOpenNextPack;
-  close.hidden = false;
-  close.textContent = "Cancel draft";
-  if (skip) { skip.hidden = false; skip.textContent = "⏩ Open all packs"; skip.onclick = openAllDraftPacks; }
-}
 
 // Called after each draft pack is revealed: bank the pulls and set up the next
 // step ("Open next pack" until 10, then "Build your deck").
@@ -9142,9 +9067,6 @@ function bindEvents() {
   document.getElementById("multiplayerButton").addEventListener("click", () => {
     window.location.href = "html/multiplayer.html";
   });
-
-  document.getElementById("openPackBtn")?.addEventListener("click", openPack);
-  document.getElementById("draftSoloBtn")?.addEventListener("click", startSoloDraft);
 
   // Home cards that just do what another control already does (e.g. the Card
   // Creator card = the Card Creator nav tab), so there's one code path for each.

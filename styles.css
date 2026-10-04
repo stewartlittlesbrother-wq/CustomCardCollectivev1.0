@@ -267,38 +267,48 @@ main {
   box-shadow: var(--shadow);
 }
 
-/* Large faded character artwork flanking the hero: Zoro down the left, Brook down
-   the right. Purely decorative: both sit behind the content, ignore pointer events,
-   and simply don't paint if an image file is absent.
+/* Character art in the EMPTY MARGINS either side of the content column - Zoro on
+   the left, Brook on the right - instead of behind the hero. Fixed to the window
+   and full height, as wide as the empty margin plus a little tuck behind the
+   column, fading out toward the content. Decorative only: behind everything, no
+   pointer events, and simply doesn't paint if an image file is absent.
      images/basic/zoro-bg.png   (left)
-     images/basic/brook-bg.png  (right) */
-.home-launch::before,
-.home-launch::after {
-  content: "";
-  position: absolute;
+     images/basic/brook-bg.png  (right)
+   Needs a stacking context on the view so z-index:-1 stays above the page
+   background but below the content (see #homeView.view.active). */
+#homeView.view.active {
+  position: relative;
+  isolation: isolate;
+}
+.home-side {
+  position: fixed;
   top: 0;
   bottom: 0;
-  width: min(44%, 540px);
+  width: clamp(0px, calc((100vw - 1120px) / 2 + 90px), 560px);
   background-repeat: no-repeat;
-  background-size: cover;
-  opacity: .2;
+  background-size: auto 100%;
+  opacity: .55;
   filter: saturate(1.1);
   pointer-events: none;
-  z-index: 0;
+  z-index: -1;
 }
-.home-launch::before {
+.home-side-left {
   left: 0;
   background-image: url("images/basic/zoro-bg.png");
   background-position: left center;
-  -webkit-mask-image: linear-gradient(to right, #000 45%, transparent 100%);
-  mask-image: linear-gradient(to right, #000 45%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 50%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 50%, transparent 100%);
 }
-.home-launch::after {
+.home-side-right {
   right: 0;
   background-image: url("images/basic/brook-bg.png");
   background-position: right center;
-  -webkit-mask-image: linear-gradient(to left, #000 45%, transparent 100%);
-  mask-image: linear-gradient(to left, #000 45%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to left, #000 50%, transparent 100%);
+  mask-image: linear-gradient(to left, #000 50%, transparent 100%);
+}
+/* No margin to fill on a narrow window: don't let the art sit behind the cards. */
+@media (max-width: 1160px) {
+  .home-side { display: none; }
 }
 
 /* Keep all real content above the artwork */

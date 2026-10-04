@@ -25,7 +25,7 @@
   </script>
   <title>Golds Customs</title>
   <link rel="icon" type="image/svg+xml" href="images/basic/custom-sim-logo.svg">
-  <link rel="stylesheet" href="styles.css?v=draft-mp-15">
+  <link rel="stylesheet" href="styles.css?v=draft-mp-16">
 </head>
 <body>
   <div class="app-shell">
@@ -55,6 +55,11 @@
 
     <main>
       <section class="view active" id="homeView" data-view-panel="home">
+        <!-- Character art in the empty margins either side of the content column
+             (Zoro left, Brook right). Decorative only: sits behind everything. -->
+        <div class="home-side home-side-left" aria-hidden="true"></div>
+        <div class="home-side home-side-right" aria-hidden="true"></div>
+
         <div class="home-page">
 
           <!-- Hero: who we are + the library at a glance (numbers filled in by
@@ -101,15 +106,15 @@
               </button>
               <button type="button" data-view="game" class="home-mode">
                 <span class="home-mode-icon" aria-hidden="true">🎯</span>
-                <span class="home-mode-body"><strong>Practice vs Self</strong><small>Test a deck on the full play board. You control both sides.</small></span>
+                <span class="home-mode-body"><strong>Practice Board</strong><small>Test a deck on the full play board. You control both sides.</small></span>
               </button>
-              <button type="button" id="openPackBtn" class="home-mode">
-                <span class="home-mode-icon" aria-hidden="true">🎁</span>
-                <span class="home-mode-body"><strong>Open a Pack</strong><small>Rip open booster packs from any collection, animation and all.</small></span>
+              <button type="button" data-view="hotkeys" class="home-mode">
+                <span class="home-mode-icon" aria-hidden="true">⌨️</span>
+                <span class="home-mode-body"><strong>Hotkeys</strong><small>Make your own keyboard shortcuts for actions on the game board.</small></span>
               </button>
-              <button type="button" id="draftSoloBtn" class="home-mode">
-                <span class="home-mode-icon" aria-hidden="true">🎴</span>
-                <span class="home-mode-body"><strong>Solo Draft</strong><small>Open 10 packs, then build a 40-card deck from your pulls.</small></span>
+              <button type="button" data-view="settings" class="home-mode">
+                <span class="home-mode-icon" aria-hidden="true">⚙️</span>
+                <span class="home-mode-body"><strong>Settings</strong><small>Turn automation, board display, custom playmats and your account.</small></span>
               </button>
             </div>
           </section>
@@ -931,13 +936,13 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=243"></script>
+  <script src="js/version.js?v=244"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=243"></script>
+  <script src="js/auth-ui.js?v=244"></script>
   <script src="js/cards/cardCollections.js?v=draft-1"></script>
   <script src="js/cards/decks.js?v=creation-10"></script>
   <script src="js/manual-play.js?v=manual-28"></script>
-  <script src="app.js?v=creation-123"></script>
+  <script src="app.js?v=creation-124"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).
