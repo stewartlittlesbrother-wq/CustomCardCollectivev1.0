@@ -201,7 +201,7 @@ function refreshLobbyStatsRow() {
     const row = $("lobbyStatsRow");
     const select = $("lobbyStatsSelect");
     if (!row || !select) return;
-    const deck = window.getDeckById?.(lobbyDeckSelect.value);
+    const deck = getLobbyDeck();
     if (!deck || !deck.leaderKey2) { row.hidden = true; select.innerHTML = ""; return; }
 
     const previous = select.value;
@@ -336,16 +336,64 @@ function applyTournamentLobby(meta) {
     tournamentMeta = meta;
     loadCollectionNamesOnce();
     const pool = Object.values(meta.collections || {});
+    const bans = Object.values(meta.banned || {});
+    const bestOf = Number(meta.bestOf) || 1;
     if (lobbyTournamentBanner) {
         lobbyTournamentBanner.hidden = false;
         lobbyTournamentBanner.innerHTML =
-            `<strong>🏆 ${escapeHtml(meta.name || "Tournament")} — Round ${escapeHtml(meta.round)}</strong>` +
+            `<strong>🏆 ${escapeHtml(meta.name || "Tournament")} — Round ${escapeHtml(meta.round)}${bestOf > 1 ? ` · Game ${escapeHtml(meta.game || 1)} of ${bestOf}` : ""}</strong>` +
             `<span>${meta.format === "swiss" ? "Swiss" : "Single elimination"} · ` +
             `${meta.matchType === "draft" ? "Draft battle" : "Regular match"} · ` +
-            `Card pool: ${pool.length ? escapeHtml(pool.map(prettyCollectionName).join(", ")) : "all collections"}</span>`;
+            `Card pool: ${pool.length ? escapeHtml(pool.map(prettyCollectionName).join(", ")) : "all collections"}` +
+            `${bans.length ? ` · ${bans.length} banned card${bans.length === 1 ? "" : "s"}` : ""}</span>`;
     }
     if (lobbyTitle) lobbyTitle.textContent = "Tournament match";
     if (btnBackFromLobby) btnBackFromLobby.textContent = "← Tournaments";
+    if (meta.requireDeck && meta.matchType !== "draft") loadRequiredDeck(meta);
+}
+
+// A tournament that asked for deck lists: you play the deck you submitted, nothing else.
+let tournamentLockedDeck = null;
+let lockedDeckRequested = false;
+async function loadRequiredDeck(meta) {
+    if (lockedDeckRequested || !currentUser) return;
+    lockedDeckRequested = true;
+    try {
+        const decks = await import("../firebase/tournamentDecks.js?v=tour-2");
+        const submitted = await decks.getSubmittedDeck(meta.id, currentUser.uid);
+        if (!submitted || !submitted.deck) {
+            showError(mpLobbyError, "You haven't submitted a deck list for this tournament, so you can't play yet. Go back and submit one.");
+            return;
+        }
+        tournamentLockedDeck = { ...submitted.deck };
+        lobbyDeckSelect.innerHTML = "";
+        const option = document.createElement("option");
+        option.value = "__tournament__";
+        option.textContent = `🔒 ${submitted.name || "Submitted deck"} (your tournament deck list)`;
+        lobbyDeckSelect.appendChild(option);
+        lobbyDeckSelect.disabled = true;
+        refreshLobbyStatsRow();
+        mpLobbyMsg.textContent = "This tournament uses your submitted deck list — ready up when you're set.";
+    } catch (error) {
+        lockedDeckRequested = false;
+        showError(mpLobbyError, "Couldn't load your submitted deck list. Check your connection and refresh.");
+    }
+}
+
+// The deck the player will use: their submitted list in a deck-list tournament,
+// otherwise whatever is chosen in the picker.
+function getLobbyDeck() {
+    if (tournamentLockedDeck) return tournamentLockedDeck;
+    return window.getDeckById?.(lobbyDeckSelect.value);
+}
+
+// A tournament can change the draft's pack count and build time; show the real numbers.
+function draftMinutes() {
+    return Number(tournamentMeta && tournamentMeta.draft && tournamentMeta.draft.minutes) || 15;
+}
+function draftSettingsText() {
+    const packs = Number(tournamentMeta && tournamentMeta.draft && tournamentMeta.draft.packs);
+    return packs ? `${packs} pack${packs === 1 ? "" : "s"}` : "packs";
 }
 
 // Cards in a deck that aren't from the tournament's collections ("" = no problem).
@@ -355,47 +403,16 @@ function applyTournamentLobby(meta) {
 // only stores card NUMBERS, and the same number can exist in more than one collection,
 // so a card is accepted if ANY card with that number is in the tournament's pool.
 async function tournamentDeckProblem(deck) {
-    const pool = new Set(Object.values((tournamentMeta && tournamentMeta.collections) || {}));
-    if (!pool.size) return "";
-
-    const ids = new Set();
-    String(deck.deckText || "").split(/\n+/).forEach(line => {
-        const m = line.trim().match(/^\d+x(.+)$/i);
-        if (m) ids.add(m[1].trim());
-    });
-    [deck.leaderKey, deck.leaderKey2].forEach(id => { if (id) ids.add(id); });
-    if (!ids.size) return "";
-
-    const fallback = window.COLLECTION_DEFAULT || "golds-bleach";
-    const collectionsByCard = new Map();   // card number -> Set of collections that have it
-    const nameByCard = new Map();
+    const pool = Object.values((tournamentMeta && tournamentMeta.collections) || {});
+    const banned = Object.values((tournamentMeta && tournamentMeta.banned) || {});
+    if (!pool.length && !banned.length) return "";
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=draft-4");
-        const { cards } = await library.loadSharedCards({ onlyNumbers: ids });
-        (cards || []).forEach(card => {
-            [card.cardNumber, card.id].filter(Boolean).forEach(key => {
-                if (!collectionsByCard.has(key)) collectionsByCard.set(key, new Set());
-                collectionsByCard.get(key).add(card.collection || fallback);
-                if (card.name && !nameByCard.has(key)) nameByCard.set(key, card.name);
-            });
-        });
+        const decks = await import("../firebase/tournamentDecks.js?v=tour-2");
+        const result = await decks.checkDeck(deck, { collections: pool, banned, collectionName: prettyCollectionName });
+        return result.problems.join(" ");
     } catch {
-        return "Couldn't check your deck against the card pool right now. Check your connection and try again.";
+        return "Couldn't check your deck against the tournament rules right now. Check your connection and try again.";
     }
-
-    const bad = [];
-    ids.forEach(id => {
-        const collections = collectionsByCard.get(id);
-        // Unknown to the shared library: a bundled card (default collection) or a card
-        // that doesn't exist - only the default collection can vouch for those.
-        const allowed = collections
-            ? [...collections].some(c => pool.has(c))
-            : Boolean((window.cardDatabase || {})[id]) && pool.has(fallback);
-        if (!allowed) bad.push(nameByCard.get(id) || ((window.cardDatabase || {})[id] || {}).name || id);
-    });
-    if (!bad.length) return "";
-    const shown = bad.slice(0, 6).join(", ") + (bad.length > 6 ? `, and ${bad.length - 6} more` : "");
-    return `This deck has cards outside the tournament's card pool (${[...pool].map(prettyCollectionName).join(", ")}): ${shown}.`;
 }
 
 function goToDraft() {
@@ -437,7 +454,7 @@ function handleMatchUpdate(match) {
         if (btnEnterDraft) btnEnterDraft.disabled = !bothHere;
         if (draftLobbyHint) {
             draftLobbyHint.textContent = bothHere
-                ? "Opponent's here! Open your packs when ready — you'll build on a shared 15-minute timer."
+                ? `Opponent's here! Open your ${draftSettingsText()} when ready — you'll build on a shared ${draftMinutes()}-minute timer.`
                 : "Waiting for an opponent to join…";
         }
         mpLobbyMsg.textContent = bothHere
@@ -804,7 +821,11 @@ btnReady.addEventListener("click", async () => {
     clearError(mpLobbyError);
     if (!currentRoomCode || !currentUser) { showError(mpLobbyError, "Not in a room."); return; }
 
-    const selectedDeck = window.getDeckById?.(lobbyDeckSelect.value);
+    if (tournamentMeta && tournamentMeta.requireDeck && tournamentMeta.matchType !== "draft" && !tournamentLockedDeck) {
+        showError(mpLobbyError, "Your submitted deck list hasn't loaded yet — wait a moment, or go back and submit one.");
+        return;
+    }
+    const selectedDeck = getLobbyDeck();
     if (!selectedDeck) { showError(mpLobbyError, "Choose a deck first."); return; }
 
     // Tournament with a card pool: the deck must stay inside it.

@@ -1389,23 +1389,73 @@ function reportTournamentResult(winnerSlot) {
     if (!tournamentContext || isSpectator) return;
     const winnerUid = tournamentContext.uids[winnerSlot];
     if (!winnerUid) return;
-    import("../firebase/tournamentService.js?v=tour-1")
-        .then(service => service.reportMatchResult(tournamentContext.meta, winnerUid))
+    tournamentContext.iWon = winnerSlot === playerSlot;
+    Promise.all([
+        import("../firebase/tournamentService.js?v=tour-2"),
+        import("../core/tournamentEngine.js?v=tour-2")
+    ])
+        .then(async ([service, engine]) => {
+            const doc = await service.reportMatchResult(tournamentContext.meta, winnerUid);
+            tournamentContext.series = describeTournamentSeries(engine, doc);
+            updateTournamentPanelNote();
+        })
         .catch(error => console.warn("Couldn't record the tournament result:", error));
+}
+
+// Where does the match stand after this game? ({ played, score, decided })
+function describeTournamentSeries(engine, doc) {
+    const meta = tournamentContext && tournamentContext.meta;
+    if (!doc || !meta) return null;
+    const round = engine.getRound(doc, meta.round);
+    const pairing = round && round.pairings && round.pairings[meta.pairingId];
+    if (!pairing) return null;
+    const score = engine.seriesScore(pairing);
+    const mineIsA = pairing.a === (tournamentContext.uids[playerSlot]);
+    return {
+        mine: mineIsA ? score.a : score.b,
+        theirs: mineIsA ? score.b : score.a,
+        decided: Boolean(pairing.result),
+        won: Boolean(pairing.result) && pairing.result.winner === tournamentContext.uids[playerSlot],
+        nextGame: score.played + 1
+    };
+}
+
+function tournamentPanelText() {
+    const meta = tournamentContext.meta;
+    const bestOf = Number(meta.bestOf) || 1;
+    if (bestOf <= 1) {
+        return "Your result has been recorded. There's no rematch in tournament games — " +
+            "head back to the tournament to see your next round.";
+    }
+    const series = tournamentContext.series;
+    if (!series) return `Game ${meta.game || 1} of ${bestOf} — recording your result…`;
+    if (series.decided) {
+        return `The match is decided: you ${series.won ? "won" : "lost"} ${series.mine}–${series.theirs}. ` +
+            "Head back to the tournament to see what's next.";
+    }
+    return `Game ${meta.game || 1} is recorded — the series is ${series.mine}–${series.theirs}. ` +
+        `Head back to the tournament and press Play game ${series.nextGame} when you're ready (all games must be played before the round ends).`;
+}
+
+function updateTournamentPanelNote() {
+    if (tournamentContext && tournamentContext.noteEl && tournamentContext.noteEl.isConnected) {
+        tournamentContext.noteEl.textContent = tournamentPanelText();
+    }
 }
 
 function buildTournamentGameOverPanel() {
     const meta = tournamentContext.meta;
+    const bestOf = Number(meta.bestOf) || 1;
     const panel = document.createElement("div");
     panel.className = "rematch-panel";
 
     const heading = document.createElement("h4");
     heading.className = "rematch-heading";
-    heading.textContent = `🏆 ${meta.name || "Tournament"} — Round ${meta.round}`;
+    heading.textContent = `🏆 ${meta.name || "Tournament"} — Round ${meta.round}${bestOf > 1 ? ` · Game ${meta.game || 1} of ${bestOf}` : ""}`;
 
     const note = document.createElement("p");
-    note.textContent = "Your result has been recorded. There's no rematch in tournament games — " +
-        "head back to the tournament to see your next round.";
+    tournamentContext.noteEl = note;
+    note.textContent = tournamentPanelText();
 
     panel.appendChild(heading);
     panel.appendChild(note);

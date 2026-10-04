@@ -6,21 +6,18 @@
         ".write": "auth != null"
       }
     },
-
     "lobbies": {
       ".read": "auth != null",
       "$roomCode": {
         ".write": "auth != null"
       }
     },
-
     "activeGames": {
       ".read": true,
       "$roomCode": {
         ".write": "auth != null"
       }
     },
-
     "cards": {
       ".read": true,
       "$cardNumber": {
@@ -28,45 +25,74 @@
         ".validate": "newData.hasChildren(['cardNumber', 'name'])"
       }
     },
-
     "cardIndex": {
       ".read": true,
       "$cardNumber": {
         ".write": "auth != null"
       }
     },
-
     "collections": {
       ".read": true,
       "$slug": {
         ".write": "auth != null"
       }
     },
-
     "users": {
       "$uid": {
         ".read": "auth != null && auth.uid == $uid",
         ".write": "auth != null && auth.uid == $uid"
       }
     },
-
     "usernames": {
       ".read": "auth != null",
       "$name": {
         ".write": "auth != null && !data.exists()"
       }
     },
-
     "tournaments": {
       ".read": true,
       "$tid": {
-        ".write": "auth != null && auth.token.firebase.sign_in_provider !== 'anonymous' && ((!data.exists() && newData.child('createdBy').val() === auth.uid) || data.child('createdBy').val() === auth.uid || data.child('players').child(auth.uid).exists())",
-        ".validate": "newData.hasChildren(['name', 'createdBy', 'matchType', 'format', 'startAt', 'roundMinutes', 'maxPlayers', 'status']) && ((data.exists() && newData.child('createdBy').val() === data.child('createdBy').val()) || (!data.exists() && newData.child('createdBy').val() === auth.uid)) && newData.child('name').isString() && newData.child('name').val().length <= 60 && (newData.child('matchType').val() === 'regular' || newData.child('matchType').val() === 'draft') && (newData.child('format').val() === 'elimination' || newData.child('format').val() === 'swiss') && newData.child('startAt').isNumber() && newData.child('roundMinutes').isNumber() && newData.child('maxPlayers').isNumber() && (newData.child('status').val() === 'registration' || newData.child('status').val() === 'running' || newData.child('status').val() === 'complete' || newData.child('status').val() === 'cancelled')",
+        ".write": "auth != null && auth.token.firebase.sign_in_provider !== 'anonymous' && ((!data.exists() && newData.child('createdBy').val() === auth.uid) || data.child('createdBy').val() === auth.uid || (newData.exists() && data.child('players').child(auth.uid).exists()))",
+        ".validate": "newData.hasChildren(['name', 'createdBy', 'matchType', 'format', 'startAt', 'roundMinutes', 'maxPlayers', 'status']) && ((data.exists() && newData.child('createdBy').val() === data.child('createdBy').val()) || (!data.exists() && newData.child('createdBy').val() === auth.uid)) && newData.child('name').isString() && newData.child('name').val().length <= 60 && (newData.child('matchType').val() === 'regular' || newData.child('matchType').val() === 'draft') && (newData.child('format').val() === 'elimination' || newData.child('format').val() === 'swiss') && newData.child('startAt').isNumber() && newData.child('roundMinutes').isNumber() && newData.child('roundMinutes').val() >= 5 && newData.child('roundMinutes').val() <= 86400 && newData.child('maxPlayers').isNumber() && newData.child('maxPlayers').val() <= 256 && (newData.child('status').val() === 'registration' || newData.child('status').val() === 'running' || newData.child('status').val() === 'complete' || newData.child('status').val() === 'cancelled') && (!newData.child('description').exists() || (newData.child('description').isString() && newData.child('description').val().length <= 600)) && (!newData.child('bestOf').exists() || (newData.child('bestOf').val() === 1 || newData.child('bestOf').val() === 3 || newData.child('bestOf').val() === 5)) && (!newData.child('minPlayers').exists() || (newData.child('minPlayers').isNumber() && newData.child('minPlayers').val() >= 2 && newData.child('minPlayers').val() <= 256)) && (!newData.child('roundMode').exists() || (newData.child('roundMode').val() === 'asap' || newData.child('roundMode').val() === 'full')) && (!newData.child('pwSalt').exists() || (newData.child('pwSalt').isString() && newData.child('pwSalt').val().length <= 64))",
         "players": {
           "$uid": {
-            ".write": "auth != null && auth.uid === $uid && auth.token.firebase.sign_in_provider !== 'anonymous' && root.child('tournaments').child($tid).child('status').val() === 'registration' && (data.exists() || root.child('tournaments').child($tid).child('players').numChildren() < root.child('tournaments').child($tid).child('maxPlayers').val())",
-            ".validate": "newData.hasChildren(['name', 'joinedAt']) && newData.child('name').isString() && newData.child('name').val().length <= 30"
+            ".write": "auth != null && auth.uid === $uid && auth.token.firebase.sign_in_provider !== 'anonymous' && !root.child('tournaments').child($tid).child('kicked').child($uid).exists() && ((root.child('tournaments').child($tid).child('status').val() === 'registration' && (data.exists() || (root.child('tournaments').child($tid).child('players').numChildren() < root.child('tournaments').child($tid).child('maxPlayers').val() && (root.child('tournaments').child($tid).child('hasPassword').val() !== true || root.child('tournamentJoin').child($tid).child($uid).val() === root.child('tournamentSecrets').child($tid).child('pwHash').val())))) || (root.child('tournaments').child($tid).child('status').val() === 'running' && root.child('tournaments').child($tid).child('lateJoin').val() === true && !data.exists() && newData.exists() && root.child('tournaments').child($tid).child('players').numChildren() < root.child('tournaments').child($tid).child('maxPlayers').val() && (root.child('tournaments').child($tid).child('hasPassword').val() !== true || root.child('tournamentJoin').child($tid).child($uid).val() === root.child('tournamentSecrets').child($tid).child('pwHash').val())))",
+            ".validate": "newData.hasChildren(['name', 'joinedAt']) && newData.child('name').isString() && newData.child('name').val().length <= 30",
+            "deckAt": {
+              ".write": "auth != null && auth.uid === $uid && auth.token.firebase.sign_in_provider !== 'anonymous' && ((root.child('tournaments').child($tid).child('status').val() === 'registration' && (!root.child('tournaments').child($tid).child('deckDeadline').exists() || now <= root.child('tournaments').child($tid).child('deckDeadline').val())) || (root.child('tournaments').child($tid).child('status').val() === 'running' && root.child('tournaments').child($tid).child('lateJoin').val() === true && !data.exists()))",
+              ".validate": "newData.isNumber()"
+            }
           }
+        }
+      }
+    },
+    "tournamentSecrets": {
+      "$tid": {
+        ".read": false,
+        ".write": "auth != null && root.child('tournaments').child($tid).child('createdBy').val() === auth.uid",
+        "pwHash": {
+          ".validate": "newData.isString() && newData.val().length <= 64"
+        }
+      }
+    },
+    "tournamentJoin": {
+      "$tid": {
+        ".write": "auth != null && root.child('tournaments').child($tid).child('createdBy').val() === auth.uid",
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "newData.isString() && newData.val().length <= 64"
+        }
+      }
+    },
+    "tournamentDecks": {
+      "$tid": {
+        ".read": "auth != null && root.child('tournaments').child($tid).child('createdBy').val() === auth.uid",
+        ".write": "auth != null && root.child('tournaments').child($tid).child('createdBy').val() === auth.uid",
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "auth != null && (root.child('tournaments').child($tid).child('createdBy').val() === auth.uid || (auth.uid === $uid && root.child('tournaments').child($tid).child('players').child($uid).exists() && ((root.child('tournaments').child($tid).child('status').val() === 'registration' && (!root.child('tournaments').child($tid).child('deckDeadline').exists() || now <= root.child('tournaments').child($tid).child('deckDeadline').val())) || (root.child('tournaments').child($tid).child('status').val() === 'running' && root.child('tournaments').child($tid).child('lateJoin').val() === true && !data.exists()))))",
+          ".validate": "newData.hasChildren(['name', 'cards', 'deck', 'submittedAt']) && newData.child('name').isString() && newData.child('name').val().length <= 60"
         }
       }
     }

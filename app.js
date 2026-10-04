@@ -7043,8 +7043,13 @@ function packRarityClass(card) {
 
 // A card that shouldn't appear in a pack: DON!! cards and LEADERS (you get a set
 // leader in draft, and leaders aren't pack pulls).
+function isDraftBanned(c) {
+  if (!draftBannedNumbers.size || !c) return false;
+  return draftBannedNumbers.has(String(c.cardNumber || "").toLowerCase()) || draftBannedNumbers.has(String(c.id || "").toLowerCase());
+}
+
 function isPackableCard(c) {
-  return c && !c.donCard && !c.omniLeader && String(c.category || c.cardType).toLowerCase() !== "leader";
+  return c && !c.donCard && !c.omniLeader && String(c.category || c.cardType).toLowerCase() !== "leader" && !isDraftBanned(c);
 }
 
 // Which collection packs draw from ("" = all collections). Set for draft; the
@@ -7204,9 +7209,13 @@ function revealPack() {
 // Draft and plain "Open a Pack" entries were removed from the home page, and the
 // pack opener / builder below are driven by the multiplayer draft (see
 // beginMultiplayerDraft). Their solo-only branches are left in place, unreachable.
-const DRAFT_PACKS = 10;
-const DRAFT_MINUTES = 15;
-const DRAFT_DECK_SIZE = 40;   // draft decks are 40 cards (smaller than a normal 50)
+// These are the defaults. A tournament's organiser can change all three for its draft
+// matches; the settings are read from the room in maybeStartMultiplayerDraft().
+let DRAFT_PACKS = 10;
+let DRAFT_MINUTES = 15;
+let DRAFT_DECK_SIZE = 40;   // draft decks are 40 cards (smaller than a normal 50)
+// Card numbers (lowercase) a tournament has banned: never put in packs or offered as leaders.
+let draftBannedNumbers = new Set();
 const OMNI_LEADER_ID = "OMNI-999";
 let packDraftMode = false;
 let draftPool = [];          // every card pulled across the 10 packs (with dupes)
@@ -7563,6 +7572,19 @@ function finishDraft() {
 let mpDraft = null;          // { room, slot, pool, svc, user, nick, ... } while drafting
 const MP_DRAFT_WARN_MS = [10, 5, 3, 1].map(m => m * 60 * 1000);
 
+// Draft rules chosen by a tournament's organiser (packs, build time, deck size, bans).
+function applyTournamentDraftSettings(meta) {
+  const d = (meta && meta.draft) || {};
+  const pick = (value, min, max, fallback) => {
+    const n = Math.round(Number(value));
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+  };
+  DRAFT_PACKS = pick(d.packs, 1, 30, DRAFT_PACKS);
+  DRAFT_MINUTES = pick(d.minutes, 3, 180, DRAFT_MINUTES);
+  DRAFT_DECK_SIZE = pick(d.deckSize, 20, 60, DRAFT_DECK_SIZE);
+  draftBannedNumbers = new Set(Object.values((meta && meta.banned) || {}).map(n => String(n).trim().toLowerCase()).filter(Boolean));
+}
+
 function getMpDraftParams() {
   const p = new URLSearchParams(location.search);
   if (p.get("draft") !== "1") return null;
@@ -7654,6 +7676,12 @@ async function maybeStartMultiplayerDraft() {
     unsubChat: null,
     timer: null
   };
+
+  // A tournament match carries its own draft settings and ban list on the room.
+  try {
+    const room = await svc.getMatch(params.room);
+    if (room && room.tournament) applyTournamentDraftSettings(room.tournament);
+  } catch (e) { /* default settings are fine */ }
 
   showMpDraftCover("Loading the card pool…");
   const ready = await whenCardsReady();
@@ -7748,7 +7776,7 @@ function teardownMpDraft() {
 // colour leader would fight the mixed-colour draft pool. Omni always leads.
 function rainbowLeaders() {
   const leaders = (state.cards || []).filter(card =>
-    card && card.category === "leader" &&
+    card && card.category === "leader" && !isDraftBanned(card) &&
     Array.isArray(card.colors) &&
     card.colors.filter(color => color && color !== "colorless").length >= 2);
   // Guarantee the omni leader is present even if it isn't in the pool array.
@@ -7935,7 +7963,7 @@ function tickMpDraftTimer() {
 
   // Warnings as each threshold is crossed (once each).
   MP_DRAFT_WARN_MS.forEach(ms => {
-    if (left <= ms && !mpDraft.warned.has(ms)) {
+    if (ms < DRAFT_MINUTES * 60 * 1000 && left <= ms && !mpDraft.warned.has(ms)) {
       mpDraft.warned.add(ms);
       const mins = Math.round(ms / 60000);
       toast(`⏳ ${mins} minute${mins === 1 ? "" : "s"} left to build your deck.`);
