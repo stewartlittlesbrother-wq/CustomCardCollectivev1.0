@@ -22,8 +22,8 @@ import {
 
 import { database } from "./firebaseApp.js";
 import { createRoom, joinRoom } from "./multiplayerService.js?v=draft-6";
-import { BASE_PATH, DECKS_PATH, SECRETS_PATH, JOIN_PATH } from "./tournamentPaths.js?v=tour-2";
-import { getSubmittedDeck } from "./tournamentDecks.js?v=tour-2";
+import { BASE_PATH, DECKS_PATH, SECRETS_PATH, JOIN_PATH } from "./tournamentPaths.js?v=tour-3";
+import { getSubmittedDeck } from "./tournamentDecks.js?v=tour-3";
 import {
     tick,
     cleanSettings,
@@ -45,7 +45,7 @@ import {
     myStatus,
     playerCount,
     minPlayersOf
-} from "../core/tournamentEngine.js?v=tour-2";
+} from "../core/tournamentEngine.js?v=tour-3";
 
 const basePath = BASE_PATH;
 const tournamentRef = (id, ...parts) => ref(database, [basePath, id, ...parts].join("/"));

@@ -1,7 +1,7 @@
 // Deck list dialogs: a player submitting theirs, and the viewer (image + text) the
 // organiser uses to look at every submitted list.
 
-import { $, esc, fmtDate, toast, copyText, downloadText, safeFilename } from "./tournamentUi.js?v=tour-2";
+import { $, esc, fmtDate, toast, copyText, downloadText, safeFilename } from "./tournamentUi.js?v=tour-3";
 import {
     savedDecks,
     deckContents,
@@ -10,8 +10,8 @@ import {
     getSubmittedDeck,
     lookupCards,
     deckListText
-} from "../firebase/tournamentDecks.js?v=tour-2";
-import { collectionsOf, bannedOf } from "../core/tournamentEngine.js?v=tour-2";
+} from "../firebase/tournamentDecks.js?v=tour-3";
+import { collectionsOf, bannedOf } from "../core/tournamentEngine.js?v=tour-3";
 
 // ── submitting ───────────────────────────────────────────────────────────────
 

@@ -301,6 +301,17 @@ function removePlayer(t, uid, now, reason) {
   if (!Object.keys(t.players).length) delete t.players;
 }
 
+// The database rules can't count players, so a few extra sign-ups can slip past the
+// "most players" limit when several people join at once. Whenever the tournament moves
+// forward, the latest joiners over the limit are dropped.
+function trimToCapacity(t, now) {
+  const max = Number(t.maxPlayers);
+  if (!Number.isFinite(max)) return false;
+  const extra = playersInOrder(t).slice(max);
+  extra.forEach(p => removePlayer(t, p.uid, now, "The tournament was full"));
+  return extra.length > 0;
+}
+
 function roundWindow(t, now) {
   return { startedAt: now, endsAt: now + Number(t.roundMinutes) * 60000 };
 }
@@ -313,6 +324,7 @@ function startTournament(t, now, tournamentId) {
       if (!p || !p.deckAt) { removePlayer(t, uid, now, "No deck list submitted"); dropped++; }
     });
   }
+  trimToCapacity(t, now);
   const players = playersInOrder(t);
   if (players.length < minPlayersOf(t)) {
     t.status = "cancelled";
@@ -579,6 +591,7 @@ export function tick(input, now, results = {}, tournamentId = "") {
   }
 
   if (t.status === "running") {
+    trimToCapacity(t, now);
     seatLateJoiners(t, now);
 
     Object.entries(results || {}).forEach(([key, winner]) => {

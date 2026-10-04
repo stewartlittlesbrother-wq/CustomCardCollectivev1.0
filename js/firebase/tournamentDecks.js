@@ -8,7 +8,7 @@
 
 import { ref, get, update, remove, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { database } from "./firebaseApp.js";
-import { BASE_PATH, DECKS_PATH } from "./tournamentPaths.js?v=tour-2";
+import { BASE_PATH, DECKS_PATH } from "./tournamentPaths.js?v=tour-3";
 
 const LIBRARY_URL = "./cardLibraryService.js?v=collections-13";
 const norm = (value) => String(value || "").trim().toLowerCase();

@@ -1,7 +1,7 @@
 // The organiser's panel: who has joined (with kick buttons), every match (with "set the
 // winner"), and every submitted deck list.
 
-import { $, esc, fmtDate, relative, toast, copyText, downloadText, safeFilename } from "./tournamentUi.js?v=tour-2";
+import { $, esc, fmtDate, relative, toast, copyText, downloadText, safeFilename } from "./tournamentUi.js?v=tour-3";
 import {
     kickFromTournament,
     setMatchResult,
@@ -9,9 +9,9 @@ import {
     cancelTournament,
     deleteTournament,
     isPermissionError
-} from "../firebase/tournamentService.js?v=tour-2";
-import { watchDecks, deckListText } from "../firebase/tournamentDecks.js?v=tour-2";
-import { openViewDialog } from "./tournamentDeckUi.js?v=tour-2";
+} from "../firebase/tournamentService.js?v=tour-3";
+import { watchDecks, deckListText } from "../firebase/tournamentDecks.js?v=tour-3";
+import { openViewDialog } from "./tournamentDeckUi.js?v=tour-3";
 import {
     playersInOrder,
     playerCount,
@@ -24,7 +24,7 @@ import {
     pairingsOf,
     seriesScore,
     canEditResult
-} from "../core/tournamentEngine.js?v=tour-2";
+} from "../core/tournamentEngine.js?v=tour-3";
 
 /**
  * ctx: {

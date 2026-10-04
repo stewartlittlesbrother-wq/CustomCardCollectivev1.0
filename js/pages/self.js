@@ -1391,8 +1391,8 @@ function reportTournamentResult(winnerSlot) {
     if (!winnerUid) return;
     tournamentContext.iWon = winnerSlot === playerSlot;
     Promise.all([
-        import("../firebase/tournamentService.js?v=tour-2"),
-        import("../core/tournamentEngine.js?v=tour-2")
+        import("../firebase/tournamentService.js?v=tour-3"),
+        import("../core/tournamentEngine.js?v=tour-3")
     ])
         .then(async ([service, engine]) => {
             const doc = await service.reportMatchResult(tournamentContext.meta, winnerUid);

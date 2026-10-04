@@ -6,7 +6,7 @@
 // build - hard-refresh (Ctrl+Shift+R) or check the upload actually went through.
 //
 // ⬇ BUMP THIS ON EVERY CHANGE ⬇
-const APP_VERSION = 247;
+const APP_VERSION = 248;
 
 (function showAppVersion() {
     const paint = () => {

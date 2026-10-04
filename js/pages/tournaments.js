@@ -9,8 +9,8 @@ import {
     syncTournament,
     enterMatch,
     isPermissionError
-} from "../firebase/tournamentService.js?v=tour-2";
-import { lookupCards } from "../firebase/tournamentDecks.js?v=tour-2";
+} from "../firebase/tournamentService.js?v=tour-3";
+import { lookupCards } from "../firebase/tournamentDecks.js?v=tour-3";
 import {
     ROUND_LENGTHS,
     DRAFT_DEFAULTS,
@@ -32,10 +32,10 @@ import {
     seriesScore,
     swissStandings,
     nameOf
-} from "../core/tournamentEngine.js?v=tour-2";
-import { $, esc, fmtDate, relative, toast, toLocalInput, copyText } from "./tournamentUi.js?v=tour-2";
-import { openSubmitDialog, closeSubmitDialog, closeViewDialog } from "./tournamentDeckUi.js?v=tour-2";
-import { createManage } from "./tournamentManage.js?v=tour-2";
+} from "../core/tournamentEngine.js?v=tour-3";
+import { $, esc, fmtDate, relative, toast, toLocalInput, copyText } from "./tournamentUi.js?v=tour-3";
+import { openSubmitDialog, closeSubmitDialog, closeViewDialog } from "./tournamentDeckUi.js?v=tour-3";
+import { createManage } from "./tournamentManage.js?v=tour-3";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
