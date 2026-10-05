@@ -204,6 +204,14 @@
             bar.append(resetButton);
         }
 
+        // The Card Importer lives in the Deck Builder (it has no top-bar tab), and
+        // this layout hides the old tab row - so it gets its own button here.
+        const importer = make("button", "v2-btn v2-btn-green v2-importer", "＋ Card Importer");
+        importer.type = "button";
+        importer.title = "Add your own cards to the card pool";
+        importer.addEventListener("click", () => click("cardCreationTab"));
+        bar.append(importer);
+
         stack.prepend(bar);
     }
 

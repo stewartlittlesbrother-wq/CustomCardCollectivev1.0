@@ -29,7 +29,7 @@
        (decided before first paint so there is no flash). ?deckv2=0 / ?deckv2=1 switch it. -->
   <script>(function(){var on=true;try{var p=new URLSearchParams(location.search).get("deckv2");if(p==="1"||p==="0"){localStorage.setItem("cc_deck_v2",p);var u=new URL(location.href);u.searchParams.delete("deckv2");history.replaceState(null,"",u.pathname+u.search+u.hash);}if(localStorage.getItem("cc_deck_v2")==="0")on=false;}catch(e){}if(on)document.documentElement.classList.add("deck-v2");})();</script>
   <link rel="stylesheet" href="styles.css?v=news-1">
-  <link rel="stylesheet" href="css/deck-v2.css?v=deckv2-4">
+  <link rel="stylesheet" href="css/deck-v2.css?v=deckv2-5">
 </head>
 <body>
   <div class="app-shell">
@@ -47,7 +47,6 @@
       <nav class="nav-tabs" aria-label="Main views">
         <button class="nav-tab active" type="button" data-view="home">Home</button>
         <button class="nav-tab" type="button" data-view="builder">Deck Builder</button>
-        <button class="nav-tab" type="button" id="navCardCreator">Card Creator</button>
         <button class="nav-tab" type="button" data-view="game">Practice Board</button>
         <button class="nav-tab" type="button" id="navMultiplayer">Multiplayer</button>
         <button class="nav-tab" type="button" id="navTournaments">Tournaments</button>
@@ -105,15 +104,11 @@
                 <span class="home-mode-icon" aria-hidden="true">🏆</span>
                 <span class="home-mode-body"><strong>Tournaments</strong><small>Join a bracket that hasn't started, or run your own — elimination or Swiss, regular or draft.</small></span>
               </button>
-              <button type="button" data-view="builder" class="home-mode">
+              <button type="button" data-view="builder" class="home-mode wide">
                 <span class="home-mode-icon" aria-hidden="true">🃏</span>
-                <span class="home-mode-body"><strong>Deck Builder</strong><small>Browse every collection, pick your leader (or two) and build your deck.</small></span>
+                <span class="home-mode-body"><strong>Deck Builder</strong><small>Browse every collection, pick your leader (or two) and build your deck. Add your own cards with the Card Importer.</small></span>
               </button>
-              <button type="button" data-forward-click="navCardCreator" class="home-mode">
-                <span class="home-mode-icon" aria-hidden="true">✨</span>
-                <span class="home-mode-body"><strong>Card Creator</strong><small>Design your own cards and add them to the shared library for everyone.</small></span>
-              </button>
-              <button type="button" data-view="game" class="home-mode">
+              <button type="button" data-view="game" class="home-mode wide">
                 <span class="home-mode-icon" aria-hidden="true">🎯</span>
                 <span class="home-mode-body"><strong>Practice Board</strong><small>Test a deck on the full play board. You control both sides.</small></span>
               </button>
@@ -132,7 +127,7 @@
             <h2 class="home-section-title" id="homeNewTitle">What's new</h2>
             <ul class="home-news">
               <li><span class="home-news-badge">NEW</span><div><strong>Tournaments</strong><span>Run or join a bracket: single elimination or Swiss, best of 1, 3 or 5, deck lists, ban lists and password-protected events. Open the Tournaments tab.</span></div></li>
-              <li><span class="home-news-badge">NEW</span><div><strong>Overall UI improvements</strong><span>A cleaner Deck Builder with your deck docked at the bottom and a My decks menu, a redesigned Card Creator with tabs and a live preview, and a fresher home page.</span></div></li>
+              <li><span class="home-news-badge">NEW</span><div><strong>Overall UI improvements</strong><span>A cleaner Deck Builder with your deck docked at the bottom and a My decks menu, a redesigned Card Importer (now inside the Deck Builder) with tabs and a live preview, and a fresher home page.</span></div></li>
               <li><span class="home-news-badge fix">FIXED</span><div><strong>Steadier online games</strong><span>Games no longer reset to the dice roll partway through, mulligans always stick, rejoining with the room code puts you back in your game, and long games stay fast.</span></div></li>
               <li><span class="home-news-badge fix">FIXED</span><div><strong>Start in play, every time</strong><span>Cards set to start in play now reliably show up in online games and rematches, survive a mulligan, and count toward your Life.</span></div></li>
               <li><span class="home-news-badge fix">FIXED</span><div><strong>Alt arts in online games</strong><span>Your alt arts now stay on your own cards when you join a game or play again, instead of swapping with your opponent's.</span></div></li>
@@ -269,7 +264,7 @@
           <section class="settings-group" aria-label="Card importer settings">
             <h2>Card Importer</h2>
             <p class="settings-group-note">
-              Controls the Card Creator's automatic image scanning.
+              Controls the Card Importer's automatic image scanning.
             </p>
             <label class="settings-row">
               <input type="checkbox" id="setOcrEnabled">
@@ -391,7 +386,7 @@
               <div class="deck-tabs">
                 <span class="active">Deck Builder</span>
                 <button type="button" id="savedDecksTab">Saved Decks</button>
-                <button type="button" id="cardCreationTab">Card Creation</button>
+                <button type="button" id="cardCreationTab">Card Importer</button>
                 <button type="button" id="donDeckTab">DON Decks</button>
               </div>
 
@@ -449,7 +444,7 @@
                 <header class="cc-header">
                   <button class="ghost cc-back" type="button" id="closeCardCreation">← Back to Cards</button>
                   <div class="cc-title">
-                    <h2 id="creationTitle">Create Card</h2>
+                    <h2 id="creationTitle">Card Importer</h2>
                     <p id="creationSubtitle">Fill in the basics, then add details and effects.</p>
                   </div>
                   <div class="creation-header-actions">
@@ -461,7 +456,7 @@
                 <!-- Four sections instead of one long form. On a wide screen the
                      Preview is always visible beside the form, so its tab only
                      appears on narrow screens. -->
-                <nav class="cc-tabs" id="creationTabs" role="tablist" aria-label="Card creator sections">
+                <nav class="cc-tabs" id="creationTabs" role="tablist" aria-label="Card Importer sections">
                   <button type="button" class="cc-tab active" role="tab" data-cc-tab="basic"><b>1</b> Basic Info <i class="cc-tab-done" id="creationBasicDone" hidden>✓</i></button>
                   <button type="button" class="cc-tab" role="tab" data-cc-tab="details"><b>2</b> Details</button>
                   <button type="button" class="cc-tab" role="tab" data-cc-tab="effects"><b>3</b> Effects</button>
@@ -971,14 +966,14 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=257"></script>
+  <script src="js/version.js?v=258"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=257"></script>
+  <script src="js/auth-ui.js?v=258"></script>
   <script src="js/cards/cardCollections.js?v=draft-1"></script>
   <script src="js/cards/decks.js?v=creation-10"></script>
   <script src="js/manual-play.js?v=manual-28"></script>
-  <script src="app.js?v=creation-131"></script>
-  <script src="js/deck-v2.js?v=deckv2-4"></script>
+  <script src="app.js?v=creation-132"></script>
+  <script src="js/deck-v2.js?v=deckv2-5"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the
     // same key self.js reads at the start of each turn (getTurnAutomationSettings).

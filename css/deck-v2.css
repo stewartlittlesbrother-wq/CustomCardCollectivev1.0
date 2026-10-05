@@ -89,6 +89,8 @@ html.deck-v2 .v2-search .tip-button { flex: none; position: static; width: 28px;
 .v2-link { min-height: 0; padding: 4px 6px; border: 0; border-radius: 6px; background: none !important; color: var(--v2-accent-hi) !important; font-weight: 650; box-shadow: none; width: auto !important; }
 .v2-link:hover { text-decoration: underline; filter: none; box-shadow: none; }
 html.deck-v2 #resetFilters.v2-link { width: auto !important; }
+/* Card Importer button: pinned to the right end of the filter bar. */
+.v2-fb .v2-importer { margin-left: auto; white-space: nowrap; }
 
 /* Buttons + popover menus (shared by the filter bar and the dock) */
 .v2-btn { min-height: 36px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--v2-surface-2); color: var(--v2-ink); font-weight: 650; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; box-shadow: none; }

@@ -3869,7 +3869,7 @@ function syncCreationUi() {
   renderCreationTypeTags();
 
   const editing = Boolean(state.editingCardId);
-  if (el.creationTitle) el.creationTitle.textContent = editing ? "Edit Card" : "Create Card";
+  if (el.creationTitle) el.creationTitle.textContent = editing ? "Edit Card" : "Card Importer";
   if (el.creationSubtitle) {
     el.creationSubtitle.textContent = editing
       ? `Editing “${el.creationName.value.trim() || state.editingCardId}” — changes only apply when you save.`
@@ -9456,8 +9456,8 @@ function bindEvents() {
     window.location.href = "html/multiplayer.html";
   });
 
-  // Home cards that just do what another control already does (e.g. the Card
-  // Creator card = the Card Creator nav tab), so there's one code path for each.
+  // Home cards that just do what another control already does (they "click" the
+  // control named in data-forward-click), so there's one code path for each.
   document.querySelectorAll("[data-forward-click]").forEach(button => {
     button.addEventListener("click", () => {
       document.getElementById(button.dataset.forwardClick)?.click();
@@ -9474,19 +9474,6 @@ function bindEvents() {
     document.getElementById(id)?.addEventListener("click", () => {
       window.location.href = "html/tournaments.html";
     });
-  });
-
-  // Nav: Card Creator tab -> Deck Builder view with the Card Creation panel open.
-  // Card Creator isn't a separate view, so after showView highlights the Deck
-  // Builder tab we move the highlight to Card Creator to reflect where the user is.
-  document.getElementById("navCardCreator")?.addEventListener("click", () => {
-    showView("builder");
-    initializeCardCreation();
-    if (el.savedDecksPanel) el.savedDecksPanel.hidden = true;
-    if (el.cardCreationPanel) el.cardCreationPanel.hidden = false;
-    el.navTabs.forEach(tab => tab.classList.remove("active"));
-    document.getElementById("navCardCreator").classList.add("active");
-    onCreationPanelOpened();
   });
 
   document.querySelectorAll("[data-open-self]").forEach(button => {
@@ -9909,8 +9896,12 @@ function bindEvents() {
     const index = event.target.closest("[data-load-deck]")?.dataset.loadDeck;
     if (index !== undefined) loadNamedDeck(Number(index));
   });
+  // The Card Importer (formerly the Card Creator) lives inside the Deck Builder:
+  // this tab, and the "Card Importer" button in the new layout's top bar.
   el.cardCreationTab?.addEventListener("click", () => {
-    el.savedDecksPanel.hidden = true;
+    initializeCardCreation();
+    if (el.savedDecksPanel) el.savedDecksPanel.hidden = true;
+    if (el.donDeckPanel) el.donDeckPanel.hidden = true;
     el.cardCreationPanel.hidden = false;
     // Also: new cards default into the collection you're browsing, and an
     // unfinished draft is offered back.
