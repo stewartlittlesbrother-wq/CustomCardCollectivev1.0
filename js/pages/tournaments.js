@@ -9,7 +9,7 @@ import {
     syncTournament,
     enterMatch,
     isPermissionError
-} from "../firebase/tournamentService.js?v=tour-5";
+} from "../firebase/tournamentService.js?v=tour-6";
 import { lookupCards } from "../firebase/tournamentDecks.js?v=tour-3";
 import {
     ROUND_LENGTHS,
@@ -35,7 +35,7 @@ import {
 } from "../core/tournamentEngine.js?v=tour-3";
 import { $, esc, fmtDate, relative, toast, toLocalInput, copyText } from "./tournamentUi.js?v=tour-3";
 import { openSubmitDialog, closeSubmitDialog, closeViewDialog } from "./tournamentDeckUi.js?v=tour-3";
-import { createManage } from "./tournamentManage.js?v=tour-5";
+import { createManage } from "./tournamentManage.js?v=tour-6";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
@@ -388,7 +388,7 @@ async function doPlay(id) {
         // Re-check first: a result may have just moved the tournament to a new round.
         const fresh = (await syncTournament(id, state.me.uid)) || getTournament(id);
         const { code, slot } = await enterMatch(id, fresh, firebaseUserOrId(), state.me.name);
-        window.location.href = `multiplayer.html?room=${encodeURIComponent(code)}&slot=${encodeURIComponent(slot)}`;
+        window.location.href = `../index.html?view=multiplayer&room=${encodeURIComponent(code)}&slot=${encodeURIComponent(slot)}`;
     } catch (error) { toast(error.message || "Couldn't open the match.", true); }
 }
 

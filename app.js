@@ -293,8 +293,12 @@ const IMPORT_IMAGE_MAX_HEIGHT = 1064;
 const IMPORT_IMAGE_QUALITY = 0.84;
 
 function initialView() {
-  const requestedView = new URLSearchParams(window.location.search).get("view");
-  return ["home", "builder", "game", "settings"].includes(requestedView) ? requestedView : "home";
+  const params = new URLSearchParams(window.location.search);
+  // An invite link (?join=CODE) or a room link (?room=CODE) opens Multiplayer.
+  // (A Draft Battle URL also carries ?room=, but it takes over the page itself.)
+  if (params.get("draft") !== "1" && (params.get("join") || params.get("room"))) return "multiplayer";
+  const requestedView = params.get("view");
+  return ["home", "builder", "game", "settings", "multiplayer"].includes(requestedView) ? requestedView : "home";
 }
 
 const state = {
@@ -6280,6 +6284,50 @@ function showView(view) {
   el.navTabs.forEach(button => button.classList.toggle("active", button.dataset.view === view));
   if (view === "builder") queueDeckTableResize();
   if (view === "hotkeys") renderHotkeys();
+  if (view === "multiplayer") openMultiplayerTab();
+}
+
+// Multiplayer is a tab on this page (it used to be a separate page, which is
+// why opening it reloaded everything). Its code is only fetched the first time
+// the tab opens; window.ccMpHost hands it the card pool and art helpers.
+let multiplayerTabModule = null;
+let multiplayerTabLoading = false;
+function openMultiplayerTab() {
+  if (multiplayerTabModule) { multiplayerTabModule.show(); return; }
+  if (multiplayerTabLoading) return;
+  multiplayerTabLoading = true;
+  window.ccMpHost = {
+    state,
+    getCard,
+    cardVisual,
+    cardArtList,
+    observeLazyImages,
+    showView,
+    // Collections that have something to open in a pack (for Draft Battle).
+    collections() {
+      const counts = {};
+      state.cards.forEach(card => {
+        if (card && card.collection && card.category !== "leader" && !card.donCard) {
+          counts[card.collection] = (counts[card.collection] || 0) + 1;
+        }
+      });
+      const seen = new Set();
+      return [...CARD_COLLECTIONS, ...customCollections]
+        .filter(c => c && c.slug && c.slug !== "all-access" && counts[c.slug] && !seen.has(c.slug) && seen.add(c.slug))
+        .map(c => ({ slug: c.slug, name: c.name || c.slug, count: counts[c.slug] }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
+  };
+  import("./js/pages/multiplayerTab.js?v=mpx-2")
+    .then(mod => {
+      multiplayerTabModule = mod;
+      if (state.activeView === "multiplayer") mod.show();
+    })
+    .catch(error => {
+      multiplayerTabLoading = false;
+      const rootEl = document.getElementById("mpxRoot");
+      if (rootEl) rootEl.innerHTML = `<p class="mpx-error">Multiplayer couldn't load (${escapeHtml(error.message)}). Check your connection and refresh.</p>`;
+    });
 }
 
 function cardsByCategory(category) {
@@ -8272,7 +8320,7 @@ async function maybeStartMultiplayerDraft() {
   try {
     [firebaseApp, svc] = await Promise.all([
       import("./js/firebase/firebaseApp.js"),
-      import("./js/firebase/multiplayerService.js?v=draft-11")
+      import("./js/firebase/multiplayerService.js?v=draft-12")
     ]);
     await firebaseApp.signInGuest();
   } catch (e) {
@@ -8389,7 +8437,7 @@ function maybeForceExpiredDraft() {
 
 function leaveMpDraft() {
   teardownMpDraft();
-  window.location.href = "html/multiplayer.html";
+  window.location.href = "index.html?view=multiplayer";
 }
 
 function teardownMpDraft() {
@@ -9452,21 +9500,12 @@ function bindEvents() {
 
   setupHotkeysView();
 
-  document.getElementById("multiplayerButton").addEventListener("click", () => {
-    window.location.href = "html/multiplayer.html";
-  });
-
   // Home cards that just do what another control already does (they "click" the
   // control named in data-forward-click), so there's one code path for each.
   document.querySelectorAll("[data-forward-click]").forEach(button => {
     button.addEventListener("click", () => {
       document.getElementById(button.dataset.forwardClick)?.click();
     });
-  });
-
-  // Nav: Multiplayer tab -> lobby page
-  document.getElementById("navMultiplayer")?.addEventListener("click", () => {
-    window.location.href = "html/multiplayer.html";
   });
 
   // Tournaments: nav tab and the home card both open the tournaments page.

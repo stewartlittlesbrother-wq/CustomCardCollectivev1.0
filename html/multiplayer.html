@@ -1,186 +1,21 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <!-- Fixed width so phones render the desktop lobby scaled to fit (desktop
-         ignores viewport width). Matches the deck builder + game board. -->
-    <meta name="viewport" content="width=1280, user-scalable=no">
-    <title>Multiplayer – Golds Customs</title>
-    <link rel="icon" type="image/svg+xml" href="../images/basic/custom-sim-logo.svg">
-    <link rel="stylesheet" href="../css/style.css">
-    <link rel="stylesheet" href="../css/multiplayer.css?v=lobby-9">
+  <meta charset="utf-8">
+  <title>Multiplayer – Golds Customs</title>
+  <meta name="viewport" content="width=1280, user-scalable=no">
+  <script>
+    // Multiplayer is now a tab inside the main app (index.html). Old links -
+    // tournaments, bookmarks, the game board - land here and are sent on,
+    // keeping any room / slot / join code.
+    (function () {
+      var params = new URLSearchParams(location.search);
+      params.set("view", "multiplayer");
+      location.replace("../index.html?" + params.toString());
+    })();
+  </script>
 </head>
-<body>
-    <a href="../index.html" class="mp-back-link">← Back</a>
-
-    <main class="mp-root">
-
-        <!-- ══════════ VIEW: LANDING ══════════ -->
-        <section class="mp-view active" id="viewLanding">
-            <div class="mp-card">
-                <h1 class="mp-title">Multiplayer</h1>
-
-                <div id="mpConnStatus" class="mp-status connecting">Connecting…</div>
-
-                <div class="mp-nickname-row">
-                    <label for="nicknameInput">Your nickname</label>
-                    <input id="nicknameInput" type="text" maxlength="20" placeholder="Enter nickname…">
-                </div>
-
-                <div class="mp-landing-grid mp-landing-single">
-                    <button class="mp-big-btn" id="btnCreate">
-                        <span class="mp-big-icon">✚</span>
-                        <span class="mp-big-label">Create Game</span>
-                        <span class="mp-big-sub">Host a private room and share the code</span>
-                    </button>
-                </div>
-
-                <div class="mp-divider"><span>or join with a code</span></div>
-
-                <div class="mp-code-row">
-                    <input id="codeInput" type="text" maxlength="6" placeholder="XXXXXX" autocomplete="off" spellcheck="false">
-                    <button class="mp-btn-secondary" id="btnJoinCode">Join</button>
-                </div>
-
-                <div id="mpLandingError" class="mp-error hidden"></div>
-
-                <div class="mp-divider"><span>or watch a live game</span></div>
-
-                <div class="mp-spectate">
-                    <div class="mp-spectate-head">
-                        <span class="mp-spectate-title">Live games</span>
-                        <span id="spectateCount" class="mp-spectate-count">0</span>
-                    </div>
-                    <div id="spectateList" class="mp-spectate-list">
-                        <div class="mp-spectate-empty">No games in progress right now.</div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- ══════════ VIEW: CREATE ROOM ══════════ -->
-        <section class="mp-view" id="viewCreate">
-            <div class="mp-card">
-                <div class="mp-view-header">
-                    <button class="mp-back-btn" id="btnBackFromCreate">←</button>
-                    <h2>Create Game</h2>
-                </div>
-
-                <div class="mp-form">
-                    <label for="lobbyNameInput">Room name</label>
-                    <input id="lobbyNameInput" type="text" maxlength="32" placeholder="My Awesome Game">
-
-                    <p class="mp-toggle-hint">
-                        Rooms are private — share the room code with your opponent so they can join.
-                    </p>
-
-                    <label>Match type</label>
-                    <div class="mp-mode-toggle" id="mpModeToggle">
-                        <button type="button" class="mp-mode-btn active" data-mode="regular">Regular Match</button>
-                        <button type="button" class="mp-mode-btn" data-mode="draft">Draft Battle</button>
-                    </div>
-
-                    <!-- Regular-match deck pickers (hidden for a draft, which drafts a deck). -->
-                    <div id="regularOptions">
-                        <label for="createDeckSelect">Your deck</label>
-                        <select id="createDeckSelect"></select>
-
-                        <label for="createDonDeckSelect">DON!! deck</label>
-                        <select id="createDonDeckSelect" class="mp-don-select"></select>
-                    </div>
-
-                    <!-- Draft options: which card pool to draft from, with a search box. -->
-                    <div id="draftOptions" hidden>
-                        <label for="draftCollectionSearch">Draft pool</label>
-                        <input id="draftCollectionSearch" type="text" placeholder="Search collections…" autocomplete="off">
-                        <select id="draftCollectionSelectMp" size="6" class="mp-draft-collection"></select>
-                        <p class="mp-toggle-hint">Both players open 10 packs from this pool, then build a 40-card deck (15 min).</p>
-                    </div>
-
-                    <button class="mp-btn-primary" id="btnConfirmCreate">Create Room</button>
-                    <div id="mpCreateError" class="mp-error hidden"></div>
-                </div>
-            </div>
-        </section>
-
-        <!-- ══════════ VIEW: ROOM LOBBY ══════════ -->
-        <section class="mp-view" id="viewLobby">
-            <div class="mp-card">
-                <div class="mp-view-header">
-                    <button class="mp-back-btn" id="btnBackFromLobby">← Leave</button>
-                    <h2 id="lobbyTitle">Room</h2>
-                </div>
-
-                <!-- Tournament matches only: which tournament/round this is + card pool. -->
-                <div id="lobbyTournamentBanner" class="mp-tournament-banner" hidden></div>
-
-                <div id="lobbyCodeBox" class="lobby-code-box hidden">
-                    <span class="lobby-code-label">Room code — share with friend</span>
-                    <span id="lobbyCodeDisplay" class="lobby-code-value"></span>
-                    <button class="mp-btn-tiny" id="btnCopyCode">Copy</button>
-                </div>
-
-                <div class="lobby-players">
-                    <div class="lobby-player" id="lobbyP1">
-                        <span class="lobby-player-slot">P1</span>
-                        <span class="lobby-player-name">—</span>
-                        <span class="lobby-player-status waiting">Waiting…</span>
-                    </div>
-                    <div class="lobby-vs">VS</div>
-                    <div class="lobby-player" id="lobbyP2">
-                        <span class="lobby-player-slot">P2</span>
-                        <span class="lobby-player-name">—</span>
-                        <span class="lobby-player-status waiting">Waiting…</span>
-                    </div>
-                </div>
-
-                <div class="mp-form">
-                    <!-- Regular match: pick a saved deck and ready up. -->
-                    <div id="lobbyRegularPanel">
-                        <label for="lobbyDeckSelect">Choose your deck</label>
-                        <select id="lobbyDeckSelect"></select>
-
-                        <!-- Dual Leader decks only: which of the two leaders supplies the
-                             life + power for both (the other is its linked twin). -->
-                        <div id="lobbyStatsRow" hidden>
-                            <label for="lobbyStatsSelect">Stats leader <span class="mp-toggle-hint">(its life &amp; power apply to both leaders)</span></label>
-                            <select id="lobbyStatsSelect"></select>
-                        </div>
-
-                        <label for="lobbyDonDeckSelect">DON!! deck</label>
-                        <select id="lobbyDonDeckSelect" class="mp-don-select"></select>
-
-                        <button class="mp-btn-primary" id="btnReady">Ready Up</button>
-                        <button class="mp-btn-primary hidden" id="btnStart">Start Match</button>
-                    </div>
-
-                    <!-- Draft Battle: no deck picker — both players open packs, then
-                         build a deck on a shared timer with chat. -->
-                    <div id="lobbyDraftPanel" hidden>
-                        <div class="mp-draft-lobby">
-                            <span class="mp-draft-lobby-icon">🎴</span>
-                            <strong>Draft Battle</strong>
-                            <p id="draftLobbyHint" class="mp-toggle-hint">Waiting for an opponent to join…</p>
-                        </div>
-                        <button class="mp-btn-primary" id="btnEnterDraft" disabled>Open Packs &amp; Draft</button>
-                    </div>
-
-                    <div id="mpLobbyMsg" class="mp-info"></div>
-                    <div id="mpLobbyError" class="mp-error hidden"></div>
-                </div>
-            </div>
-        </section>
-
-    </main>
-
-    <script src="../js/cards/cardCollections.js?v=draft-1"></script>
-    <script src="../js/cards/cardDatabase.js?v=cardnum-18"></script>
-    <script src="../js/cards/decks.js?v=ry-ichigo-3"></script>
-    <script src="../js/core/deckParser.js?v=starting-1"></script>
-    <script type="module" src="../js/pages/multiplayer.js?v=lobby-26"></script>
-  <script src="../js/rotate-prompt.js"></script>
-
-  <script src="../js/version.js?v=258"></script>
-  <script src="../js/auth-ui.js?v=258"></script>
+<body style="margin:0;background:#07090a;color:#eef6f2;font-family:system-ui,sans-serif">
+  <p style="padding:24px">Opening Multiplayer… <a href="../index.html?view=multiplayer" style="color:#4dff9e">Continue</a></p>
 </body>
 </html>

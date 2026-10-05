@@ -23,6 +23,19 @@ import { database } from "./firebaseApp.js";
 // was then lost and the game sat on the mulligan screen.
 const SERVER_CONFIRMED = { applyLocally: false };
 
+// Firebase's estimate of (server clock - this device's clock), so every player's
+// turn timer counts from the same moment even if their clocks disagree.
+let serverTimeOffset = 0;
+try {
+    onValue(ref(database, ".info/serverTimeOffset"), (snapshot) => {
+        serverTimeOffset = Number(snapshot.val()) || 0;
+    });
+} catch (_) { /* fall back to this device's clock */ }
+
+export function serverNow() {
+    return Date.now() + serverTimeOffset;
+}
+
 function generateRoomCode() {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
@@ -551,6 +564,8 @@ export async function createRoom(user, opts = {}) {
         // Tournament matches: who may play, which tournament/round this is, and the
         // card pool the decks are restricted to. Absent for ordinary rooms.
         ...(opts.tournament ? { tournament: opts.tournament } : {}),
+        // Room options chosen on the create screen (e.g. { turnSeconds: 120 }).
+        ...(opts.settings ? { settings: opts.settings } : {}),
 
         players: {
             p1: {
@@ -676,13 +691,18 @@ export function subscribeToMatch(roomCode, callback) {
     // `mode` + `draftCollection` let the lobby switch to the draft layout; they're
     // small scalars so watching them adds no meaningful traffic. `tournament` is a
     // small object (names + ids), present only on tournament matches.
-    const paths = ["status", "players", "isPublic", "lobbyName", "startError", "mode", "draftCollection", "tournament"];
+    const paths = ["status", "players", "isPublic", "lobbyName", "startError", "mode", "draftCollection", "tournament", "settings"];
     const latest = {};
+    const reported = new Set();
     const unsubscribers = [];
 
     paths.forEach(path => {
         const unsubscribe = onValue(ref(database, `matches/${code}/${path}`), (snapshot) => {
             latest[path] = snapshot.val();
+            reported.add(path);
+            // Wait until every part has arrived once: a half-loaded room looked like
+            // a regular room with no tournament (mode/tournament not in yet).
+            if (reported.size < paths.length) return;
             // A room always has a status once created; until then treat as absent.
             callback(latest.status == null && latest.players == null ? null : { ...latest });
         });
@@ -968,6 +988,10 @@ function buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, rema
         },
         "public/revealedCards": [],
         "public/currentAttack": null,
+        // A fresh id per dealt game, so a result is only ever counted once in a
+        // player's win/loss record (a reload of the game-over screen reports it again).
+        "public/gameId": `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        "public/turnStartedAt": null,
         "public/setup": {
             dice: diceSetup,
             turnChoice: {
@@ -1377,7 +1401,8 @@ function startMainPhase(publicState) {
         phase: "main",
         currentPlayer: firstPlayer,
         turnNumber: 1,
-        playerTurns: { ...(publicState.playerTurns || {}), [firstPlayer]: 0 }
+        playerTurns: { ...(publicState.playerTurns || {}), [firstPlayer]: 0 },
+        turnStartedAt: serverNow()   // for the optional turn timer
     };
 }
 
@@ -1474,6 +1499,7 @@ function runPassTurnTransaction(publicRef, currentPlayer) {
             phase: "main",
             currentAttack: null,
             turnNumber: nextTurnNumber,
+            turnStartedAt: serverNow(),   // for the optional turn timer
             playerTurns: {
                 ...(publicState.playerTurns || {})
             }
@@ -1603,21 +1629,26 @@ export async function registerActiveGame(roomCode, meta = {}) {
     // with the same result (no need to pass both nicknames from the client).
     let p1Name = meta.p1Name;
     let p2Name = meta.p2Name;
-    if (!p1Name || !p2Name) {
-        try {
-            const playersSnap = await get(ref(database, `matches/${code}/players`));
-            const players = playersSnap.val() || {};
-            p1Name = p1Name || players.p1?.name;
-            p2Name = p2Name || players.p2?.name;
-        } catch {
-            // fall back to defaults below
-        }
+    // Each side's leader card number, so the Live games list can show their art.
+    let p1Leader = "";
+    let p2Leader = "";
+    try {
+        const playersSnap = await get(ref(database, `matches/${code}/players`));
+        const players = playersSnap.val() || {};
+        p1Name = p1Name || players.p1?.name;
+        p2Name = p2Name || players.p2?.name;
+        p1Leader = String(players.p1?.deck?.leaderKey || "");
+        p2Leader = String(players.p2?.deck?.leaderKey || "");
+    } catch {
+        // fall back to defaults below
     }
 
     await set(ref(database, `activeGames/${code}`), {
         roomCode: code,
         p1Name: String(p1Name || "Player 1").slice(0, 24),
         p2Name: String(p2Name || "Player 2").slice(0, 24),
+        p1Leader: p1Leader.slice(0, 80),
+        p2Leader: p2Leader.slice(0, 80),
         phase: meta.phase || "main",
         turnNumber: Number(meta.turnNumber || 0),
         status: meta.status || "started",
@@ -1673,4 +1704,32 @@ export function subscribeToActiveGames(callback, onError) {
         console.warn("Active games listener failed:", error);
         if (typeof onError === "function") onError(error);
     });
+}
+
+// ── Win/loss record (accounts only) ──────────────────────
+// users/<uid>/mpRecord = { wins, losses, lastGameId }. Each player records only
+// their OWN result, once per dealt game (gameId), so reloading the game-over
+// screen or both browsers reporting can never count a game twice.
+export async function recordMatchResult(uid, gameId, won) {
+    if (!uid || !gameId) return null;
+    const result = await runTransaction(ref(database, `users/${uid}/mpRecord`), (current) => {
+        const record = current || { wins: 0, losses: 0 };
+        if (record.lastGameId === gameId) return;   // already counted
+        return {
+            wins: Number(record.wins || 0) + (won ? 1 : 0),
+            losses: Number(record.losses || 0) + (won ? 0 : 1),
+            lastGameId: gameId
+        };
+    });
+    return result.snapshot ? result.snapshot.val() : null;
+}
+
+export async function getMatchRecord(uid) {
+    if (!uid) return null;
+    try {
+        const snapshot = await get(ref(database, `users/${uid}/mpRecord`));
+        return snapshot.val();
+    } catch {
+        return null;
+    }
 }

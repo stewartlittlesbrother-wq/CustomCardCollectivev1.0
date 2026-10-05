@@ -777,6 +777,8 @@ function applyOnlinePublicState(publicState = {}) {
             : Object.values(publicState.revealedCards || {}).filter(Boolean),
         currentAttack: publicState.currentAttack || null,
         highlights: normalizeHighlights(publicState.highlights),
+        gameId: publicState.gameId || null,              // per dealt game (win/loss record)
+        turnStartedAt: Number(publicState.turnStartedAt) || 0,   // turn timer
         player1: publicState.player1 || null,
         player2: publicState.player2 || null
     };
@@ -1405,6 +1407,8 @@ function handleOnlineGameOver() {
     // A tournament match: write the winner into the bracket now (before anyone can
     // press anything on the game-over screen).
     reportTournamentResult(onlinePublicState.winner);
+    // Count it in this account's win/loss record (once per game).
+    recordOnlineResult(onlinePublicState.winner === playerSlot);
 
     showGameOverPopup(
         winnerPlayer,
@@ -1412,6 +1416,91 @@ function handleOnlineGameOver() {
         onlinePublicState.gameOverReasonText || `${winnerPlayer.name} won the online match.`,
         outcomeText
     );
+}
+
+// ── Win/loss record ──────────────────────────────────────
+// Accounts only (a guest's id is new in every tab, so a record would be lost).
+// Each player records their own result once per dealt game (public/gameId), then
+// the game-over screen shows the updated record.
+async function recordOnlineResult(won) {
+    if (isSpectator || !onlineMultiplayerService?.recordMatchResult) return;
+    if (!onlineUser || onlineUser.isAnonymous || !onlinePublicState?.gameId) return;
+    try {
+        const record = await onlineMultiplayerService.recordMatchResult(onlineUser.uid, onlinePublicState.gameId, won);
+        const popup = document.querySelector("#gameOverOverlay .game-over-popup");
+        if (!record || !popup || popup.querySelector(".game-over-record")) return;
+        const line = document.createElement("p");
+        line.className = "game-over-record";
+        line.style.cssText = "margin:4px 0 0;font-weight:800;color:#f3d58c;";
+        line.textContent = `Your online record: ${Number(record.wins || 0)} wins, ${Number(record.losses || 0)} losses`;
+        const reason = popup.querySelector(".game-over-reason-text");
+        if (reason) reason.after(line); else popup.appendChild(line);
+    } catch (error) {
+        console.warn("Couldn't update your win/loss record:", error);
+    }
+}
+
+// ── Turn timer (optional, chosen when the room is made) ──
+// Shown under the turn indicator for both players. It only counts down - when it
+// runs out it says so; nothing is taken away automatically.
+let turnTimerSeconds = 0;
+let turnTimerHandle = null;
+let turnTimerAnnouncedKey = null;
+
+async function loadTurnTimerSetting() {
+    if (!isOnlineMatch || !onlineFirebaseApp) return;
+    try {
+        const db = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
+        const snapshot = await db.get(db.ref(onlineFirebaseApp.database, `matches/${roomCode}/settings/turnSeconds`));
+        turnTimerSeconds = Number(snapshot.val()) || 0;
+        if (turnTimerSeconds > 0 && !turnTimerHandle) {
+            turnTimerHandle = setInterval(renderTurnTimer, 1000);
+            renderTurnTimer();
+        }
+    } catch (error) {
+        console.warn("Couldn't read the turn timer setting:", error);
+    }
+}
+
+function renderTurnTimer() {
+    let chip = document.getElementById("turnTimer");
+    if (!chip) {
+        const anchor = document.getElementById("phaseDisplay");
+        if (!anchor) return;
+        chip = document.createElement("div");
+        chip.id = "turnTimer";
+        chip.setAttribute("role", "timer");
+        chip.style.cssText = "margin-top:6px;padding:5px 8px;border-radius:8px;text-align:center;" +
+            "font:800 13px/1.2 system-ui,sans-serif;font-variant-numeric:tabular-nums;";
+        anchor.after(chip);
+    }
+    const startedAt = Number(onlinePublicState?.turnStartedAt) || 0;
+    if (!turnTimerSeconds || onlinePublicState?.phase !== "main" || !startedAt) {
+        chip.hidden = true;
+        return;
+    }
+    const now = onlineMultiplayerService?.serverNow ? onlineMultiplayerService.serverNow() : Date.now();
+    const left = Math.ceil((startedAt + turnTimerSeconds * 1000 - now) / 1000);
+    const whose = isSpectator
+        ? `${onlinePlayerLabels[onlinePublicState.currentPlayer] || "Player"}'s turn`
+        : (isCurrentOnlinePlayer() ? "Your turn" : "Their turn");
+    chip.hidden = false;
+    if (left > 0) {
+        const minutes = Math.floor(left / 60);
+        const seconds = String(left % 60).padStart(2, "0");
+        chip.textContent = `⏱ ${whose}: ${minutes}:${seconds}`;
+        chip.style.background = left <= 15 ? "rgba(226,180,81,.2)" : "rgba(255,255,255,.07)";
+        chip.style.color = left <= 15 ? "#f3d58c" : "#dfe7e2";
+        return;
+    }
+    chip.textContent = `⏱ ${whose}: time's up`;
+    chip.style.background = "rgba(224,85,90,.22)";
+    chip.style.color = "#ffb3b5";
+    const key = `${onlinePublicState.currentPlayer}:${onlinePublicState.turnNumber}:${startedAt}`;
+    if (turnTimerAnnouncedKey !== key) {
+        turnTimerAnnouncedKey = key;
+        addGameLog(`⏱ ${onlinePlayerLabels[onlinePublicState.currentPlayer] || "Player"}'s turn time is up.`);
+    }
 }
 
 // ── Tournament matches ───────────────────────────────────
@@ -1438,7 +1527,7 @@ function reportTournamentResult(winnerSlot) {
     if (!winnerUid) return;
     tournamentContext.iWon = winnerSlot === playerSlot;
     Promise.all([
-        import("../firebase/tournamentService.js?v=tour-5"),
+        import("../firebase/tournamentService.js?v=tour-6"),
         import("../core/tournamentEngine.js?v=tour-3")
     ])
         .then(async ([service, engine]) => {
@@ -1842,11 +1931,14 @@ async function syncOnlineAllPublicBoardsFromLocal(extraState = {}) {
     });
 }
 
-// Make sure the match is actually initialised once we're on the game page.
+// Make sure the match is actually initialised once we're on the game page. Since
+// the Multiplayer tab moved into the main app, the board is ALWAYS where a game is
+// dealt: both players arrive, one wins the start claim and deals, the other waits.
 // Retries past the server-side stale-claim window so an abandoned start claim
 // (client navigated away mid-init) is reclaimed instead of deadlocking.
-// (7 tries x 4s outlasts the 15s start claim, so a dead claim is always retaken.)
-async function ensureOnlineMatchStarted(attempts = 7, delayMs = 4000) {
+// (14 tries x 1.5s outlasts the 15s start claim, and the player who didn't deal
+// sees the new game within a second or two.)
+async function ensureOnlineMatchStarted(attempts = 14, delayMs = 1500) {
     for (let attempt = 0; attempt < attempts; attempt++) {
         try {
             const match = await onlineMultiplayerService.getMatch(roomCode);
@@ -1855,6 +1947,7 @@ async function ensureOnlineMatchStarted(attempts = 7, delayMs = 4000) {
 
             if (match.startError) {
                 addGameLog(`Match could not start: ${match.startError}`);
+                showStartErrorOverlay(match.startError);
                 return;
             }
 
@@ -1877,6 +1970,33 @@ async function ensureOnlineMatchStarted(attempts = 7, delayMs = 4000) {
         // Wait long enough that an abandoned claim goes stale and can be retaken.
         await new Promise(resolve => setTimeout(resolve, delayMs));
     }
+}
+
+// The deal failed (e.g. a deck's leader isn't in the card library). Don't leave
+// the players on an empty board: say why and take them back to the room.
+function showStartErrorOverlay(message) {
+    if (isSpectator || document.getElementById("startErrorOverlay")) return;
+    const overlay = document.createElement("div");
+    overlay.id = "startErrorOverlay";
+    overlay.className = "setup-overlay";
+    const card = document.createElement("div");
+    card.className = "setup-overlay-card";
+    const heading = document.createElement("h2");
+    heading.textContent = "The game couldn't start";
+    const text = document.createElement("p");
+    text.className = "setup-overlay-status";
+    text.textContent = `${message} Go back to the room, pick a deck and ready up again.`;
+    const actions = document.createElement("div");
+    actions.className = "setup-overlay-actions";
+    const back = document.createElement("a");
+    back.className = "setup-overlay-btn primary";
+    back.style.textDecoration = "none";
+    back.textContent = "Back to the room";
+    back.href = `../index.html?view=multiplayer&room=${encodeURIComponent(roomCode)}&slot=${encodeURIComponent(playerSlot || "")}`;
+    actions.appendChild(back);
+    card.append(heading, text, actions);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
 }
 
 async function maybeRunOnlineTurnStart(turnKey) {
@@ -2137,10 +2257,15 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-11");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-12");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
+
+        // Remember this game, so the Multiplayer tab can offer "Rejoin game".
+        try {
+            localStorage.setItem("cc_mp_current_game", JSON.stringify({ code: roomCode, slot: playerSlot, at: Date.now() }));
+        } catch (_) { /* no rejoin banner, that's all */ }
 
         // Self-heal: if we reached the game page but the match was never fully
         // initialised (e.g. the client holding the start claim navigated away
@@ -2155,6 +2280,7 @@ async function initializeOnlineMultiplayer() {
         setupOnlinePlayerNames();
         setupOnlineCosmetics();
         loadTournamentContext();   // is this room a tournament match? (fire and forget)
+        loadTurnTimerSetting();    // optional per-room turn timer (fire and forget)
 
         // Multiplayer code reads public board/count state plus this user's private zones only.
         onlineMatchUnsubscribe = onlineMultiplayerService.subscribeToPublicState(
@@ -2205,7 +2331,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-11");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-12");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2226,6 +2352,7 @@ async function initializeSpectatorMatch() {
 
         setupOnlinePlayerNames();
         setupOnlineCosmetics();
+        loadTurnTimerSetting();
         // Spectators can read AND type in the match chat (as "Spectator").
         setupOnlineChat();
 
@@ -3946,7 +4073,7 @@ function showGameOverPopup(winnerPlayer, reasonTitle = "Victory", reasonText = "
 
     const mainMenuButton = document.createElement("a");
     mainMenuButton.className = "game-over-button main-menu";
-    mainMenuButton.href = isOnlineMatch ? "multiplayer.html" : "../index.html";
+    mainMenuButton.href = isOnlineMatch ? "../index.html?view=multiplayer" : "../index.html";
     mainMenuButton.textContent = isOnlineMatch ? "Go to Lobby" : "Main Menu";
 
     popup.appendChild(title);
@@ -3959,11 +4086,11 @@ function showGameOverPopup(winnerPlayer, reasonTitle = "Victory", reasonText = "
         // (which lists live games). Navigate explicitly on click so nothing on the
         // game-over overlay can swallow the anchor's default (it was doing nothing).
         mainMenuButton.textContent = "Back to Lobby";
-        mainMenuButton.href = "multiplayer.html";
+        mainMenuButton.href = "../index.html?view=multiplayer";
         mainMenuButton.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            window.location.href = "multiplayer.html";
+            window.location.href = "../index.html?view=multiplayer";
         });
         buttons.appendChild(mainMenuButton);
     } else if (isOnlineMatch && tournamentContext) {
