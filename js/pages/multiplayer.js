@@ -9,7 +9,7 @@ import {
     setPlayerReady,
     getMatch,
     clearMatchStartError
-} from "../firebase/multiplayerService.js?v=draft-8";
+} from "../firebase/multiplayerService.js?v=draft-11";
 
 // ── State ────────────────────────────────────────────
 let currentUser = null;
@@ -254,8 +254,11 @@ async function joinWithCode(code) {
     if (!currentUser) { showError(mpLandingError, "Not connected yet — wait a moment."); return; }
     const nickname = getNickname() || "Player 2";
     try {
-        currentRoomCode = await joinRoom(code, currentUser, nickname);
-        playerSlot = "p2";
+        // You get your existing seat back if you were already in this room; the
+        // lobby then sends you straight back into a game that's under way.
+        const joined = await joinRoom(code, currentUser, nickname);
+        currentRoomCode = joined.code;
+        playerSlot = joined.slot;
         openLobbyView();
     } catch (e) {
         showError(mpLandingError, e.message);
@@ -708,7 +711,8 @@ function renderDraftCollectionOptions(query) {
     const items = [{ slug: "", name: "All cards" },
         ...draftCollectionList.filter(o => o.name.toLowerCase().includes(q) || o.slug.includes(q))];
     draftCollectionSelectMp.innerHTML = items
-        .map((o, i) => `<option value="${o.slug}"${i === 0 ? " selected" : ""}>${o.name}</option>`).join("");
+        // Collection names are chosen by whoever made the collection - escape them.
+        .map((o, i) => `<option value="${escapeHtml(o.slug)}"${i === 0 ? " selected" : ""}>${escapeHtml(o.name)}</option>`).join("");
 }
 async function ensureDraftCollections() {
     if (draftCollectionList.length || !draftCollectionSelectMp) return;

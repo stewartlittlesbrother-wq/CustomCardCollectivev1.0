@@ -21,7 +21,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 import { database } from "./firebaseApp.js";
-import { createRoom, joinRoom } from "./multiplayerService.js?v=draft-8";
+import { createRoom, joinRoom } from "./multiplayerService.js?v=draft-11";
 import { BASE_PATH, DECKS_PATH, SECRETS_PATH, JOIN_PATH } from "./tournamentPaths.js?v=tour-3";
 import { getSubmittedDeck } from "./tournamentDecks.js?v=tour-3";
 import {
@@ -407,8 +407,8 @@ export async function enterMatch(id, t, user, displayName) {
         }
     }
 
-    await joinRoom(code, user, name);
-    return { code, slot: "p2" };
+    const joined = await joinRoom(code, user, name);
+    return { code, slot: joined.slot };
 }
 
 export { playerCount };

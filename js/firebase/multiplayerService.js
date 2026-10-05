@@ -15,6 +15,14 @@ import {
 
 import { database } from "./firebaseApp.js";
 
+// For transactions that move the game along (dice, turn order, mulligan, turn
+// pass, re-deal): don't show the result on this screen until the server has
+// accepted it. By default Firebase shows it straight away - so this page would
+// react to, say, "the game has started" (beginning your turn and saving your
+// board), and that save cancelled the transaction still in flight. The choice
+// was then lost and the game sat on the mulligan screen.
+const SERVER_CONFIRMED = { applyLocally: false };
+
 function generateRoomCode() {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
@@ -234,13 +242,26 @@ function isCardLoaded(number) {
 // "sometimes". Loads the full shared library (once more if a first try still
 // leaves gaps) and returns whatever is STILL missing; never throws, so a flaky
 // network can't strand a rematch.
+//
+// Call it BEFORE claiming a deal: the claims only last a few seconds, and a long
+// download inside one let the other player's browser deal a second time.
+let fullLibraryLoad = null;   // one shared download, however many callers ask at once
+function loadFullLibraryOnce() {
+    if (!fullLibraryLoad) {
+        fullLibraryLoad = Promise.resolve()
+            .then(() => globalThis.loadFullCardLibraryBlocking())
+            .finally(() => { fullLibraryLoad = null; });
+    }
+    return fullLibraryLoad;
+}
+
 async function ensureDeckCardsLoaded(decks, { force = false } = {}) {
-    const load = globalThis.loadFullCardLibraryBlocking;
-    if (typeof load !== "function") return [];
+    if (typeof globalThis.loadFullCardLibraryBlocking !== "function") return [];
+    const load = loadFullLibraryOnce;
 
     const missingNow = () => {
         const out = new Set();
-        decks.forEach(deck => deckCardNumbers(deck).forEach(number => {
+        decks.filter(Boolean).forEach(deck => deckCardNumbers(deck).forEach(number => {
             if (!isCardLoaded(number)) out.add(number);
         }));
         return [...out];
@@ -579,38 +600,63 @@ export async function createRoom(user, opts = {}) {
     return { roomCode, publicListingFailed: false };
 }
 
+// Returns { code, slot } - the seat you have in the room ("p1" or "p2").
 export async function joinRoom(roomCode, user, nickname = "Player 2") {
-    const code = roomCode.trim().toUpperCase();
+    if (!user?.uid) {
+        throw new Error("No user found. Guest login did not finish.");
+    }
+
+    const code = cleanRoomCode(roomCode);
     const matchRef = ref(database, `matches/${code}`);
 
-    const snapshot = await get(matchRef);
+    const [playersSnap, statusSnap, tournamentSnap] = await Promise.all([
+        get(ref(database, `matches/${code}/players`)),
+        get(ref(database, `matches/${code}/status`)),
+        get(ref(database, `matches/${code}/tournament`))
+    ]);
 
-    if (!snapshot.exists()) {
+    if (!playersSnap.exists() && !statusSnap.exists()) {
         throw new Error("Room does not exist.");
     }
 
-    const match = snapshot.val();
+    const players = playersSnap.val() || {};
+
+    // Already in this room (e.g. you left the game page and typed the code again):
+    // just hand your seat back. This used to re-join you from scratch - the room
+    // went back to "ready" and your hand and deck were wiped - so readying up again
+    // re-dealt a game that was still being played, and the other player was thrown
+    // back to the dice roll.
+    if (players.p1?.uid === user.uid) return { code, slot: "p1" };
+    if (players.p2?.uid === user.uid) return { code, slot: "p2" };
 
     // A tournament match is for the two paired players only. The room code is
     // derivable, so don't let anyone else take the empty seat.
-    if (match.tournament && match.tournament.players && !match.tournament.players[user.uid]) {
+    const tournament = tournamentSnap.val();
+    if (tournament && tournament.players && !tournament.players[user.uid]) {
         throw new Error("This is a tournament match - only the two players in this pairing can join it.");
     }
 
-    if (match.players?.p2 && match.players.p2.uid !== user.uid) {
+    if (players.p2) {
+        throw new Error("Room is already full.");
+    }
+
+    if (statusSnap.val() === "started") {
+        throw new Error("That game has already started.");
+    }
+
+    // Take the empty seat atomically, so two people joining at the same moment
+    // can't both think they got it.
+    const seat = await runTransaction(ref(database, `matches/${code}/players/p2`), (current) => {
+        if (current && current.uid !== user.uid) return; // someone beat us to it
+        return { uid: user.uid, name: nickname, connected: true, ready: false };
+    });
+
+    if (!seat.committed) {
         throw new Error("Room is already full.");
     }
 
     await update(matchRef, {
         status: "ready",
-
-        "players/p2": {
-            uid: user.uid,
-            name: nickname,
-            connected: true,
-            ready: false
-        },
-
         [`private/${user.uid}`]: {
             selectedDeck: null,
             hand: [],
@@ -619,7 +665,7 @@ export async function joinRoom(roomCode, user, nickname = "Player 2") {
         }
     });
 
-    return code;
+    return { code, slot: "p2" };
 }
 
 // The lobby only needs the handful of fields below. Subscribing to the whole
@@ -878,6 +924,16 @@ export async function initializeMultiplayerGame(roomCode) {
         throw new Error("Both players must choose decks before starting.");
     }
 
+    // Normally already loaded by startMatch before it claimed the start; this only
+    // downloads anything if a deck changed in the meantime. If it did have to wait,
+    // make sure nobody else dealt while we were loading.
+    const stillMissing = await ensureDeckCardsLoaded([player1Deck, player2Deck]);
+    const latestStatus = await get(ref(database, `matches/${cleanRoomCode(roomCode)}/status`));
+    if (latestStatus.val() === "started") return;
+    if (stillMissing.length) {
+        console.warn("Starting without some cards (not in the card library):", stillMissing);
+    }
+
     await update(matchRef, buildFreshMatchPayload(player1, player2, player1Deck, player2Deck));
 }
 
@@ -971,51 +1027,78 @@ export function subscribeToRematch(roomCode, callback) {
     return onValue(rematchRef, (snapshot) => callback(snapshot.val() || {}));
 }
 
-// Re-deal the match. Guarded by a transaction on rematch/startedAt so that when
-// both clients notice "both ready" at the same moment only one actually deals -
-// otherwise the decks would be shuffled twice and the two sides would disagree.
+// A claimed re-deal that never landed (the dealing browser closed mid-deal) may be
+// taken over after this long, so the rematch can't get stuck on "starting…".
+const REMATCH_CLAIM_STALE_MS = 45000;
+
+// Re-deal the match. Guarded by a transaction on the whole rematch node so that
+// when both clients notice "both ready" at the same moment only one actually
+// deals - otherwise the decks would be shuffled twice and the two sides would
+// disagree. (The claim used to sit on rematch/startedAt alone: a client that read
+// "both ready" just before the other client's deal cleared the rematch node could
+// still claim the empty startedAt afterwards and deal a SECOND time.)
 export async function restartMatch(roomCode) {
     const code = cleanRoomCode(roomCode);
     const matchRef = ref(database, `matches/${code}`);
 
-    const snapshot = await get(matchRef);
-    const match = snapshot.val();
+    // Only the small parts we need - the whole match also holds both players'
+    // cards, the chat and the cosmetics images.
+    const [playersSnap, rematchSnap, winnerSnap] = await Promise.all([
+        get(ref(database, `matches/${code}/players`)),
+        get(ref(database, `matches/${code}/rematch`)),
+        get(ref(database, `matches/${code}/public/winner`))
+    ]);
 
-    if (!match) throw new Error("Match not found.");
+    const players = playersSnap.val();
+    if (!players) throw new Error("Match not found.");
 
-    const player1 = match.players?.p1;
-    const player2 = match.players?.p2;
+    const player1 = players.p1;
+    const player2 = players.p2;
 
     if (!player1 || !player2) throw new Error("Both players must be connected.");
 
-    // A rematch deck choice wins over the one used last game.
-    const player1Deck = match.rematch?.p1?.deck || player1.deck;
-    const player2Deck = match.rematch?.p2?.deck || player2.deck;
-
-    if (!player1Deck || !player2Deck) {
-        throw new Error("Both players must have a deck selected.");
-    }
-
-    if (!match.rematch?.p1?.ready || !match.rematch?.p2?.ready) {
+    const rematch = rematchSnap.val() || {};
+    if (!rematch.p1?.ready || !rematch.p2?.ready) {
         return { committed: false };
     }
 
-    // Claim the re-deal; the loser of this race simply waits for the new state.
-    const claim = await runTransaction(
-        ref(database, `matches/${code}/rematch/startedAt`),
-        (current) => (current ? undefined : Date.now())
-    );
+    // Whichever browser deals builds BOTH decks, and it may not have the other
+    // player's cards loaded (the game page loads those in the background). Without
+    // them parseDeckText drops cards and "start in play" cards are silently
+    // skipped. Loaded before claiming, so the claim is held only for the deal.
+    await ensureDeckCardsLoaded([rematch.p1?.deck || player1.deck, rematch.p2?.deck || player2.deck]);
 
-    if (!claim.committed) return { committed: false };
+    let claimed = null;
+    const claim = await runTransaction(ref(database, `matches/${code}/rematch`), (current) => {
+        claimed = null;
+        // No local copy yet: the first try is a guess of null. Returning null (not
+        // undefined, which gives up on the spot) lets the server answer with the
+        // real value and run this again.
+        if (current === null) return null;
+        // Cleared = the other browser already re-dealt.
+        if (!current.p1?.ready || !current.p2?.ready) return;
+        if (current.startedAt && (Date.now() - Number(current.startedAt)) < REMATCH_CLAIM_STALE_MS) return;
+        claimed = { ...current, startedAt: Date.now() };
+        return claimed;
+    }, SERVER_CONFIRMED);
 
-    // Whichever browser claims the re-deal builds BOTH decks, and it may not have
-    // the other player's cards loaded (the game page loads those in the
-    // background). Without them parseDeckText drops cards and "start in play"
-    // cards are silently skipped. Only loads when something is actually missing.
+    if (!claim.committed || !claimed) return { committed: false };
+
+    // A rematch deck choice wins over the one used last game. Read from the claim,
+    // which is the latest state.
+    const player1Deck = claimed.p1?.deck || player1.deck;
+    const player2Deck = claimed.p2?.deck || player2.deck;
+
+    if (!player1Deck || !player2Deck) {
+        await update(matchRef, { "rematch/startedAt": null }).catch(() => {});
+        throw new Error("Both players must have a deck selected.");
+    }
+
+    // Only downloads if a deck was swapped since the load above.
     await ensureDeckCardsLoaded([player1Deck, player2Deck]);
 
     // The loser of the game that just ended chooses turn order for the rematch.
-    const prevWinner = match.public?.winner;
+    const prevWinner = winnerSnap.val();
     const rematchLoser = prevWinner === "p1" ? "p2" : (prevWinner === "p2" ? "p1" : null);
 
     await update(matchRef, {
@@ -1122,7 +1205,10 @@ export async function rollMultiplayerDice(roomCode, playerSlot) {
     const diceRef = ref(database, `matches/${cleanRoomCode(roomCode)}/public/setup/dice`);
     const roll = Math.floor(Math.random() * 12) + 1;
 
-    return runTransaction(diceRef, (dice = {}) => {
+    return runTransaction(diceRef, (current) => {
+        // (A default parameter doesn't cover null - the value of a node with no
+        // local copy yet - and `null.winner` threw.)
+        const dice = current || {};
         const ownKey = `${playerSlot}Roll`;
         const otherKey = playerSlot === "p1" ? "p2Roll" : "p1Roll";
 
@@ -1151,7 +1237,7 @@ export async function rollMultiplayerDice(roomCode, playerSlot) {
         }
 
         return nextDice;
-    });
+    }, SERVER_CONFIRMED);
 }
 
 export async function chooseMultiplayerTurnOrder(roomCode, chooserSlot, choice) {
@@ -1166,9 +1252,10 @@ export async function chooseMultiplayerTurnOrder(roomCode, chooserSlot, choice) 
     const publicRef = ref(database, `matches/${cleanRoomCode(roomCode)}/public`);
 
     return runTransaction(publicRef, (publicState) => {
+        if (publicState === null) return null;   // no local copy yet - let the server answer
         const diceWinner = publicState?.setup?.dice?.winner;
 
-        if (!publicState || publicState.phase !== "diceRoll" || diceWinner !== chooserSlot) {
+        if (publicState.phase !== "diceRoll" || diceWinner !== chooserSlot) {
             return;
         }
 
@@ -1195,7 +1282,7 @@ export async function chooseMultiplayerTurnOrder(roomCode, chooserSlot, choice) 
                 }
             }
         };
-    });
+    }, SERVER_CONFIRMED);
 }
 
 export async function setMultiplayerMulligan(roomCode, user, playerSlot, tookMulligan) {
@@ -1207,30 +1294,34 @@ export async function setMultiplayerMulligan(roomCode, user, playerSlot, tookMul
         throw new Error("Invalid player slot.");
     }
 
-    const matchRef = ref(database, `matches/${cleanRoomCode(roomCode)}`);
-    const snapshot = await get(matchRef);
+    const code = cleanRoomCode(roomCode);
+    const matchRef = ref(database, `matches/${code}`);
+    const [phaseSnap, mulliganSnap, uidSnap, privateSnap] = await Promise.all([
+        get(ref(database, `matches/${code}/public/phase`)),
+        get(ref(database, `matches/${code}/public/setup/mulligan`)),
+        get(ref(database, `matches/${code}/players/${playerSlot}/uid`)),
+        get(ref(database, `matches/${code}/private/${user.uid}`))
+    ]);
 
-    if (!snapshot.exists()) {
+    if (!phaseSnap.exists() && !uidSnap.exists()) {
         throw new Error("Room does not exist.");
     }
 
-    const match = snapshot.val();
-    const publicState = match.public || {};
-    const player = match.players?.[playerSlot];
-
-    if (publicState.phase !== "mulligan") {
+    if (phaseSnap.val() !== "mulligan") {
         throw new Error("Mulligan is not available right now.");
     }
 
-    if (player?.uid !== user.uid) {
+    if (uidSnap.val() !== user.uid) {
         throw new Error("Only your player slot can mulligan.");
     }
 
-    if (publicState.setup?.mulligan?.[playerSlot]?.done) {
+    if (mulliganSnap.val()?.[playerSlot]?.done) {
         throw new Error("Mulligan was already chosen.");
     }
 
-    const privateState = match.private?.[user.uid] || {};
+    // During setup the dealt hand/deck arrays are the truth (the board isn't
+    // yours to change until the game starts).
+    const privateState = privateSnap.val() || {};
     let hand = privateState.hand || [];
     let deck = privateState.deck || [];
 
@@ -1245,69 +1336,68 @@ export async function setMultiplayerMulligan(roomCode, user, playerSlot, tookMul
     }
 
     const publicPlayerKey = playerSlot === "p1" ? "player1" : "player2";
-    const mulliganState = {
-        ...(publicState.setup?.mulligan || {}),
-        [playerSlot]: {
-            done: true,
-            took: Boolean(tookMulligan)
-        }
-    };
-    const bothDone = Boolean(mulliganState.p1?.done && mulliganState.p2?.done);
-    const updates = {
+
+    // Step 1: the new hand. Written on its own, BEFORE the game can start. When the
+    // hand and "game starts" went out in one write, the browser could see the game
+    // start before the new hand arrived - and it locks in your cards the moment the
+    // game starts, so the mulligan was silently undone. zonesJson is cleared so a
+    // copy pushed during setup can't win over the dealt cards.
+    await update(matchRef, {
         [`private/${user.uid}/hand`]: hand,
         [`private/${user.uid}/deck`]: deck,
+        [`private/${user.uid}/zonesJson`]: null,
         [`public/${publicPlayerKey}/handCount`]: hand.length,
-        [`public/${publicPlayerKey}/deckCount`]: deck.length,
-        [`public/setup/mulligan/${playerSlot}`]: mulliganState[playerSlot]
-    };
+        [`public/${publicPlayerKey}/deckCount`]: deck.length
+    });
 
-    if (bothDone) {
-        const firstPlayer = publicState.firstPlayer || publicState.setup?.turnChoice?.firstPlayer || "p1";
-
-        updates["public/phase"] = "main";
-        updates["public/currentPlayer"] = firstPlayer;
-        updates["public/turnNumber"] = 1;
-
-        // Deliberately leave playerTurns/turns at 0 for the first player. Their
-        // client runs the opening turn start itself (maybeRunOnlineTurnStart),
-        // which is what actually grants the 1 DON!!, skips the turn-1 draw and
-        // then stamps turns = 1. Pre-setting it to 1 here made that guard think
-        // the turn had already been processed, so the player going first started
-        // with an empty DON!! area.
-        updates[`public/playerTurns/${firstPlayer}`] = 0;
-    }
-
-    await update(matchRef, updates);
+    // Step 2: record the choice, and start the game if both players have chosen.
+    // A transaction, so two players choosing at the same instant can't each miss
+    // the other's choice and leave the game stuck on "mulligan".
+    await runTransaction(ref(database, `matches/${code}/public`), (publicState) => {
+        if (publicState === null) return null;   // no local copy yet - let the server answer
+        if (publicState.phase !== "mulligan") return;
+        const mulligan = {
+            ...(publicState.setup?.mulligan || {}),
+            [playerSlot]: { done: true, took: Boolean(tookMulligan) }
+        };
+        const next = { ...publicState, setup: { ...(publicState.setup || {}), mulligan } };
+        return mulligan.p1?.done && mulligan.p2?.done ? startMainPhase(next) : next;
+    }, SERVER_CONFIRMED);
 }
 
-// Rescue a mulligan deadlock. setMultiplayerMulligan reads the match, then
-// writes - so if BOTH players decide at nearly the same instant, each reads the
-// state before the other's write lands and neither sees "both done", so neither
-// advances the phase. The result: both `done` flags are true in the DB but the
-// phase is stuck on "mulligan". Any client that sees that state calls this to
-// finish the transition. Idempotent + guarded, so both clients calling it (or
-// calling it repeatedly) is harmless.
-export async function resolveMulliganIfBothDone(roomCode) {
-    const matchRef = ref(database, `matches/${cleanRoomCode(roomCode)}`);
-    const snapshot = await get(matchRef);
-    if (!snapshot.exists()) return false;
-
-    const publicState = snapshot.val().public || {};
-    if (publicState.phase !== "mulligan") return false;
-
-    const mulligan = publicState.setup?.mulligan || {};
-    if (!(mulligan.p1?.done && mulligan.p2?.done)) return false;
-
+// The game proper begins. Deliberately leave playerTurns at 0 for the first
+// player: their client runs the opening turn start itself (maybeRunOnlineTurnStart),
+// which grants the 1 DON!!, skips the turn-1 draw and then stamps turns = 1.
+// Pre-setting it to 1 made that guard think the turn had already been processed,
+// so the player going first started with an empty DON!! area.
+function startMainPhase(publicState) {
     const firstPlayer = publicState.firstPlayer || publicState.setup?.turnChoice?.firstPlayer || "p1";
-    await update(matchRef, {
-        "public/phase": "main",
-        "public/currentPlayer": firstPlayer,
-        "public/turnNumber": 1,
-        // Match the bothDone branch of setMultiplayerMulligan: the first player's
-        // client runs its own opening turn start, so leave its turn counter at 0.
-        [`public/playerTurns/${firstPlayer}`]: 0
-    });
-    return true;
+    return {
+        ...publicState,
+        phase: "main",
+        currentPlayer: firstPlayer,
+        turnNumber: 1,
+        playerTurns: { ...(publicState.playerTurns || {}), [firstPlayer]: 0 }
+    };
+}
+
+// Rescue a mulligan that's stuck with both choices recorded but the phase still
+// on "mulligan" (possible with an older version of the page on the other side).
+// Any client that sees that state calls this. A transaction, so it can only ever
+// move the phase forward from "mulligan" - never re-start a game in progress.
+export async function resolveMulliganIfBothDone(roomCode) {
+    const result = await runTransaction(
+        ref(database, `matches/${cleanRoomCode(roomCode)}/public`),
+        (publicState) => {
+            if (publicState === null) return null;
+            if (publicState.phase !== "mulligan") return;
+            const mulligan = publicState.setup?.mulligan || {};
+            if (!(mulligan.p1?.done && mulligan.p2?.done)) return;
+            return startMainPhase(publicState);
+        },
+        SERVER_CONFIRMED
+    );
+    return Boolean(result.committed && result.snapshot.val()?.phase === "main");
 }
 
 export async function sendMultiplayerAction(roomCode, user, actionType, payload) {
@@ -1346,9 +1436,24 @@ export async function passTurn(roomCode, currentPlayer) {
 
     const publicRef = ref(database, `matches/${cleanRoomCode(roomCode)}/public`);
 
+    // Any other write this browser makes to the match while the transaction is in
+    // flight (a board sync, a card reveal) cancels it with "set" - the turn then
+    // simply didn't pass ("Failed to end online turn: set"). It hasn't changed
+    // anything yet, so it's safe to just try again.
+    for (let attempt = 0; ; attempt++) {
+        try {
+            return await runPassTurnTransaction(publicRef, currentPlayer);
+        } catch (error) {
+            const retryable = /^(set|maxretry|disconnect)$/i.test(String(error?.message || ""));
+            if (!retryable || attempt >= 3) throw error;
+        }
+    }
+}
+
+function runPassTurnTransaction(publicRef, currentPlayer) {
     return runTransaction(publicRef, (publicState) => {
+        if (publicState === null) return null;   // no local copy yet - let the server answer
         if (
-            !publicState ||
             publicState.currentPlayer !== currentPlayer ||
             publicState.phase !== "main" ||
             publicState.currentAttack
@@ -1373,10 +1478,10 @@ export async function passTurn(roomCode, currentPlayer) {
                 ...(publicState.playerTurns || {})
             }
         };
-    });
+    }, SERVER_CONFIRMED);
 }
 
-const START_CLAIM_STALE_MS = 8000;
+const START_CLAIM_STALE_MS = 15000;
 
 // Atomically claim the right to initialise the match. Uses a timestamped claim
 // rather than a "starting" status so a client that dies (or navigates away)
@@ -1401,25 +1506,25 @@ export async function startMatch(roomCode) {
     const snapshot = await get(ref(database, `matches/${code}/status`));
     if (snapshot.val() === "started") return; // already running
 
+    // The dealer builds BOTH players' decks, so it needs every deck + "start in
+    // play" card loaded — including the OPPONENT's custom cards. Without them
+    // parseDeckText silently drops cards and applyStartingCards can't place them.
+    // Loaded BEFORE claiming the start: the claim goes stale after
+    // START_CLAIM_STALE_MS, and a slow download inside it let the other player's
+    // browser claim too and deal a second game on top of the first (both players
+    // thrown back to the dice roll).
+    const playersSnap = await get(ref(database, `matches/${code}/players`));
+    const players = playersSnap.val() || {};
+    await ensureDeckCardsLoaded([players.p1?.deck, players.p2?.deck]);
+
+    const recheck = await get(ref(database, `matches/${code}/status`));
+    if (recheck.val() === "started") return;
+
     if (!(await claimMatchStart(code))) {
         return; // another client is mid-start
     }
 
     try {
-        // The host builds BOTH players' decks here, so it needs every deck +
-        // "start in play" card loaded — including the OPPONENT's custom cards,
-        // which a fast/targeted load may not have. Without this, parseDeckText
-        // silently drops the missing cards and applyStartingCards can't place
-        // them, which is why starting cards were spotty online. Cached after the
-        // first load, so it's only slow once. A failed load used to be swallowed
-        // here; now a second attempt is made if either deck still has gaps.
-        const playersSnap = await get(ref(database, `matches/${code}/players`));
-        const players = playersSnap.val() || {};
-        await ensureDeckCardsLoaded(
-            [players.p1?.deck, players.p2?.deck].filter(Boolean),
-            { force: true }
-        );
-
         await initializeMultiplayerGame(code);
         // Release the claim and clear any previous failure so both clients unblock.
         await update(ref(database, `matches/${code}`), { startError: null, startClaim: null });

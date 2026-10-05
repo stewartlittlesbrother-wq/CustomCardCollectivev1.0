@@ -30,7 +30,14 @@ export function sanitizeSyncKey(key) {
 //   lww   - any value: last write wins, by a per-key timestamp.
 // Deliberately EXCLUDED: device-layout ergonomics (cc_builder_deck_h/locked/set/
 // large - screen-size specific), the guest-ack flag, and debug/session keys.
+// Deleted decks, as { "<list key>|<lowercase name>": deletedAtMs }. The deck merge
+// only ever adds, so without these a deleted deck came back: from the cloud copy
+// if the page closed before the delete was pushed, or from another device that
+// still had it. Must stay FIRST - the deck lists below are filtered by it.
+const DELETED_DECKS_KEY = "cc-deleted-decks-v1";
+
 const SYNC_SPECS = [
+    { key: DELETED_DECKS_KEY,                            mode: "tombstones" },
     { key: "custom-cards-sim-luffy-only-saved-decks-v1", mode: "decks" },
     { key: "custom-don-decks-v1",                        mode: "decks" },
     { key: "custom-cards-sim-imported-cards-v1",         mode: "cards" },
@@ -90,6 +97,12 @@ async function pushEntries(uid, entries) {
 function parseArr(json) {
     try { const v = JSON.parse(json); return Array.isArray(v) ? v : []; } catch { return []; }
 }
+function parseObj(json) {
+    try { const v = JSON.parse(json); return v && typeof v === "object" && !Array.isArray(v) ? v : {}; } catch { return {}; }
+}
+export function deletedDeckKey(listKey, name) {
+    return `${listKey}|${String(name || "").toLowerCase()}`;
+}
 function deckTime(d) { return Date.parse(d && d.savedAt) || 0; }
 function cardKeyOf(c) {
     const num = String(c?.cardNumber || c?.id || "").toLowerCase();
@@ -114,18 +127,41 @@ function unionBy(localArr, cloudArr, keyFn, timeFn) {
 
 // Reconcile one key against its cloud blob. Returns { localValue, pushValue,
 // adoptedAt } — localValue/pushValue null when nothing needs writing that side.
-function reconcile(spec, cloudEntry, meta) {
+function reconcile(spec, cloudEntry, meta, deleted = {}) {
     const localRaw = lsGet(spec.key);
     const cloudJson = cloudEntry && typeof cloudEntry.json === "string" ? cloudEntry.json : null;
 
+    if (spec.mode === "tombstones") {
+        // Union, keeping the latest deletion time for each deck.
+        const merged = { ...parseObj(localRaw) };
+        Object.entries(parseObj(cloudJson)).forEach(([key, at]) => {
+            if (!(Number(merged[key]) >= Number(at))) merged[key] = Number(at) || 0;
+        });
+        const mergedJson = JSON.stringify(merged);
+        const empty = !Object.keys(merged).length;
+        return {
+            localValue: !empty && mergedJson !== localRaw ? mergedJson : null,
+            pushValue: !empty && mergedJson !== cloudJson ? mergedJson : null,
+            merged
+        };
+    }
+
     if (spec.mode === "decks" || spec.mode === "cards") {
-        if (cloudJson == null) return { localValue: null, pushValue: localRaw };
         const isCards = spec.mode === "cards";
+        // A deck deleted after it was last saved stays deleted, whichever copy has it.
+        const notDeleted = (d) => isCards ||
+            !(Number(deleted[deletedDeckKey(spec.key, d?.name)]) > deckTime(d));
+        if (cloudJson == null) {
+            const kept = parseArr(localRaw).filter(notDeleted);
+            const keptJson = JSON.stringify(kept);
+            const changed = localRaw != null && keptJson !== localRaw;
+            return { localValue: changed ? keptJson : null, pushValue: changed ? keptJson : localRaw };
+        }
         const merged = unionBy(
             parseArr(localRaw), parseArr(cloudJson),
             isCards ? cardKeyOf : (d => String(d?.name || "").toLowerCase()),
             isCards ? cardTime : deckTime
-        );
+        ).filter(notDeleted);
         const mergedJson = JSON.stringify(merged);
         return {
             localValue: mergedJson !== localRaw ? mergedJson : null,
@@ -159,10 +195,12 @@ export async function startAccountSync(uid, options = {}) {
     const now = Date.now();
     const toPush = {};
     const changedKeys = [];
+    let deleted = {};
 
     SYNC_SPECS.forEach(spec => {
         const sk = sanitizeSyncKey(spec.key);
-        const res = reconcile(spec, cloud[sk], meta);
+        const res = reconcile(spec, cloud[sk], meta, deleted);
+        if (res.merged) deleted = res.merged;
         if (res.localValue != null) {
             if (lsSet(spec.key, res.localValue)) changedKeys.push(spec.key);
         }
@@ -200,14 +238,30 @@ export function pushKey(key) {
     writeMeta(meta);
     if (!currentUid) return;   // no account to push to yet — the timestamp is enough
     clearTimeout(pushTimers[key]);
-    pushTimers[key] = setTimeout(() => {
-        if (!currentUid) return;
-        const json = lsGet(key);
-        if (json == null) return;
-        // Use the stamp recorded for the latest write to this key.
-        const stampedAt = Number(readMeta()[key]) || at;
-        pushEntries(currentUid, { [sanitizeSyncKey(key)]: { at: stampedAt, json } });
-    }, 800);
+    pushTimers[key] = setTimeout(() => pushNow(key, at), 800);
+}
+
+function pushNow(key, fallbackAt = Date.now()) {
+    clearTimeout(pushTimers[key]);
+    delete pushTimers[key];
+    if (!currentUid) return;
+    const json = lsGet(key);
+    if (json == null) return;
+    // Use the stamp recorded for the latest write to this key.
+    const stampedAt = Number(readMeta()[key]) || fallbackAt;
+    pushEntries(currentUid, { [sanitizeSyncKey(key)]: { at: stampedAt, json } });
+}
+
+// Leaving the page (e.g. Save, then straight into a match) used to drop any push
+// still waiting out its debounce - send them now instead.
+function flushPendingPushes() {
+    Object.keys(pushTimers).forEach(key => pushNow(key));
+}
+if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", flushPendingPushes);
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") flushPendingPushes();
+    });
 }
 
 // Back-compat exports (older callers).

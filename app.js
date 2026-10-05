@@ -2044,11 +2044,11 @@ function renderDonCardPool() {
     const tile = document.createElement("div");
     tile.className = "don-pool-card";
     tile.innerHTML = `
-      <div class="don-pool-art">${card.imageUrl ? `<img src="${card.imageUrl}" alt="">` : `<span>ド!!</span>`}</div>
+      <div class="don-pool-art">${card.imageUrl ? `<img src="${escapeAttr(card.imageUrl)}" alt="">` : `<span>ド!!</span>`}</div>
       <div class="don-pool-name"></div>
       <div class="don-pool-actions">
-        <button class="red-button" type="button" data-add-donpool="${card.cardNumber}">Add${inDeck ? ` (${inDeck})` : ""}</button>
-        <button class="ghost danger" type="button" data-del-donpool="${card.cardNumber}">✕</button>
+        <button class="red-button" type="button" data-add-donpool="${escapeAttr(card.cardNumber)}">Add${inDeck ? ` (${inDeck})` : ""}</button>
+        <button class="ghost danger" type="button" data-del-donpool="${escapeAttr(card.cardNumber)}">✕</button>
       </div>`;
     tile.querySelector(".don-pool-name").textContent = card.name || "DON!!";
     el.donCardPool.appendChild(tile);
@@ -2082,7 +2082,7 @@ function renderDonDeckCurrent() {
     const chip = document.createElement("div");
     chip.className = "don-deck-chip";
     chip.innerHTML = `
-      <div class="don-deck-chip-art">${c.art ? `<img src="${c.art}" alt="">` : `<span>ド!!</span>`}</div>
+      <div class="don-deck-chip-art">${c.art ? `<img src="${escapeAttr(c.art)}" alt="">` : `<span>ド!!</span>`}</div>
       <button class="don-deck-chip-remove" type="button" data-remove-donbuild="${index}" title="Remove">✕</button>`;
     el.donDeckCurrent.appendChild(chip);
   });
@@ -2102,11 +2102,19 @@ function saveDonDeck() {
   const decks = getDonDecks();
   const existing = donBuild.editId ? decks.find(d => d.id === donBuild.editId) : null;
   const cards = donBuild.cards.map(c => ({ n: c.n, art: c.art || "", name: c.name || "DON!!" }));
+  // savedAt lets the account sync tell which copy of a DON!! deck is newest (with
+  // none, the cloud copy always won and an edit could be undone on the next load).
+  const savedAt = new Date().toISOString();
   if (existing) {
+    // Decks are matched by name across devices, so a rename retires the old name.
+    if (existing.name && existing.name.toLowerCase() !== name.toLowerCase()) {
+      rememberDeletedDeck(DON_DECKS_KEY, existing.name);
+    }
     existing.name = name;
     existing.cards = cards;
+    existing.savedAt = savedAt;
   } else {
-    decks.push({ id: `don-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name, cards });
+    decks.push({ id: `don-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name, cards, savedAt });
   }
   saveDonDecks(decks);
   const wasEditing = Boolean(existing);
@@ -2131,8 +2139,23 @@ function editDonDeck(id) {
   el.donDeckName?.focus();
 }
 
+// Record a deleted deck for the account sync, which otherwise only ever ADDS decks
+// (a deleted deck came back from the cloud copy or from another device).
+const DELETED_DECKS_KEY = "cc-deleted-decks-v1";
+function rememberDeletedDeck(listKey, name) {
+  try {
+    const map = JSON.parse(localStorage.getItem(DELETED_DECKS_KEY) || "{}") || {};
+    map[`${listKey}|${String(name || "").toLowerCase()}`] = Date.now();
+    localStorage.setItem(DELETED_DECKS_KEY, JSON.stringify(map));
+  } catch {}
+  syncPush(DELETED_DECKS_KEY);
+}
+
 function deleteDonDeck(id) {
-  const decks = getDonDecks().filter(d => d.id !== id);
+  const all = getDonDecks();
+  const gone = all.find(d => d.id === id);
+  const decks = all.filter(d => d.id !== id);
+  if (gone) rememberDeletedDeck(DON_DECKS_KEY, gone.name);
   saveDonDecks(decks);
   if (getActiveDonDeckId() === id) setActiveDonDeckId("");
   renderDonDeckList();
@@ -2171,7 +2194,7 @@ function renderDonDeckList() {
     const row = document.createElement("div");
     row.className = "don-deck-row" + (isActive ? " active" : "");
     const thumbs = (deck.cards || []).slice(0, 5)
-      .map(c => c.art ? `<img src="${c.art}" alt="">` : `<span>ド!!</span>`).join("");
+      .map(c => c.art ? `<img src="${escapeAttr(c.art)}" alt="">` : `<span>ド!!</span>`).join("");
     row.innerHTML = `
       <div class="don-deck-art don-deck-art-stack">${thumbs || `<span>ド!!</span>`}</div>
       <div class="don-deck-meta">
@@ -2215,7 +2238,8 @@ function importDonDeckFromText() {
       n: String(c.n || ""),
       art: typeof c.art === "string" ? c.art : "",
       name: String(c.name || "DON!!").slice(0, 60)
-    }))
+    })),
+    savedAt: new Date().toISOString()
   });
   saveDonDecks(decks);
   renderDonDeckList();
@@ -6244,6 +6268,7 @@ function deleteNamedDeck(index) {
   if (!window.confirm(`Delete saved deck "${name}"?`)) return;
   decks.splice(index, 1);
   localStorage.setItem(SAVED_DECKS_KEY, JSON.stringify(decks));
+  rememberDeletedDeck(SAVED_DECKS_KEY, deck.name);
   syncPush(SAVED_DECKS_KEY);
   renderSavedDecks();
   toast(`${name} deleted`);
@@ -6601,6 +6626,9 @@ function syncStartersToSavedDeck() {
     return;
   }
   saved.startingCards = state.startingCards.map(e => ({ ...e }));
+  // Newer timestamp, or the account sync (newest copy of a deck wins) would put
+  // the old copy from the cloud back over this change.
+  saved.savedAt = new Date().toISOString();
   try {
     localStorage.setItem(SAVED_DECKS_KEY, JSON.stringify(decks));
     syncPush(SAVED_DECKS_KEY);
@@ -8244,7 +8272,7 @@ async function maybeStartMultiplayerDraft() {
   try {
     [firebaseApp, svc] = await Promise.all([
       import("./js/firebase/firebaseApp.js"),
-      import("./js/firebase/multiplayerService.js?v=draft-8")
+      import("./js/firebase/multiplayerService.js?v=draft-11")
     ]);
     await firebaseApp.signInGuest();
   } catch (e) {

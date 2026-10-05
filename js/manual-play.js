@@ -1695,11 +1695,21 @@ const manualPlay = {
             } catch (_) {}
         };
 
+        let lastForeignDragNote = 0;
         document.addEventListener("pointerdown", (e) => {
             if (ptrDrag) return;                                   // one drag at a time
             if (e.pointerType === "mouse" && e.button !== 0) return; // left button only
             const src = readDragSource(e.target);
             if (!src) return;
+            // Online, the opponent's cards are theirs to move: a move made here only
+            // changed this screen and snapped back the next time they did anything.
+            if (typeof window.canMoveCardsOf === "function" && !window.canMoveCardsOf(src.data.playerKey)) {
+                if (Date.now() - lastForeignDragNote > 4000) {
+                    lastForeignDragNote = Date.now();
+                    window.addGameLog?.("Only your opponent can move their cards - ask them in chat.");
+                }
+                return;
+            }
             ptrDrag = { data: src.data, srcEl: src.el, ghost: null, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, dragging: false };
         }, true);
 

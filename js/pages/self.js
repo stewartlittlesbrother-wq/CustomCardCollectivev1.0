@@ -318,6 +318,7 @@ let onlineActiveAttackId = null;
 let onlineProcessedDefenderAttackEffectId = null;
 let onlineShownGameOverKey = null;
 let onlinePendingWinnerSlot = null;
+let onlineLastRawPhase = null;   // last phase the match document reported
 
 if (isOnlineMatch) {
     console.log("Online match loaded.");
@@ -388,7 +389,9 @@ function createPublicCardSnapshot(card) {
 
     return {
         name: card.name,
-        image: card.image,
+        // Uploaded art is rebuilt from the viewer's own library (hydrateCard);
+        // sending it would put ~90 KB per face-up life card into every board push.
+        image: syncableImage(card.image),
         cardNumber: card.cardNumber,
         cardType: card.cardType,
         type: card.type,
@@ -768,7 +771,10 @@ function applyOnlinePublicState(publicState = {}) {
         secondPlayer: publicState.secondPlayer || null,
         playerTurns: publicState.playerTurns || { p1: 0, p2: 0 },
         setup: publicState.setup || {},
-        revealedCards: publicState.revealedCards || [],
+        // Firebase can hand an array back as an {0:..,1:..} object.
+        revealedCards: Array.isArray(publicState.revealedCards)
+            ? publicState.revealedCards.filter(Boolean)
+            : Object.values(publicState.revealedCards || {}).filter(Boolean),
         currentAttack: publicState.currentAttack || null,
         highlights: normalizeHighlights(publicState.highlights),
         player1: publicState.player1 || null,
@@ -813,10 +819,15 @@ function applyOnlinePublicState(publicState = {}) {
 
     // A rematch re-deals the match: the phase drops back to diceRoll with the
     // winner cleared. Every zone, hand and deck is new, so reload rather than
-    // trying to unpick the finished game's local state in place.
-    if (onlineShownGameOverKey &&
-        onlinePublicState.phase === "diceRoll" &&
-        !onlinePublicState.winner) {
+    // trying to unpick the finished game's local state in place. The same goes
+    // for any re-deal of a game that was already being played (it used to keep
+    // this page's DON!!, turn counters and "turn already started" marker from the
+    // old game, so the new game's first turn could be skipped).
+    const rawPhase = publicState.phase || null;
+    const wasPlaying = onlineLastRawPhase && !ONLINE_SETUP_PHASES.has(onlineLastRawPhase);
+    onlineLastRawPhase = rawPhase || onlineLastRawPhase;
+    if (rawPhase === "diceRoll" && !onlinePublicState.winner &&
+        (onlineShownGameOverKey || wasPlaying)) {
         stopRematchWatch();
         window.location.reload();
         return;
@@ -1104,8 +1115,19 @@ function showOnlineRevealedCards() {
     // the same chip rendering instead of the fixed "revealed:".
     addGameLog(
         `${onlinePlayerLabels[latestReveal.player] || "Player"} ${latestReveal.verb || "revealed:"}`,
-        cards.map(card => ({ name: card.name, image: card.image }))
+        cards.map(card => ({ name: card.name, image: revealedCardImage(card) }))
     );
+}
+
+// Reveals don't carry uploaded art (see publishOnlineReveal) - look the card up
+// in this browser's library by number, in the art its owner picked.
+function revealedCardImage(card) {
+    if (!card) return cardBackImage;
+    if (card.image && !card.cardNumber) return card.image;
+    const local = card.cardNumber
+        ? (onlineMultiplayerService?.hydrateSyncedCard?.({ ...card, image: card.image || undefined }) || card)
+        : card;
+    return cardArtSrc(local);
 }
 
 // Reveal a card to the opponent (from a deck/peek/trash viewer). Online: writes
@@ -1174,8 +1196,9 @@ function maybeAutoLayOnlineLife() {
         addGameLog(`Life set: ${laid} card${laid === 1 ? "" : "s"} placed from the top of your deck.`);
         scheduleOnlineBoardSync();
     } else if (needsManual) {
+        // (This also called toast(), which doesn't exist on the game page - the
+        // error stopped the rest of that update from running.)
         addGameLog("⚠ Your leader has no life value set — deal your life manually (and set the leader's life in the card editor).");
-        toast("Set your leader's life in the card editor, or lay life manually.");
     }
 }
 
@@ -1415,7 +1438,7 @@ function reportTournamentResult(winnerSlot) {
     if (!winnerUid) return;
     tournamentContext.iWon = winnerSlot === playerSlot;
     Promise.all([
-        import("../firebase/tournamentService.js?v=tour-4"),
+        import("../firebase/tournamentService.js?v=tour-5"),
         import("../core/tournamentEngine.js?v=tour-3")
     ])
         .then(async ([service, engine]) => {
@@ -1486,10 +1509,22 @@ function buildTournamentGameOverPanel() {
     return panel;
 }
 
-async function publishOnlineReveal(cards, verb = "revealed:") {
-    if (!isOnlineMatch || !onlineMultiplayerService || !cards?.length) return;
+// Only the newest reveal is ever shown (showOnlineRevealedCards), so keep just the
+// last few. The list used to grow forever, each entry carrying the card's full
+// picture (a custom card's is ~90 KB), and every reveal re-sent the WHOLE list -
+// so a long game made each play, and each turn pass, upload megabytes.
+const ONLINE_REVEAL_HISTORY = 4;
 
-    const revealedCards = onlinePublicState?.revealedCards || [];
+// A picture that is fine to send: a plain URL. Uploaded (data:) art is rebuilt
+// from the receiver's own card library by number instead.
+function syncableImage(image) {
+    return typeof image === "string" && image && !image.startsWith("data:") ? image : null;
+}
+
+async function publishOnlineReveal(cards, verb = "revealed:") {
+    if (!isOnlineMatch || !onlineMultiplayerService || !cards?.length || isSpectator) return;
+
+    const revealedCards = (onlinePublicState?.revealedCards || []).slice(-(ONLINE_REVEAL_HISTORY - 1));
 
     await onlineMultiplayerService.updatePublicState(roomCode, {
         revealedCards: [
@@ -1499,11 +1534,12 @@ async function publishOnlineReveal(cards, verb = "revealed:") {
                 player: playerSlot,
                 verb,
                 cards: cards.map(card => ({
-                    name: card.name,
-                    image: card.image,
-                    cardNumber: card.cardNumber,
-                    cardType: card.cardType,
-                    type: card.type
+                    name: card.name || "",
+                    image: syncableImage(card.image),
+                    cardNumber: card.cardNumber || null,
+                    artIndex: ownArtIndexRaw(card),
+                    cardType: card.cardType || null,
+                    type: card.type || null
                 }))
             }
         ]
@@ -1714,8 +1750,18 @@ function safeParseJson(value, fallback) {
     }
 }
 
+// The own side may only be pushed once it's ours: loaded from the server and past
+// the dice roll / mulligan (the server deals and owns the cards until then).
+// Pushing earlier - e.g. a drag in the first second after a page reload, before
+// your cards had arrived - overwrote your real hand, deck and life with this
+// browser's empty or out-of-date copy.
+function canPushOwnOnlineState() {
+    return ownStateLockedToLocal && !ONLINE_SETUP_PHASES.has(onlinePublicState?.phase);
+}
+
 async function syncOnlineStateFromLocal() {
     if (!isOnlineMatch || !onlineMultiplayerService || !onlineUser || !gameState || isSpectator) return;
+    if (!canPushOwnOnlineState()) return;
 
     const ownPlayerKey = getOwnOnlinePlayerKey();
     const ownPlayer = ownPlayerKey ? gameState[ownPlayerKey] : null;
@@ -1770,7 +1816,8 @@ function scheduleOnlineBoardSync() {
 window.scheduleOnlineBoardSync = scheduleOnlineBoardSync;
 
 async function syncOnlinePublicBoardFromLocal(extraState = {}) {
-    if (!isOnlineMatch || !onlineMultiplayerService || !gameState) return;
+    if (!isOnlineMatch || !onlineMultiplayerService || !gameState || isSpectator) return;
+    if (!canPushOwnOnlineState()) return;
 
     const ownPlayerKey = getOwnOnlinePlayerKey();
     const ownPlayer = ownPlayerKey ? gameState[ownPlayerKey] : null;
@@ -1785,7 +1832,8 @@ async function syncOnlinePublicBoardFromLocal(extraState = {}) {
 }
 
 async function syncOnlineAllPublicBoardsFromLocal(extraState = {}) {
-    if (!isOnlineMatch || !onlineMultiplayerService || !gameState) return;
+    if (!isOnlineMatch || !onlineMultiplayerService || !gameState || isSpectator) return;
+    if (!canPushOwnOnlineState()) return;
 
     await onlineMultiplayerService.updatePublicState(roomCode, {
         player1: createPublicPlayerStateFromLocal(gameState.player1),
@@ -1797,7 +1845,8 @@ async function syncOnlineAllPublicBoardsFromLocal(extraState = {}) {
 // Make sure the match is actually initialised once we're on the game page.
 // Retries past the server-side stale-claim window so an abandoned start claim
 // (client navigated away mid-init) is reclaimed instead of deadlocking.
-async function ensureOnlineMatchStarted(attempts = 4, delayMs = 4000) {
+// (7 tries x 4s outlasts the 15s start claim, so a dead claim is always retaken.)
+async function ensureOnlineMatchStarted(attempts = 7, delayMs = 4000) {
     for (let attempt = 0; attempt < attempts; attempt++) {
         try {
             const match = await onlineMultiplayerService.getMatch(roomCode);
@@ -1918,8 +1967,8 @@ function applyTurnStartToPlayer(player, { isFirstTurn, skipDraw, donGain }) {
     }
 
     if (settings.autoAddDon) {
-        player.don = Math.min((player.don || 0) + donGain, 10);
-        addGameLog(`${label}'s turn starts: +${donGain} DON!!.`);
+        const gained = gainDonFromDeck(player, donGain);
+        addGameLog(`${label}'s turn starts: +${gained} DON!!${gained < donGain ? " (DON!! deck is empty)" : ""}.`);
     }
 
     // Card click for the start-of-turn draw / DON!! gain.
@@ -2088,7 +2137,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-8");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-11");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2156,7 +2205,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-8");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-11");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2354,6 +2403,10 @@ async function handleOnlineMulligan(tookMulligan) {
     }
 }
 
+// Whose cards this screen may move: both sides in practice, only your own online
+// (your copy of the opponent's board is overwritten by their next update).
+window.canMoveCardsOf = (playerKey) => !isOnlineMatch || (!isSpectator && playerKey === getOwnOnlinePlayerKey());
+
 // Exposed for manual-play.js's sidebar "Next Turn" button - see nextTurn().
 window.isOnlineMatchActive = () => Boolean(isOnlineMatch);
 window.isOwnOnlineTurn = () => isCurrentOnlinePlayer();
@@ -2454,6 +2507,9 @@ async function handleOnlinePassTurn() {
             // our copy of it is a stale reflection, and writing it back clobbered
             // their real state. Best-effort too - a failed board sync must NOT
             // stop the turn from passing, or the game freezes on your turn.
+            // This push covers any debounced one still waiting, so drop that -
+            // firing in the middle of the turn-pass it would cancel it.
+            clearTimeout(onlineBoardSyncTimer);
             try {
                 await syncOnlineStateFromLocal();
             } catch (syncError) {
@@ -3947,6 +4003,7 @@ function showGameOverPopup(winnerPlayer, reasonTitle = "Victory", reasonText = "
 let rematchUnsubscribe = null;
 let rematchState = {};
 let ownRematchDeckId = null;
+const SAME_REMATCH_DECK = "__same__";
 let rematchRestartAttempted = false;
 
 // A small chat on the game-over / rematch screen (the full-screen popup hides
@@ -4028,6 +4085,16 @@ function buildRematchPanel() {
 
         const select = document.createElement("select");
         select.id = "rematchDeckSelect";
+
+        // The deck you just played isn't always a saved deck (a Draft Battle deck,
+        // a tournament list). It used to fall back to your FIRST saved deck, so the
+        // rematch silently switched decks. "Same deck" keeps the one from last game.
+        const currentName = onlinePrivateState?.selectedDeck?.name;
+        const same = document.createElement("option");
+        same.value = SAME_REMATCH_DECK;
+        same.textContent = currentName ? `Same deck (${currentName})` : "Same deck as last game";
+        select.appendChild(same);
+
         decks.forEach(deck => {
             const option = document.createElement("option");
             option.value = deck.id;
@@ -4035,9 +4102,9 @@ function buildRematchPanel() {
             select.appendChild(option);
         });
 
-        const currentName = onlinePrivateState?.selectedDeck?.name;
+        // Prefer the saved deck of the same name, so edits made since show up.
         const match = decks.find(deck => deck.name === currentName);
-        if (match) select.value = match.id;
+        select.value = match ? match.id : SAME_REMATCH_DECK;
         ownRematchDeckId = select.value;
 
         // Changing decks clears your ready flag so the other player can see it.
@@ -4071,7 +4138,8 @@ function buildRematchPanel() {
 async function setOwnRematchReady(ready) {
     if (!onlineMultiplayerService || !roomCode || !playerSlot) return;
 
-    const deck = ready
+    // null = keep the deck from last game (players/<slot>/deck).
+    const deck = ready && ownRematchDeckId && ownRematchDeckId !== SAME_REMATCH_DECK
         ? (window.getDeckById?.(ownRematchDeckId) || null)
         : null;
 
@@ -4137,12 +4205,24 @@ function maybeTriggerRematch() {
 
     // Both clients call this; the transaction inside guarantees only one deals.
     onlineMultiplayerService.restartMatch(roomCode)
+        .then(result => {
+            if (result?.committed) return;
+            // The other browser is dealing (the new game reloads this page). If it
+            // never arrives - their browser closed mid-deal - try again once their
+            // claim has gone stale, instead of sitting on "starting…" forever.
+            clearTimeout(rematchRetryTimer);
+            rematchRetryTimer = setTimeout(() => {
+                rematchRestartAttempted = false;
+                maybeTriggerRematch();
+            }, 50000);
+        })
         .catch(error => {
             console.error(error);
             addGameLog(`Failed to start rematch: ${error.message}`);
             rematchRestartAttempted = false;
         });
 }
+let rematchRetryTimer = null;
 
 function removeGameOverPopup() {
     const oldPopup = document.getElementById("gameOverOverlay");
@@ -4605,9 +4685,8 @@ function startPlayerTurn(player) {
             addGameLog("Player 2's turn starts with 2 DON");
         }
     } else if (settings.autoAddDon) {
-        const donMax = donMaxFor(player);
-        player.don = Math.min((player.don || 0) + 2, donMax);
-        addGameLog(`Player ${playerNum}'s turn starts: +2 DON${player.don === donMax ? ` (capped at ${donMax})` : ""}`);
+        const gained = gainDonFromDeck(player, 2);
+        addGameLog(`Player ${playerNum}'s turn starts: +${gained} DON${gained < 2 ? " (DON!! deck is empty)" : ""}`);
     }
 
     // Draw phase - skipped on the first player's first turn per the rules.
@@ -4775,6 +4854,18 @@ function removeChoiceButtons() {
 
 // `previewCards` (optional): [{ name, image }]. When given, each card's name is
 // appended as a hoverable chip that shows a big preview (see setupDeckViewerInspect).
+// Log lines are built from nicknames and card names that anyone can choose, so
+// they must never be treated as HTML - a name like <img onerror=...> would run on
+// the other player's screen. Escape everything, then put back only the plain
+// formatting tags the log itself writes.
+function sanitizeLogHtml(html) {
+    return String(html)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/&lt;(\/?)(br|strong|b|em|i)\s*\/?&gt;/gi, "<$1$2>");
+}
+
 function addGameLog(message, previewCards = null) {
     const gameLogMessages = document.getElementById("gameLogMessages");
 
@@ -4790,7 +4881,7 @@ function addGameLog(message, previewCards = null) {
     const logMessage = document.createElement("div");
 
     logMessage.className = "log-message";
-    logMessage.innerHTML = cleanMessage;
+    logMessage.innerHTML = sanitizeLogHtml(cleanMessage);
 
     (previewCards || []).forEach(card => {
         if (!card?.name) return;
@@ -5465,6 +5556,17 @@ function removeDonAttachmentConfirm() {
     }
 
     updatePhaseButtonPassState();
+}
+
+// Take up to `amount` DON!! from the DON!! deck into the active pool and return
+// how many came. The deck holds whatever isn't already out - active, rested,
+// attached or floating. (The old cap of "10 active" ignored rested/attached DON!!
+// and smaller custom DON!! decks, so you could end up with more DON!! than exist.)
+function gainDonFromDeck(player, amount) {
+    const available = Math.max(0, donMaxFor(player) - getDonOnField(player));
+    const gained = Math.max(0, Math.min(Number(amount) || 0, available));
+    player.don = (Number(player.don) || 0) + gained;
+    return gained;
 }
 
 function getDonOnField(player) {
@@ -7192,7 +7294,7 @@ function confirmDeckMove(position, cardName, onConfirm, pileLabel = "deck") {
 
     const msg = document.createElement("p");
     msg.className = "confirm-msg";
-    msg.innerHTML = `Put <strong>${cardName || "this card"}</strong> on the <strong>${where}</strong> of your deck?`;
+    msg.innerHTML = sanitizeLogHtml(`Put <strong>${cardName || "this card"}</strong> on the <strong>${where}</strong> of your deck?`);
     panel.appendChild(msg);
 
     const row = document.createElement("div");
@@ -8276,9 +8378,16 @@ function setupHandCardSelection() {
     });
 }
 
+// Legacy on-card "Play" / "Counter" buttons from the old automatic rules engine.
+// They depend on helpers (playCard, canPlayerAffordCard, ...) that no longer exist,
+// so every hand-card click threw an error here. The manual board plays cards by
+// drag and the right-click "Play Card" menu instead, so these stay switched off.
+const LEGACY_CARD_ACTION_BUTTONS = false;
+
 function showSelectedCardActions() {
     clearSelectedCardActions();
 
+    if (!LEGACY_CARD_ACTION_BUTTONS) return;
     if (!selectedHandCard || !selectedHandCardData) return;
 
     const player = gameState[selectedHandCardData.playerKey];
@@ -8401,6 +8510,7 @@ function showSelectedCardActions() {
 function showSelectedCounterActions() {
     clearSelectedCardActions();
 
+    if (!LEGACY_CARD_ACTION_BUTTONS) return;
     if (!selectedHandCard || !selectedHandCardData || !currentAttack) return;
 
     const player = gameState[selectedHandCardData.playerKey];
@@ -8567,8 +8677,6 @@ function setupBoardCharacterSelection() {
             showCardPreview(cardElement.getAttribute("data-card-image"));
 
             showSelectedBoardActions();
-
-            addGameLog(`${player.name} selected ${card.name}.`);
         };
     });
 }
@@ -8618,8 +8726,6 @@ function setupBoardLeaderSelection() {
             showCardPreview(leaderElement.getAttribute("data-card-image"));
 
             showSelectedBoardActions();
-
-            addGameLog(`${player.name} selected ${player.leader.name}.`);
         };
     });
 }
@@ -8627,6 +8733,8 @@ function setupBoardLeaderSelection() {
 function showSelectedBoardActions() {
     clearSelectedBoardActions();
 
+    // Same legacy engine: its "Power" button needs helpers that no longer exist.
+    if (!LEGACY_CARD_ACTION_BUTTONS) return;
     if (!selectedBoardCard || !selectedBoardCardData) return;
 
     const player = gameState[selectedBoardCardData.playerKey];
@@ -10402,6 +10510,26 @@ function getSelectedBoardCardObject() {
     if (!selectedBoardCardData) return null;
 
     return getBoardCardFromData(selectedBoardCardData);
+}
+
+// The card object a board selection points at ({ playerKey, cardType, slotIndex,
+// instanceId? }). This was called from several places but never defined, so
+// clicking a leader threw "getBoardCardFromData is not defined".
+function getBoardCardFromData(data) {
+    if (!data || !gameState) return null;
+    const player = gameState[data.playerKey];
+    if (!player) return null;
+    if (data.cardType === "leader") return player.leader || null;
+    if (data.cardType === "stage") return player.stage || null;
+    if (data.cardType === "character") {
+        const characters = player.characters || [];
+        const inSlot = characters[Number(data.slotIndex)] || null;
+        if (data.instanceId && (!inSlot || inSlot.instanceId !== data.instanceId)) {
+            return characters.find(card => card && card.instanceId === data.instanceId) || null;
+        }
+        return inSlot;
+    }
+    return null;
 }
 
 function canSelectedBoardCardAttack() {
