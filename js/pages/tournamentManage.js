@@ -9,7 +9,7 @@ import {
     cancelTournament,
     deleteTournament,
     isPermissionError
-} from "../firebase/tournamentService.js?v=tour-6";
+} from "../firebase/tournamentService.js?v=tour-7";
 import { watchDecks, deckListText } from "../firebase/tournamentDecks.js?v=tour-3";
 import { openViewDialog } from "./tournamentDeckUi.js?v=tour-3";
 import {

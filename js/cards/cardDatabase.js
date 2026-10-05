@@ -31,7 +31,7 @@ async function loadJson(path) {
 // dynamically. Any failure here is non-fatal: the bundled files still load.
 async function loadSharedCardsForGame(onlyNumbers) {
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-13");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-14");
         // onlyNumbers restricts the download to just the decks' cards - huge speed
         // win on mobile where the full custom library is many MB of base64 art.
         const { cards, deleted } = await library.loadSharedCards(
@@ -50,7 +50,7 @@ async function loadSharedCardsForGame(onlyNumbers) {
 // caller falls back to a blocking network load.
 async function getCachedSharedForGame(onlyNumbers) {
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-13");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-14");
         if (typeof library.getCachedLibrary !== "function") return null;
         const { cards, deleted } = await library.getCachedLibrary(
             onlyNumbers ? { onlyNumbers } : {}
@@ -107,26 +107,29 @@ async function loadCardDatabase(neededNumbers) {
     }
 
     if (neededNumbers) {
-        // Practice: only the two decks' cards are needed up front.
+        // Practice AND online games: only the two decks' cards are needed up front
+        // (online, anything else a player brings in is fetched on demand - see
+        // requestGameCards). Loading the WHOLE library with its art - hundreds of
+        // MB - is what crashed the tab ("Aw, Snap") when joining a match.
+        const missingNow = () => [...neededNumbers].filter(num => num && !isGameCardLoaded(num));
         if (paintedFromCache) {
             // Board is already usable from cache. Reconcile the decks' cards in
-            // the background; if any is STILL missing afterwards (a custom card
-            // whose id != its number), pull the full library too - still all off
-            // the critical path.
+            // the background; anything STILL missing (a custom card listed by an
+            // id that isn't its number) is looked up by itself - never the full
+            // library with its art.
             loadSharedCardsForGame(neededNumbers).then(({ cards, deleted }) => {
                 assembleGameDatabase(loadedCards, cards, importedCards, deleted);
-                const missing = [...neededNumbers].some(num => num && !cardDatabase[num] && !leaders[num]);
-                if (missing) return reconcileFull();
-                try { if (typeof window.onCardDatabaseUpdated === "function") window.onCardDatabaseUpdated(); } catch (e) {}
-            }).catch(() => {});
+                const missing = missingNow();
+                return missing.length ? window.loadGameCards(missing) : null;
+            }).then(notifyCardDatabaseUpdated).catch(() => {});
             return;
         }
         // Cold cache: must wait for at least the targeted set so the board can
-        // build, then background the full library if a custom-id card is missing.
+        // build, then look up anything still missing in the background.
         const { cards, deleted } = await loadSharedCardsForGame(neededNumbers);
         assembleGameDatabase(loadedCards, cards, importedCards, deleted);
-        const missing = [...neededNumbers].some(num => num && !cardDatabase[num] && !leaders[num]);
-        if (missing) reconcileFull();
+        const missing = missingNow();
+        if (missing.length) window.loadGameCards(missing).then(notifyCardDatabaseUpdated).catch(() => {});
         return;
     }
 
@@ -151,9 +154,124 @@ async function loadCardDatabase(neededNumbers) {
     }
 }
 
-// Blocking full-library load. Used as a fallback when the fast targeted load
-// left out a card the board CAN'T open without (its leader). Everything else is
-// pulled in the background, so this rarely runs.
+function isGameCardLoaded(number) {
+    return Boolean(number && (cardDatabase[number] || leaders[number]));
+}
+
+function notifyCardDatabaseUpdated() {
+    try { if (typeof window.onCardDatabaseUpdated === "function") window.onCardDatabaseUpdated(); } catch (e) {}
+}
+
+// Add cards to the game database WITHOUT rebuilding it (assembleGameDatabase
+// replaces everything, which would drop cards loaded earlier).
+function mergeGameCards(cards) {
+    (cards || []).forEach(raw => {
+        if (!raw) return;
+        const card = normalizePermanentCardForGame(raw, raw.category || raw.cardType);
+        const target = card.cardType === "leader" ? leaders : cardDatabase;
+        if (card.id) target[card.id] = card;
+        if (card.cardNumber && card.cardNumber !== card.id) target[card.cardNumber] = card;
+    });
+    window.cardDatabase = cardDatabase;
+    window.leaders = leaders;
+}
+
+// Load just these cards (by number or id) into the game, with their art. Returns
+// whatever still couldn't be found. Never downloads the whole library's art: a
+// card a deck lists by an id that isn't its number is found through a LIGHT
+// listing (names and keys only), then just that card is read from the cache.
+window.loadGameCards = async function loadGameCards(numbers) {
+    const wanted = [...new Set([...(numbers || [])].map(n => String(n || "").trim()).filter(Boolean))];
+    const missing = () => wanted.filter(number => !isGameCardLoaded(number));
+    let todo = missing();
+    if (!todo.length) return [];
+
+    const { cards } = await loadSharedCardsForGame(new Set(todo));
+    mergeGameCards(cards);
+    todo = missing();
+    if (!todo.length) return [];
+
+    try {
+        const library = await import("../firebase/cardLibraryService.js?v=collections-14");
+        const listing = await library.loadSharedCards({ light: true });
+        const want = new Set(todo);
+        const keys = (listing.cards || [])
+            .filter(card => card && (want.has(card.id) || want.has(card.cardNumber)))
+            .map(card => card.__storageKey)
+            .filter(Boolean);
+        const full = (await Promise.all(keys.map(key => library.getCachedCard(key)))).filter(Boolean);
+        mergeGameCards(full);
+    } catch (error) {
+        console.warn("Couldn't look up cards:", todo, error);
+    }
+    return missing();
+};
+
+// Fetch cards the board meets that aren't loaded yet (e.g. a card your opponent
+// added from outside of play). Batched, and each number is only tried once.
+const pendingGameCards = new Set();
+const triedGameCards = new Set();
+let pendingGameCardsTimer = null;
+window.requestGameCards = function requestGameCards(numbers) {
+    [...(numbers || [])].forEach(number => {
+        const n = String(number || "").trim();
+        if (!n || triedGameCards.has(n) || isGameCardLoaded(n)) return;
+        pendingGameCards.add(n);
+    });
+    if (!pendingGameCards.size || pendingGameCardsTimer) return;
+    pendingGameCardsTimer = setTimeout(async () => {
+        pendingGameCardsTimer = null;
+        const batch = [...pendingGameCards];
+        pendingGameCards.clear();
+        batch.forEach(n => triedGameCards.add(n));
+        try {
+            await window.loadGameCards(batch);
+            notifyCardDatabaseUpdated();
+        } catch (error) {
+            console.warn("Couldn't fetch cards for the board:", error);
+        }
+    }, 250);
+};
+
+// Every card in the library, WITHOUT artwork in memory (for searching, e.g. "Add
+// from Outside of Play"). Pair with getGameCardArt for the few shown.
+window.listAllGameCardsLight = async function listAllGameCardsLight() {
+    const loadedCards = await loadPermanentCardFiles();
+    const importedCards = loadImportedCardsForGame();
+    let shared = [];
+    try {
+        const library = await import("../firebase/cardLibraryService.js?v=collections-14");
+        shared = (await library.loadSharedCards({ light: true })).cards || [];
+    } catch (error) {
+        console.warn("Couldn't list the shared card library:", error);
+    }
+    const byKey = new Map();
+    loadedCards.forEach(card => byKey.set(cardLibraryKeyForGame(card), card));
+    shared.forEach(raw => {
+        const card = normalizePermanentCardForGame(raw, raw.category || raw.cardType);
+        if (raw.__storageKey) card.__storageKey = raw.__storageKey;
+        byKey.set(cardLibraryKeyForGame(card), card);
+    });
+    importedCards.map(normalizeImportedCardForGame).forEach(card => {
+        const key = cardLibraryKeyForGame(card);
+        if (!byKey.has(key)) byKey.set(key, card);
+    });
+    return [...byKey.values()].filter(card => card && card.name);
+};
+
+// One card's main art from the on-device cache (by its library storage key).
+window.getGameCardArt = async function getGameCardArt(storageKey) {
+    if (!storageKey) return "";
+    try {
+        const library = await import("../firebase/cardLibraryService.js?v=collections-14");
+        return (await library.getCachedArt(storageKey, 0)) || "";
+    } catch (error) {
+        return "";
+    }
+};
+
+// Blocking full-library load (ALL card art). Heavy - hundreds of MB - so the game
+// no longer uses it; kept only for anything older that still calls it.
 window.loadFullCardLibraryBlocking = async function loadFullCardLibraryBlocking() {
     const loadedCards = await loadPermanentCardFiles();
     const importedCards = loadImportedCardsForGame();

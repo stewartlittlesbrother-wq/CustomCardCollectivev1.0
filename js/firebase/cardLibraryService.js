@@ -147,7 +147,10 @@ function readCachedForLoad(wantNums) {
                 const value = cursor.value;
                 const key = value[CACHE_KEY_PATH] || cardLibraryKey(value);
                 if (wantNums) {
-                    if (wantNums.has(keyNumberOf(key))) { value.__storageKey = key; out.push(value); }
+                    // By number (the storage key) OR by the card's own id - a deck
+                    // may list an imported card by an id that isn't its number.
+                    const byId = value.id && wantNums.has(sanitizeKeyPart(value.id));
+                    if (wantNums.has(keyNumberOf(key)) || byId) { value.__storageKey = key; out.push(value); }
                 } else {
                     out.push(lightCachedCard(value, key));
                 }
@@ -319,7 +322,9 @@ export async function loadSharedCards(options = {}) {
         : null;
     // The number part of a storage key ("JJK1-001__collection" -> "JJK1-001").
     const keyNumber = key => String(key).split("__")[0];
-    const keyWanted = key => !wantNums || wantNums.has(keyNumber(key));
+    // Keys of cached cards that were wanted by their id rather than their number.
+    const wantedById = new Set();
+    const keyWanted = key => !wantNums || wantNums.has(keyNumber(key)) || wantedById.has(key);
 
     // `light` (the deck builder): keep only metadata in memory, not the base64
     // artwork - the whole library's art is hundreds of MB and loading it all via
@@ -346,6 +351,11 @@ export async function loadSharedCards(options = {}) {
     // now carries a collection would otherwise recompute to "JJK1__collection",
     // miss its own index entry, and re-download on every single load.
     const cachedByKey = new Map(cached.map(card => [card[CACHE_KEY_PATH] || cardLibraryKey(card), card]));
+    if (wantNums) {
+        cachedByKey.forEach((card, key) => {
+            if (card && card.id && wantNums.has(sanitizeKeyPart(card.id))) wantedById.add(key);
+        });
+    }
 
     if (onProgress && cachedByKey.size) {
         // Use the LAST-KNOWN tombstone set (persisted locally) so this first

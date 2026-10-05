@@ -466,7 +466,12 @@ function applyBoardToPlayer(player, boardJson) {
     // the right count AND the right (shared) art. Own player keeps its
     // locally-applied deck; only apply from the board when it carries a value.
     if (Number(board.donMax) > 0) player.donMax = Number(board.donMax);
-    if (Array.isArray(board.donNums)) player.donNums = board.donNums;
+    if (Array.isArray(board.donNums)) {
+        player.donNums = board.donNums;
+        // Their custom DON!! art comes from the library by number - fetch it if
+        // it isn't loaded (the board only loads the decks' cards up front).
+        window.requestGameCards?.(board.donNums.filter(Boolean));
+    }
     if (typeof board.extraRow === "boolean") player.extraRow = board.extraRow;
     // Rebuilt from the counts by getDonSlots if absent or inconsistent.
     player.donOrder = Array.isArray(board.donOrder) ? board.donOrder : null;
@@ -1527,7 +1532,7 @@ function reportTournamentResult(winnerSlot) {
     if (!winnerUid) return;
     tournamentContext.iWon = winnerSlot === playerSlot;
     Promise.all([
-        import("../firebase/tournamentService.js?v=tour-6"),
+        import("../firebase/tournamentService.js?v=tour-7"),
         import("../core/tournamentEngine.js?v=tour-3")
     ])
         .then(async ([service, engine]) => {
@@ -2257,7 +2262,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-12");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-13");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2331,7 +2336,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-12");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-13");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -3382,15 +3387,19 @@ async function showOutsideCardPicker(player) {
     overlay.addEventListener("click", (event) => { if (event.target === overlay) removeOutsideCardPicker(); });
     document.body.appendChild(overlay);
 
-    // Ensure the whole pool is available before listing.
-    if (typeof window.loadFullCardLibraryBlocking === "function") {
-        try { await window.loadFullCardLibraryBlocking(); } catch { /* fall back to whatever's loaded */ }
+    // List every card WITHOUT loading all their art (the full library with art is
+    // hundreds of MB and crashed the tab); the few shown load their art from the
+    // device cache, and the one you add is loaded properly.
+    let listed = [];
+    if (typeof window.listAllGameCardsLight === "function") {
+        try { listed = await window.listAllGameCardsLight(); } catch { listed = []; }
     }
+    if (!listed.length) listed = Object.values(window.cardDatabase || {});
     // The user may have closed the picker while it loaded.
     if (!document.getElementById("outsideCardPickerOverlay")) return;
 
     const MAX_RESULTS = 60;
-    const allCards = Object.values(window.cardDatabase || {})
+    const allCards = listed
         .filter(c => c && c.name)
         .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
@@ -3422,13 +3431,20 @@ async function showOutsideCardPicker(player) {
             cell.style.cssText = "width:130px;display:flex;flex-direction:column;gap:6px;align-items:center;";
 
             const img = document.createElement("img");
-            img.src = cardArtSrc(card);
+            let art = cardArtSrc(card);
+            img.src = art;
             img.alt = card.name || "Card";
             img.loading = "lazy";
             img.style.cssText = "width:100%;border-radius:6px;display:block;cursor:pointer;";
-            img.addEventListener("mouseenter", () => showCardPreview(cardArtSrc(card)));
-            img.addEventListener("click", () => showBigCardImage(cardArtSrc(card)));
+            img.addEventListener("mouseenter", () => showCardPreview(art));
+            img.addEventListener("click", () => showBigCardImage(art));
             cell.appendChild(img);
+            // Listed without art in memory: fetch this one card's picture.
+            if (art === cardBackImage && card.__storageKey && typeof window.getGameCardArt === "function") {
+                window.getGameCardArt(card.__storageKey).then(src => {
+                    if (src) { art = src; img.src = src; }
+                });
+            }
 
             const label = document.createElement("div");
             label.style.cssText = "color:#fff;font-size:11px;font-weight:700;text-align:center;line-height:1.2;";
@@ -3438,8 +3454,15 @@ async function showOutsideCardPicker(player) {
             const addButton = document.createElement("button");
             addButton.textContent = "+ Add to hand";
             addButton.style.cssText = "width:100%;padding:5px;font-size:11px;font-weight:700;cursor:pointer;border-radius:4px;border:1px solid #0e9f70;background:#10b981;color:#000;";
-            addButton.addEventListener("click", () => {
-                addCardFromOutside(card, player);
+            addButton.addEventListener("click", async () => {
+                // Load the real card (with its art) before it goes into your hand.
+                const number = card.cardNumber || card.id;
+                if (number && typeof window.loadGameCards === "function" && !window.cardDatabase?.[number] && !window.leaders?.[number]) {
+                    addButton.textContent = "Adding…";
+                    try { await window.loadGameCards([number]); } catch (_) { /* add what we have */ }
+                }
+                const full = (number && (window.cardDatabase?.[number] || window.leaders?.[number])) || card;
+                addCardFromOutside(full, player);
                 addButton.textContent = "Added ✓";
                 addButton.style.background = "#6c757d";
                 addButton.style.color = "#fff";
@@ -3489,6 +3512,54 @@ function collectNeededCardNumbers() {
         });
     });
     return nums.size ? nums : null;
+}
+
+// Online and spectating: both decks are already on the room before the board
+// opens (players/pX/deck), so load just THEIR cards - like practice does - instead
+// of the whole library with its art. That full load (hundreds of MB, and the deal
+// could trigger another one) is what crashed the tab with "Aw, Snap" when joining
+// a match. Anything else a player brings in later is fetched on demand.
+async function collectOnlineNeededCardNumbers() {
+    if (!isOnlineMatch || !roomCode) return null;
+    // Never an empty set: an empty set means "no filter" further down, which is
+    // the full load again. The built-in all-colour leader is always safe to ask for.
+    const nums = new Set(["OMNI-999"]);
+    const addDeck = (deck) => {
+        if (!deck) return;
+        [deck.leaderKey, deck.leaderKey2].forEach(key => key && nums.add(String(key)));
+        (Array.isArray(deck.tokens) ? deck.tokens : []).forEach(token => token && nums.add(String(token)));
+        (Array.isArray(deck.startingCards) ? deck.startingCards : [])
+            .forEach(entry => entry && entry.id && nums.add(String(entry.id)));
+        String(deck.deckText || "").split(/\n+/).forEach(line => {
+            const match = line.trim().match(/^\d+x(.+)$/i);
+            if (match) nums.add(match[1].trim());
+        });
+    };
+    try {
+        const app = await import("../firebase/firebaseApp.js");
+        await app.signInGuest();
+        await app.waitForUser();
+        const db = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
+        const [playersSnap, rematchSnap] = await Promise.all([
+            db.get(db.ref(app.database, `matches/${roomCode}/players`)),
+            db.get(db.ref(app.database, `matches/${roomCode}/rematch`))
+        ]);
+        const players = playersSnap.val() || {};
+        const rematch = rematchSnap.val() || {};
+        ["p1", "p2"].forEach(slot => {
+            addDeck(players[slot]?.deck);
+            addDeck(rematch[slot]?.deck);
+        });
+    } catch (error) {
+        console.warn("Couldn't read the decks for this match; cards will load as they're seen.", error);
+    }
+    // Your own DON!! deck's cards (custom DON!! art).
+    try {
+        const donId = localStorage.getItem(DON_ACTIVE_DECK_KEY) || "";
+        const donDeck = donId ? getSavedDonDeckList().find(d => d.id === donId) : null;
+        (donDeck?.cards || []).forEach(c => c && c.n && nums.add(String(c.n)));
+    } catch (_) { /* standard DON!! */ }
+    return nums;
 }
 
 // The card ids that are set to start in play (practice only). These must be fully
@@ -3575,6 +3646,7 @@ window.onCardDatabaseUpdated = function reRenderAfterCardLoad() {
         topUpMissingDeckCards();
         renderLeaders(); renderCharacters(); renderStages();
         renderTrash(); renderHands(); renderDecks();
+        updateDonDisplay();   // custom DON!! art looked up by number
     } catch (e) { /* board not ready yet */ }
 };
 
@@ -3587,27 +3659,30 @@ async function initializeGamePage() {
     setupSfxToggle();
     setupDeckViewerInspect();
     try {
-        await loadCardDatabase(collectNeededCardNumbers());
+        const neededNumbers = isOnlineMatch
+            ? await collectOnlineNeededCardNumbers()
+            : collectNeededCardNumbers();
+        await loadCardDatabase(neededNumbers);
 
         // "Start in play" cards MUST be loaded before the board is built, or
         // applyStartingCards can't find them in the deck and silently skips them
         // (the "sometimes it triggers, sometimes it doesn't" bug — a custom card
-        // whose id ≠ its number can miss the fast targeted load). If any starting
-        // card isn't loaded yet, do the one blocking full load first.
+        // whose id ≠ its number can miss the fast targeted load). Look up any
+        // that aren't loaded yet first - just those cards, not the whole library.
         const startIds = collectStartingCardIds();
-        if (startIds.length && typeof window.loadFullCardLibraryBlocking === "function"
+        if (startIds.length && typeof window.loadGameCards === "function"
             && startIds.some(id => !window.getCardById(id))) {
-            await window.loadFullCardLibraryBlocking();
+            await window.loadGameCards(startIds);
         }
 
         try {
             gameState = createInitialGameState();
         } catch (buildErr) {
             // The fast targeted load can miss a card the board can't open without
-            // (its leader keyed by an id ≠ its number). Do the one blocking full
-            // load and retry before surfacing the error.
-            if (typeof window.loadFullCardLibraryBlocking === "function") {
-                await window.loadFullCardLibraryBlocking();
+            // (its leader keyed by an id ≠ its number). Look the decks' cards up
+            // one more way and retry before surfacing the error.
+            if (typeof window.loadGameCards === "function" && neededNumbers) {
+                await window.loadGameCards(neededNumbers);
                 gameState = createInitialGameState();
             } else {
                 throw buildErr;
@@ -7431,7 +7506,14 @@ function confirmDeckMove(position, cardName, onConfirm, pileLabel = "deck") {
     no.addEventListener("click", () => overlay.remove());
     const yes = document.createElement("button");
     yes.type = "button"; yes.className = "confirm-yes"; yes.textContent = `Yes, ${where.toLowerCase()}`;
-    yes.addEventListener("click", () => { overlay.remove(); onConfirm(); });
+    yes.addEventListener("click", () => {
+        overlay.remove();
+        onConfirm();
+        // The move happens HERE, after the menu that opened this sheet has already
+        // pushed the board - so push again, or the opponent didn't see the card go
+        // to the top/bottom of the deck until your next action.
+        window.scheduleOnlineBoardSync?.();
+    });
     row.appendChild(no);
     row.appendChild(yes);
     panel.appendChild(row);
@@ -9139,33 +9221,44 @@ function setupBoardContextMenus() {
             // leaves play must first return any attached DON!! to the active area,
             // otherwise the DON!! rode along with the card and vanished from play.
             if (cardType === "character") {
+                // Find the card again when the choice is made (the board may have
+                // re-rendered while the confirm was open) and EMPTY its slot rather
+                // than splicing it out - splicing slid every character to its
+                // right one slot over.
+                const takeCharacter = () => {
+                    const at = (player.characters || []).findIndex(c => c && c.instanceId === card.instanceId);
+                    if (at === -1) return false;
+                    detachDonToRested(player, card);
+                    player.characters[at] = null;
+                    return true;
+                };
                 options.push({
                     label: "Send to Bottom Deck",
                     action: () => confirmDeckMove("bottom", card.name, () => {
-                        detachDonToRested(player, card);
-                        player.characters.splice(slotIndex, 1);
+                        if (!takeCharacter()) return;
                         player.deck.unshift(card);
                         renderCharacters();
+                        renderDecks();
                         addGameLog(`${card.name} sent to bottom of deck`);
                     })
                 });
                 options.push({
                     label: "Send to Top Deck",
                     action: () => confirmDeckMove("top", card.name, () => {
-                        detachDonToRested(player, card);
-                        player.characters.splice(slotIndex, 1);
+                        if (!takeCharacter()) return;
                         player.deck.push(card);
                         renderCharacters();
+                        renderDecks();
                         addGameLog(`${card.name} sent to top of deck`);
                     })
                 });
                 options.push({
                     label: "Send to Trash",
                     action: () => {
-                        detachDonToRested(player, card);
-                        player.characters.splice(slotIndex, 1);
-                        player.trash.push(card);
+                        if (!takeCharacter()) return;
+                        (player.trash = player.trash || []).push(card);
                         renderCharacters();
+                        renderTrash();
                         addGameLog(`${card.name} sent to trash`);
                     }
                 });

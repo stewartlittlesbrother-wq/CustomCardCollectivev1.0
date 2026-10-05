@@ -1145,7 +1145,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-13")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-14")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -6318,7 +6318,7 @@ function openMultiplayerTab() {
         .sort((a, b) => a.name.localeCompare(b.name));
     }
   };
-  import("./js/pages/multiplayerTab.js?v=mpx-2")
+  import("./js/pages/multiplayerTab.js?v=mpx-3")
     .then(mod => {
       multiplayerTabModule = mod;
       if (state.activeView === "multiplayer") mod.show();
@@ -8320,7 +8320,7 @@ async function maybeStartMultiplayerDraft() {
   try {
     [firebaseApp, svc] = await Promise.all([
       import("./js/firebase/firebaseApp.js"),
-      import("./js/firebase/multiplayerService.js?v=draft-12")
+      import("./js/firebase/multiplayerService.js?v=draft-13")
     ]);
     await firebaseApp.signInGuest();
   } catch (e) {

@@ -30,7 +30,7 @@ import {
     sendChatMessage,
     subscribeToChat,
     getMatchRecord
-} from "../firebase/multiplayerService.js?v=draft-12";
+} from "../firebase/multiplayerService.js?v=draft-13";
 
 const host = window.ccMpHost || {};
 

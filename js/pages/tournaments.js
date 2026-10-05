@@ -9,7 +9,7 @@ import {
     syncTournament,
     enterMatch,
     isPermissionError
-} from "../firebase/tournamentService.js?v=tour-6";
+} from "../firebase/tournamentService.js?v=tour-7";
 import { lookupCards } from "../firebase/tournamentDecks.js?v=tour-3";
 import {
     ROUND_LENGTHS,
@@ -35,7 +35,7 @@ import {
 } from "../core/tournamentEngine.js?v=tour-3";
 import { $, esc, fmtDate, relative, toast, toLocalInput, copyText } from "./tournamentUi.js?v=tour-3";
 import { openSubmitDialog, closeSubmitDialog, closeViewDialog } from "./tournamentDeckUi.js?v=tour-3";
-import { createManage } from "./tournamentManage.js?v=tour-6";
+import { createManage } from "./tournamentManage.js?v=tour-7";
 
 // ── state ────────────────────────────────────────────────────────────────────
 

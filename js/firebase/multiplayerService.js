@@ -176,7 +176,13 @@ export function hydrateSyncedCard(card) {
         lookup = globalThis.getCardById(key);
     }
 
-    if (!lookup) return card;
+    if (!lookup) {
+        // Not loaded yet (the board only loads the two decks up front - e.g. your
+        // opponent added this from outside of play): fetch just this card, and the
+        // board refreshes it once it arrives.
+        if (key && typeof globalThis.requestGameCards === "function") globalThis.requestGameCards([key]);
+        return card;
+    }
 
     return {
         ...card,
@@ -268,10 +274,7 @@ function loadFullLibraryOnce() {
     return fullLibraryLoad;
 }
 
-async function ensureDeckCardsLoaded(decks, { force = false } = {}) {
-    if (typeof globalThis.loadFullCardLibraryBlocking !== "function") return [];
-    const load = loadFullLibraryOnce;
-
+async function ensureDeckCardsLoaded(decks) {
     const missingNow = () => {
         const out = new Set();
         decks.filter(Boolean).forEach(deck => deckCardNumbers(deck).forEach(number => {
@@ -281,13 +284,19 @@ async function ensureDeckCardsLoaded(decks, { force = false } = {}) {
     };
 
     let missing = missingNow();
-    if (force || missing.length) {
-        try { await load(); } catch (error) { console.warn("Card library load failed:", error); }
+    if (!missing.length) return [];
+
+    // Just the missing cards (with their art). This used to load the WHOLE
+    // library with all its art - hundreds of MB, on top of what the board had
+    // already loaded - and that is what crashed the tab ("Aw, Snap") on joining.
+    if (typeof globalThis.loadGameCards === "function") {
+        try { await globalThis.loadGameCards(missing); }
+        catch (error) { console.warn("Card lookup failed:", error); }
         missing = missingNow();
-        if (missing.length) {
-            try { await load(); } catch (error) { console.warn("Card library retry failed:", error); }
-            missing = missingNow();
-        }
+    } else if (typeof globalThis.loadFullCardLibraryBlocking === "function") {
+        // A page without the targeted loader (shouldn't happen any more).
+        try { await loadFullLibraryOnce(); } catch (error) { console.warn("Card library load failed:", error); }
+        missing = missingNow();
     }
     if (missing.length) {
         console.warn("Dealing with cards that aren't loaded (they will be left out):", missing);
