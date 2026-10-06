@@ -10644,8 +10644,8 @@ function showUntapSummary(summary) {
       alert.innerHTML = `<span>⛔ ${blocked.length} card${one ? " was" : "s were"} NOT imported: ` +
         `${one ? "its picture uses a temporary link that stops" : "their pictures use temporary links that stop"} working within a day, ` +
         `and a permanent copy couldn't be made (${shown}${more}). Saving ${one ? "it" : "them"} would have left ${one ? "a blank card" : "blank cards"}. ` +
-        `Re-export ${one ? "it" : "them"} from the share link with the importer extension while the link is still fresh ` +
-        `(it embeds the pictures), then import again.</span>`;
+        `Re-export ${one ? "it" : "them"} from the share link with the LATEST importer extension (v0.3.1 or newer — ` +
+        `older copies don't save the pictures) while the link is still fresh, then import again.</span>`;
       list.appendChild(alert);
     }
     // Warn if some images couldn't be permanently stored - those still rely on an
