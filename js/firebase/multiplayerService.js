@@ -963,14 +963,63 @@ export async function initializeMultiplayerGame(roomCode) {
         console.warn("Starting without some cards (not in the card library):", stillMissing);
     }
 
-    await update(matchRef, buildFreshMatchPayload(player1, player2, player1Deck, player2Deck));
+    await update(matchRef, buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, null,
+        Number(match.settings?.clockSeconds) || 0));
+}
+
+// ── Game clock ───────────────────────────────────────────
+// A chess clock: each player has their own bank of time for the whole game
+// (settings/clockSeconds, chosen when the room is made). Only the player whose turn
+// it is loses time; passing the turn takes the time used off their bank
+// (passTurn). Run out and you lose (claimClockTimeout). Stored in public/clock as
+// { total, p1, p2 } in ms - what each player had when their current/last turn
+// began - so the live figure for the player on turn is bank - (now - turnStartedAt).
+const CLOCK_IDLE_PHASES = ["waiting", "diceRoll", "mulligan", "gameOver"];
+
+export function clockLeftMs(publicState, slot, now = serverNow()) {
+    const clock = publicState?.clock;
+    if (!clock || (slot !== "p1" && slot !== "p2")) return null;
+    let left = Number(clock[slot]) || 0;
+    const running = publicState.currentPlayer === slot
+        && !CLOCK_IDLE_PHASES.includes(publicState.phase)
+        && !publicState.winner
+        && Number(publicState.turnStartedAt) > 0;
+    if (running) left -= Math.max(0, now - Number(publicState.turnStartedAt));
+    return Math.max(0, left);
+}
+
+/** The player on turn has run out of time: they lose. Any client may call this when
+ *  its countdown hits zero; the transaction re-checks, so it's harmless if both do,
+ *  or if the turn was passed in time after all. Returns true if it ended the game. */
+export async function claimClockTimeout(roomCode, loserSlot, loserName = "") {
+    if (loserSlot !== "p1" && loserSlot !== "p2") return false;
+    const winnerSlot = loserSlot === "p1" ? "p2" : "p1";
+    const result = await runTransaction(ref(database, `matches/${cleanRoomCode(roomCode)}/public`), (publicState) => {
+        if (publicState === null) return null;   // no local copy yet - let the server answer
+        if (!publicState.clock || publicState.winner || CLOCK_IDLE_PHASES.includes(publicState.phase)) return;
+        if (publicState.currentPlayer !== loserSlot) return;
+        if (clockLeftMs(publicState, loserSlot) > 0) return;
+        return {
+            ...publicState,
+            phase: "gameOver",
+            winner: winnerSlot,
+            currentAttack: null,
+            clock: { ...publicState.clock, [loserSlot]: 0 },
+            gameOverReasonTitle: "Out of time",
+            gameOverReasonText: `${loserName || loserSlot.toUpperCase()} ran out of time on the game clock.`
+        };
+    }, SERVER_CONFIRMED);
+    return Boolean(result.committed && result.snapshot.val()?.winner === winnerSlot
+        && result.snapshot.val()?.gameOverReasonTitle === "Out of time");
 }
 
 // The full "deal a brand new game" write. Shared by the first start and by a
 // rematch so the two can never drift apart. On a rematch, `rematchLoser` (the
 // player who lost the last game) is pre-set as the dice "winner" so THEY get to
-// choose who goes first - no dice roll needed.
-function buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, rematchLoser = null) {
+// choose who goes first - no dice roll needed. `clockSeconds` > 0 gives both
+// players a full game clock.
+function buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, rematchLoser = null, clockSeconds = 0) {
+    const clockMs = Math.max(0, Math.round(Number(clockSeconds) || 0)) * 1000;
     const p1Private = createInitialPrivateState(player1Deck, player1 && player1.artPrefs);
     const p2Private = createInitialPrivateState(player2Deck, player2 && player2.artPrefs);
 
@@ -1001,6 +1050,7 @@ function buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, rema
         // player's win/loss record (a reload of the game-over screen reports it again).
         "public/gameId": `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
         "public/turnStartedAt": null,
+        "public/clock": clockMs ? { total: clockMs, p1: clockMs, p2: clockMs } : null,
         "public/setup": {
             dice: diceSetup,
             turnChoice: {
@@ -1076,10 +1126,11 @@ export async function restartMatch(roomCode) {
 
     // Only the small parts we need - the whole match also holds both players'
     // cards, the chat and the cosmetics images.
-    const [playersSnap, rematchSnap, winnerSnap] = await Promise.all([
+    const [playersSnap, rematchSnap, winnerSnap, clockSnap] = await Promise.all([
         get(ref(database, `matches/${code}/players`)),
         get(ref(database, `matches/${code}/rematch`)),
-        get(ref(database, `matches/${code}/public/winner`))
+        get(ref(database, `matches/${code}/public/winner`)),
+        get(ref(database, `matches/${code}/settings/clockSeconds`))
     ]);
 
     const players = playersSnap.val();
@@ -1135,7 +1186,7 @@ export async function restartMatch(roomCode) {
     const rematchLoser = prevWinner === "p1" ? "p2" : (prevWinner === "p2" ? "p1" : null);
 
     await update(matchRef, {
-        ...buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, rematchLoser),
+        ...buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, rematchLoser, Number(clockSnap.val()) || 0),
         // Clear readiness so the next game-over starts from a clean slate.
         rematch: null
     });
@@ -1502,13 +1553,24 @@ function runPassTurnTransaction(publicRef, currentPlayer) {
             ? currentTurnNumber + 1
             : currentTurnNumber;
 
+        // Game clock: the time this turn took comes off the passing player's bank.
+        // (If it has already run out, claimClockTimeout ends the game instead.)
+        const now = serverNow();
+        let clock = publicState.clock || null;
+        if (clock) {
+            const left = clockLeftMs(publicState, currentPlayer, now);
+            if (left <= 0) return;   // too late - they've lost on time
+            clock = { ...clock, [currentPlayer]: left };
+        }
+
         return {
             ...publicState,
             currentPlayer: nextPlayer,
             phase: "main",
             currentAttack: null,
             turnNumber: nextTurnNumber,
-            turnStartedAt: serverNow(),   // for the optional turn timer
+            turnStartedAt: now,   // the game clock counts from here
+            clock,
             playerTurns: {
                 ...(publicState.playerTurns || {})
             }

@@ -783,7 +783,8 @@ function applyOnlinePublicState(publicState = {}) {
         currentAttack: publicState.currentAttack || null,
         highlights: normalizeHighlights(publicState.highlights),
         gameId: publicState.gameId || null,              // per dealt game (win/loss record)
-        turnStartedAt: Number(publicState.turnStartedAt) || 0,   // turn timer
+        turnStartedAt: Number(publicState.turnStartedAt) || 0,   // game clock
+        clock: publicState.clock || null,                         // game clock banks { total, p1, p2 }
         player1: publicState.player1 || null,
         player2: publicState.player2 || null
     };
@@ -1445,67 +1446,92 @@ async function recordOnlineResult(won) {
     }
 }
 
-// ── Turn timer (optional, chosen when the room is made) ──
-// Shown under the turn indicator for both players. It only counts down - when it
-// runs out it says so; nothing is taken away automatically.
-let turnTimerSeconds = 0;
-let turnTimerHandle = null;
-let turnTimerAnnouncedKey = null;
+// ── Game clock (optional, chosen when the room is made) ──
+// A chess clock: each player has their own time for the whole game, and only the
+// player whose turn it is uses theirs up (multiplayerService keeps the banks in
+// public/clock). Both clocks show under the turn indicator. When the player on turn
+// hits 0:00 they lose - either player's browser claims it, and the transaction
+// makes sure that only happens once and only if it's really true.
+let gameClockHandle = null;
+let gameClockClaimAt = 0;
+let gameClockWarned = "";
 
-async function loadTurnTimerSetting() {
-    if (!isOnlineMatch || !onlineFirebaseApp) return;
-    try {
-        const db = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
-        const snapshot = await db.get(db.ref(onlineFirebaseApp.database, `matches/${roomCode}/settings/turnSeconds`));
-        turnTimerSeconds = Number(snapshot.val()) || 0;
-        if (turnTimerSeconds > 0 && !turnTimerHandle) {
-            turnTimerHandle = setInterval(renderTurnTimer, 1000);
-            renderTurnTimer();
+function startGameClock() {
+    if (!isOnlineMatch || gameClockHandle) return;
+    gameClockHandle = setInterval(renderGameClock, 250);
+    renderGameClock();
+}
+
+function formatClock(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+    return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function renderGameClock() {
+    let box = document.getElementById("gameClock");
+    const clock = onlinePublicState?.clock;
+    const svc = onlineMultiplayerService;
+    if (!clock || !svc?.clockLeftMs) {
+        if (box) box.hidden = true;
+        return;
+    }
+    if (!box) {
+        const anchor = document.getElementById("phaseDisplay");
+        if (!anchor) return;
+        box = document.createElement("div");
+        box.id = "gameClock";
+        box.setAttribute("role", "timer");
+        box.setAttribute("aria-label", "Game clock");
+        box.style.cssText = "margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px;" +
+            "font:800 13px/1.15 system-ui,sans-serif;font-variant-numeric:tabular-nums;";
+        anchor.after(box);
+    }
+    box.hidden = false;
+
+    const now = svc.serverNow ? svc.serverNow() : Date.now();
+    const turnSlot = onlinePublicState.currentPlayer;
+    const live = !["waiting", "diceRoll", "mulligan", "gameOver"].includes(onlinePublicState.phase) && !onlinePublicState.winner;
+    // Your own clock first; spectators see player 1 then player 2.
+    const order = isSpectator || !playerSlot ? ["p1", "p2"] : [playerSlot, playerSlot === "p1" ? "p2" : "p1"];
+    const cells = order.map((slot) => {
+        const left = svc.clockLeftMs(onlinePublicState, slot, now);
+        const running = live && slot === turnSlot;
+        const label = !isSpectator && slot === playerSlot ? "You" : (onlinePlayerLabels[slot] || slot.toUpperCase());
+        const low = left <= 60000, out = left <= 0;
+        const bg = out ? "rgba(224,85,90,.32)" : running ? (low ? "rgba(224,85,90,.22)" : "rgba(16,185,129,.2)") : "rgba(255,255,255,.06)";
+        const color = out || (running && low) ? "#ffb3b5" : running ? "#bff7dc" : "#9db1a8";
+        const border = running ? `1px solid ${low ? "rgba(224,85,90,.7)" : "rgba(77,255,158,.5)"}` : "1px solid transparent";
+        return `<div style="padding:4px 6px;border-radius:7px;text-align:center;background:${bg};color:${color};border:${border}">` +
+            `<div style="font-size:10px;font-weight:700;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${running ? "▶ " : ""}${escapeClockText(label)}</div>` +
+            `<div style="font-size:15px">${formatClock(left)}</div></div>`;
+    });
+    const html = cells.join("");
+    if (box.innerHTML !== html) box.innerHTML = html;
+
+    if (!live || (turnSlot !== "p1" && turnSlot !== "p2")) return;
+    const left = svc.clockLeftMs(onlinePublicState, turnSlot, now);
+
+    // A one-time heads-up when your own clock gets low.
+    if (!isSpectator && turnSlot === playerSlot && left > 0 && left <= 60000) {
+        const key = `${onlinePublicState.gameId || ""}:${turnSlot}`;
+        if (gameClockWarned !== key) {
+            gameClockWarned = key;
+            addGameLog("⏱ Less than a minute left on your game clock — run out and you lose.");
         }
-    } catch (error) {
-        console.warn("Couldn't read the turn timer setting:", error);
+    }
+    // Flag fall: claim the game for the other player (retry every few seconds in
+    // case the first claim raced with the turn being passed).
+    if (left <= 0 && !isSpectator && now - gameClockClaimAt > 3000 && svc.claimClockTimeout) {
+        gameClockClaimAt = now;
+        svc.claimClockTimeout(roomCode, turnSlot, onlinePlayerLabels[turnSlot] || "").catch((error) => {
+            console.warn("Couldn't end the game on time:", error);
+        });
     }
 }
 
-function renderTurnTimer() {
-    let chip = document.getElementById("turnTimer");
-    if (!chip) {
-        const anchor = document.getElementById("phaseDisplay");
-        if (!anchor) return;
-        chip = document.createElement("div");
-        chip.id = "turnTimer";
-        chip.setAttribute("role", "timer");
-        chip.style.cssText = "margin-top:6px;padding:5px 8px;border-radius:8px;text-align:center;" +
-            "font:800 13px/1.2 system-ui,sans-serif;font-variant-numeric:tabular-nums;";
-        anchor.after(chip);
-    }
-    const startedAt = Number(onlinePublicState?.turnStartedAt) || 0;
-    if (!turnTimerSeconds || onlinePublicState?.phase !== "main" || !startedAt) {
-        chip.hidden = true;
-        return;
-    }
-    const now = onlineMultiplayerService?.serverNow ? onlineMultiplayerService.serverNow() : Date.now();
-    const left = Math.ceil((startedAt + turnTimerSeconds * 1000 - now) / 1000);
-    const whose = isSpectator
-        ? `${onlinePlayerLabels[onlinePublicState.currentPlayer] || "Player"}'s turn`
-        : (isCurrentOnlinePlayer() ? "Your turn" : "Their turn");
-    chip.hidden = false;
-    if (left > 0) {
-        const minutes = Math.floor(left / 60);
-        const seconds = String(left % 60).padStart(2, "0");
-        chip.textContent = `⏱ ${whose}: ${minutes}:${seconds}`;
-        chip.style.background = left <= 15 ? "rgba(226,180,81,.2)" : "rgba(255,255,255,.07)";
-        chip.style.color = left <= 15 ? "#f3d58c" : "#dfe7e2";
-        return;
-    }
-    chip.textContent = `⏱ ${whose}: time's up`;
-    chip.style.background = "rgba(224,85,90,.22)";
-    chip.style.color = "#ffb3b5";
-    const key = `${onlinePublicState.currentPlayer}:${onlinePublicState.turnNumber}:${startedAt}`;
-    if (turnTimerAnnouncedKey !== key) {
-        turnTimerAnnouncedKey = key;
-        addGameLog(`⏱ ${onlinePlayerLabels[onlinePublicState.currentPlayer] || "Player"}'s turn time is up.`);
-    }
+function escapeClockText(text) {
+    return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 // ── Tournament matches ───────────────────────────────────
@@ -1532,8 +1558,8 @@ function reportTournamentResult(winnerSlot) {
     if (!winnerUid) return;
     tournamentContext.iWon = winnerSlot === playerSlot;
     Promise.all([
-        import("../firebase/tournamentService.js?v=tour-7"),
-        import("../core/tournamentEngine.js?v=tour-3")
+        import("../firebase/tournamentService.js?v=tour-8"),
+        import("../core/tournamentEngine.js?v=tour-8")
     ])
         .then(async ([service, engine]) => {
             const doc = await service.reportMatchResult(tournamentContext.meta, winnerUid);
@@ -2262,7 +2288,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-13");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=clock-1");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2285,7 +2311,7 @@ async function initializeOnlineMultiplayer() {
         setupOnlinePlayerNames();
         setupOnlineCosmetics();
         loadTournamentContext();   // is this room a tournament match? (fire and forget)
-        loadTurnTimerSetting();    // optional per-room turn timer (fire and forget)
+        startGameClock();          // optional per-player game clock
 
         // Multiplayer code reads public board/count state plus this user's private zones only.
         onlineMatchUnsubscribe = onlineMultiplayerService.subscribeToPublicState(
@@ -2336,7 +2362,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=draft-13");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=clock-1");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2357,7 +2383,7 @@ async function initializeSpectatorMatch() {
 
         setupOnlinePlayerNames();
         setupOnlineCosmetics();
-        loadTurnTimerSetting();
+        startGameClock();
         // Spectators can read AND type in the match chat (as "Spectator").
         setupOnlineChat();
 
@@ -2652,10 +2678,18 @@ async function handleOnlinePassTurn() {
         // Multiplayer turn owner flips the public turn pointer. This transaction is
         // the authoritative turn change, so it runs even if the board sync above
         // hiccupped.
-        const result = await onlineMultiplayerService.passTurn(roomCode, onlinePublicState.currentPlayer);
+        const passingSlot = onlinePublicState.currentPlayer;
+        const result = await onlineMultiplayerService.passTurn(roomCode, passingSlot);
 
         if (!result?.committed) {
-            addGameLog("Online turn was already updated.");
+            // Refused because the game clock had already run out: that's a loss on time.
+            const clockOut = onlineMultiplayerService.clockLeftMs
+                && onlineMultiplayerService.clockLeftMs(onlinePublicState, passingSlot) === 0;
+            if (clockOut && onlineMultiplayerService.claimClockTimeout) {
+                await onlineMultiplayerService.claimClockTimeout(roomCode, passingSlot, onlinePlayerLabels[passingSlot] || "");
+            } else {
+                addGameLog("Online turn was already updated.");
+            }
             updateOnlinePhaseButton();
         }
     } catch (error) {

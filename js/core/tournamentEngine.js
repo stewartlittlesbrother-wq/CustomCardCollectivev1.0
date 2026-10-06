@@ -12,6 +12,9 @@
 //     startAt:     ms epoch,       // when round 1 may begin
 //     roundMinutes: number,        // how long each round lasts (days are fine)
 //     roundMode:   "asap" | "full",// next round when everyone is done / only when time is up
+//     timeoutRule: "coin" | "organiser", // a level match whose round ran out: coin flip,
+//                                  // or wait for the organiser (absent = the old seed rule)
+//     clockMinutes: number,        // chess clock per player in each game (0/absent = off)
 //     roundsSetting: number,       // swiss only: custom number of rounds (absent = automatic)
 //     minPlayers, maxPlayers,
 //     lateJoin:    boolean,        // may people join after it has started?
@@ -29,6 +32,7 @@
 //   Pairing = { a: uid, b?: uid, bye?: true,
 //               checkedIn?: { [uid]: ms },
 //               games?: { g1: { winner: uid, at }, g2: ... },   // one entry per game played
+//               timedOut?: ms,  // round ran out undecided; waiting for the organiser
 //               result?: { winner, reason, at } }               // winner: uid | "none"
 //
 // Round / pairing / game keys are "r1" / "m1" / "g1" (never bare integers) because
@@ -54,6 +58,12 @@ export const ROUND_LENGTHS = [
 ];
 export const MIN_ROUND_MINUTES = 5;
 export const MAX_ROUND_MINUTES = 60 * 24 * 60;     // 60 days
+
+// What happens to a match that's level when its round runs out.
+export const TIMEOUT_RULES = ["coin", "organiser"];
+// Chess clock per player for each game (minutes; 0 = no clock).
+export const CLOCK_OPTIONS = [0, 10, 15, 18, 20, 25, 30, 45, 60];
+export const DEFAULT_CLOCK_MINUTES = 18;
 
 export const MAX_PLAYER_OPTIONS = [4, 8, 16, 32, 64];
 export const MIN_PLAYERS = 2;
@@ -157,6 +167,26 @@ export function draftSettingsOf(t) {
   return { packs: pick("packs"), minutes: pick("minutes"), deckSize: pick("deckSize") };
 }
 export function isKicked(t, uid) { return Boolean(uid && t && t.kicked && t.kicked[uid]); }
+/** "coin" | "organiser" | "seed" (tournaments made before the setting existed). */
+export function timeoutRuleOf(t) {
+  return TIMEOUT_RULES.includes(t && t.timeoutRule) ? t.timeoutRule : "seed";
+}
+/** Minutes on each player's chess clock per game (0 = no clock). */
+export function clockMinutesOf(t) {
+  const n = Math.round(Number(t && t.clockMinutes));
+  return Number.isFinite(n) && n > 0 && n <= 180 ? n : 0;
+}
+
+/** The coin flip for a match - the same in every browser, so they all agree. */
+export function coinFlipWinner(tournamentId, round, pairingId, p) {
+  return hashString(`${tournamentId}|r${round}|${pairingId}|coin`) % 2 === 0 ? p.a : p.b;
+}
+
+/** Matches of the current round waiting for the organiser to pick a winner. */
+export function awaitingOrganiser(t) {
+  if (!t || t.status !== "running") return [];
+  return pairingsOf(getRound(t, t.currentRound)).filter(p => p.timedOut && !p.result && !p.bye);
+}
 
 // ── players ──────────────────────────────────────────────────────────────────
 
@@ -383,11 +413,15 @@ function seedOf(t, uid) {
 /** Settle every unfinished match in a round whose timer has run out.
  *   - one player is ahead in the series -> they win
  *   - exactly one player showed up      -> they win (forfeit)
- *   - elimination, level / both / neither -> the higher seed (earlier sign-up) advances
- *   - swiss, level / both / neither       -> nobody scores */
-function settleExpired(t, round, now) {
+ *   - otherwise (level / both / neither) it's the organiser's timeout rule:
+ *       "coin"      -> a coin flip decides it
+ *       "organiser" -> it waits (marked `timedOut`) until the organiser picks a winner;
+ *                      the round can't move on before that
+ *       older tournaments: elimination -> the higher seed advances, swiss -> nobody scores */
+function settleExpired(t, round, roundNo, now, tournamentId) {
   let any = false;
-  Object.values(round.pairings || {}).forEach(p => {
+  const rule = timeoutRuleOf(t);
+  Object.entries(round.pairings || {}).forEach(([pairingId, p]) => {
     if (p.result) return;
     const score = seriesScore(p);
     const here = Object.keys(p.checkedIn || {}).filter(u => u === p.a || u === p.b);
@@ -395,6 +429,11 @@ function settleExpired(t, round, now) {
       p.result = { winner: score.a > score.b ? p.a : p.b, reason: "lead", at: now };
     } else if (here.length === 1) {
       p.result = { winner: here[0], reason: "forfeit", at: now };
+    } else if (rule === "coin") {
+      p.result = { winner: coinFlipWinner(tournamentId, roundNo, pairingId, p), reason: "coin", at: now };
+    } else if (rule === "organiser") {
+      if (p.timedOut) return;
+      p.timedOut = now;
     } else if (t.format === "elimination") {
       const winner = seedOf(t, p.a) <= seedOf(t, p.b) ? p.a : p.b;
       p.result = { winner, reason: "seed", at: now };
@@ -605,7 +644,7 @@ export function tick(input, now, results = {}, tournamentId = "") {
       const round = getRound(t, t.currentRound);
       if (!round) break;
       resolveKicked(t, round, now);
-      if (now >= Number(round.endsAt)) settleExpired(t, round, now);
+      if (now >= Number(round.endsAt)) settleExpired(t, round, t.currentRound, now, tournamentId);
       if (!isRoundResolved(round)) break;
       // "Full length" tournaments keep to their schedule even if everyone finished early.
       if (t.roundMode === "full" && now < Number(round.endsAt) && t.currentRound < t.totalRounds) break;
@@ -639,19 +678,77 @@ export function kickPlayer(input, uid, now = Date.now(), reason = "") {
   return { tournament: t, changed: true };
 }
 
-/** Can the organiser still change this match's result? Any match of the current round;
- *  in Swiss also earlier rounds (it only changes the standings, not the pairings). */
+/** Can the organiser change this match's result? Yes - any match of any round that has
+ *  been played, at any time (even after the tournament has finished). In a knockout a
+ *  change to an earlier round carries forward through the bracket; see overrideResult. */
 export function canEditResult(t, round) {
   const n = Number(round);
   if (t.status === "registration" || t.status === "cancelled") return false;
-  if (n === Number(t.currentRound)) return true;
-  return t.format === "swiss" && n < Number(t.currentRound);
+  return n >= 1 && n <= Number(t.currentRound);
+}
+
+// Knockout: `oldUid` won round `n` but the organiser has now given that match to
+// `newUid`. Put `newUid` in `oldUid`'s place in the later rounds:
+//   - their next match hasn't been decided -> just swap them in (games already played
+//     by the old player are wiped, the match starts over)
+//   - they LOST their next match            -> swap them in; that result stands
+//   - they WON their next match             -> that match is re-opened for the new
+//     player, and every round after it is redrawn once it's decided
+// Returns a short description of what happened (for the confirmation message).
+function carryForward(t, n, oldUid, newUid, now) {
+  for (let k = n + 1; k <= Number(t.currentRound); k++) {
+    const round = getRound(t, k);
+    const entry = Object.entries((round && round.pairings) || {}).find(([, q]) => q.a === oldUid || q.b === oldUid);
+    if (!entry) return "";
+    const [, q] = entry;
+    const side = q.a === oldUid ? "a" : "b";
+    q[side] = newUid;
+    if (q.checkedIn) delete q.checkedIn[oldUid];
+    if (q.result && q.result.winner !== oldUid) {
+      // The old player lost here: the new one takes the loss, nothing further changes.
+      return `round ${k} stays as it is`;
+    }
+    const replay = Boolean(q.result) || Boolean(q.games);
+    delete q.result;
+    delete q.games;
+    delete q.timedOut;
+    if (!replay) return `they take that place in round ${k}`;
+    // The old player had already won (or started) round k: it must be played again,
+    // so the rounds after it no longer make sense.
+    for (let later = k + 1; later <= Number(t.currentRound); later++) delete t.rounds[roundKey(later)];
+    t.currentRound = k;
+    round.endsAt = Math.max(Number(round.endsAt), now + Number(t.roundMinutes) * 60000);
+    return `their round ${k} match is played again`;
+  }
+  return "";
+}
+
+/** What changing this match's result will do, in words - for the organiser's
+ *  "are you sure?" question. "" when it's a plain change. */
+export function resultChangeImpact(t, round, pairingId, winner) {
+  const n = Number(round);
+  const p = (getRound(t, n) || {}).pairings && getRound(t, n).pairings[pairingId];
+  if (!p || t.format !== "elimination" || n >= Number(t.currentRound)) return "";
+  const old = p.result && p.result.winner;
+  if (!old || !winner || winner === old) return "";
+  const next = pairingsOf(getRound(t, n + 1)).find(q => q.a === old || q.b === old);
+  if (!next) return "";
+  const newName = nameOf(t, winner), oldName = nameOf(t, old);
+  if (next.result && next.result.winner !== old) {
+    return `${newName} takes ${oldName}'s place in round ${n + 1} (where ${oldName} lost), so nothing else changes.`;
+  }
+  if (next.result || next.games) {
+    const later = Number(t.currentRound) > n + 1 ? ` Rounds ${n + 2}+ are cleared and drawn again afterwards.` : "";
+    return `${newName} takes ${oldName}'s place in round ${n + 1}, and that match will have to be played again.${later}`;
+  }
+  return `${newName} takes ${oldName}'s place in round ${n + 1}.`;
 }
 
 /**
  * The organiser decides a match. `winner` is one of the two players' uids, "none"
  * (Swiss only: a draw, nobody scores) or null to clear the result so the match can be
- * played again. Returns { tournament, changed, error }.
+ * played again. Works for every round, also after the tournament has finished.
+ * Returns { tournament, changed, error }.
  */
 export function overrideResult(input, round, pairingId, winner, now = Date.now(), tournamentId = "") {
   const fail = (error) => ({ tournament: input, changed: false, error });
@@ -660,7 +757,7 @@ export function overrideResult(input, round, pairingId, winner, now = Date.now()
   const existing = rd && rd.pairings && rd.pairings[pairingId];
   if (!existing) return fail("That match doesn't exist.");
   if (existing.bye) return fail("A bye can't be changed.");
-  if (!canEditResult(input, n)) return fail("Results from earlier knockout rounds can't be changed.");
+  if (!canEditResult(input, n)) return fail("That match can't be changed.");
   if (winner !== null && winner !== "none" && winner !== existing.a && winner !== existing.b) {
     return fail("Pick one of the two players in the match.");
   }
@@ -670,7 +767,8 @@ export function overrideResult(input, round, pairingId, winner, now = Date.now()
   const t = clone(input);
   const p = t.rounds[roundKey(n)].pairings[pairingId];
   if (t.status === "complete") {
-    // Re-opening the final: the tournament is live again until it's decided.
+    // Changing a result after the end: the tournament is live again until tick()
+    // finishes it once more (and works out the champion again).
     t.status = "running";
     delete t.winner;
     delete t.completedAt;
@@ -679,11 +777,17 @@ export function overrideResult(input, round, pairingId, winner, now = Date.now()
     delete p.result;
     delete p.games;       // a re-opened match is played from scratch
     delete p.checkedIn;
+    delete p.timedOut;
     // Give them a fresh window, or an expired round would settle it again at once.
     const rd2 = t.rounds[roundKey(n)];
     rd2.endsAt = Math.max(Number(rd2.endsAt), now + Number(t.roundMinutes) * 60000);
   } else {
+    const old = p.result && p.result.winner;
     p.result = { winner, reason: "organiser", at: now };
+    delete p.timedOut;
+    if (t.format === "elimination" && old && old !== winner && old !== "none" && n < Number(t.currentRound)) {
+      carryForward(t, n, old, winner, now);
+    }
   }
   return { ...tick(t, now, {}, tournamentId), error: null, changed: true };
 }
@@ -715,6 +819,9 @@ export function cleanSettings(raw, ctx = {}) {
   f.format = raw.format === "swiss" ? "swiss" : "elimination";
   f.bestOf = BEST_OF_OPTIONS.includes(Number(raw.bestOf)) ? Number(raw.bestOf) : 1;
   f.roundMode = raw.roundMode === "full" ? "full" : "asap";
+  f.timeoutRule = raw.timeoutRule === "organiser" ? "organiser" : "coin";
+  const clock = Math.round(Number(raw.clockMinutes));
+  f.clockMinutes = Number.isFinite(clock) && clock > 0 ? Math.min(180, clock) : 0;
   f.collections = toList(raw.collections);
   f.banned = [...new Set(toList(raw.banned).map(s => s.trim()).filter(s => s && s.length <= 40))].slice(0, MAX_BANNED);
 
@@ -774,9 +881,9 @@ export function cleanSettings(raw, ctx = {}) {
 // Fields an organiser can no longer change once round 1 has begun.
 const LOCKED_AFTER_START = ["matchType", "format", "bestOf", "collections", "startAt", "requireDeck", "deckDeadline"];
 // Every field cleanSettings produces - they're all replaced together on an edit.
-const SETTING_KEYS = ["name", "description", "matchType", "format", "bestOf", "roundMode", "collections", "banned",
-  "startAt", "roundMinutes", "minPlayers", "maxPlayers", "lateJoin", "private", "roundsSetting", "requireDeck",
-  "deckDeadline", "draft"];
+const SETTING_KEYS = ["name", "description", "matchType", "format", "bestOf", "roundMode", "timeoutRule", "clockMinutes",
+  "collections", "banned", "startAt", "roundMinutes", "minPlayers", "maxPlayers", "lateJoin", "private", "roundsSetting",
+  "requireDeck", "deckDeadline", "draft"];
 
 /** Apply an organiser's edits to a stored tournament. Returns { tournament, changed, error }. */
 export function applySettings(input, raw, now = Date.now()) {

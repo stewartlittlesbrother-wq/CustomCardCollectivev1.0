@@ -30,7 +30,7 @@ import {
     sendChatMessage,
     subscribeToChat,
     getMatchRecord
-} from "../firebase/multiplayerService.js?v=draft-13";
+} from "../firebase/multiplayerService.js?v=clock-1";
 
 const host = window.ccMpHost || {};
 
@@ -38,14 +38,24 @@ const KEYS = {
     name: "cc_mp_nickname",
     game: "cc_mp_current_game",     // the online game this browser is in (for Rejoin)
     deck: "cc_mp_last_deck",
-    timer: "cc_mp_turn_timer"
+    timer: "cc_mp_turn_timer",      // (old per-turn timer, no longer offered)
+    clock: "cc_mp_game_clock"       // game clock minutes per player ("0" = off)
 };
 const DON_DECKS_KEY = "custom-don-decks-v1";
 const DON_ACTIVE_DECK_KEY = "custom-don-active-deck-v1";
 const ANY_SIZE_KEY = "custom-cards-allow-any-deck-size-v1";
 const SFX_MUTED_KEY = "custom-cards-sim-sfx-muted-v1";
 const CARD_BACK = "images/basic/card-back-custom.png";
-const TIMER_OPTIONS = [[0, "Off"], [60, "1 minute"], [120, "2 minutes"], [180, "3 minutes"], [300, "5 minutes"]];
+// Game clock: each player's own time for the whole game (a chess clock - it only runs
+// on your own turn, and whoever runs out loses). Minutes; 0 = no clock.
+const CLOCK_OPTIONS = [[0, "Off"], [10, "10 min each"], [15, "15 min each"], [18, "18 min each"], [20, "20 min each"], [25, "25 min each"], [30, "30 min each"], [45, "45 min each"], [60, "60 min each"]];
+const DEFAULT_CLOCK_MINUTES = 18;
+function savedClockMinutes() {
+    const raw = lsGet(KEYS.clock);
+    if (raw === null || raw === undefined || raw === "") return DEFAULT_CLOCK_MINUTES;
+    const n = Number(raw);
+    return CLOCK_OPTIONS.some(([m]) => m === n) ? n : DEFAULT_CLOCK_MINUTES;
+}
 const REJOIN_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
 
 const ICON = {
@@ -309,7 +319,7 @@ function wireDonSelects(scope) {
 // ── Home screen ──────────────────────────────────────────────────────────────
 function renderHome() {
     screen = "home";
-    const timer = Number(lsGet(KEYS.timer)) || 0;
+    const clock = savedClockMinutes();
     root.innerHTML = `
     <div class="mpx-page">
       <div class="mpx-head">
@@ -336,8 +346,8 @@ function renderHome() {
           <div class="mpx-foot">
             <div class="mpx-row" style="flex:1 1 380px">
               <label class="mpx-field">Room name<input id="mpxRoomName" type="text" maxlength="40" value="${esc(`${nickname()}'s game`)}"></label>
-              <label class="mpx-field" style="max-width:200px">Turn timer
-                <select id="mpxTimer">${TIMER_OPTIONS.map(([sec, label]) => `<option value="${sec}"${sec === timer ? " selected" : ""}>${label}</option>`).join("")}</select>
+              <label class="mpx-field" style="max-width:200px" title="Each player gets this much time for the whole game. It only runs on your own turn - run out and you lose.">Game clock
+                <select id="mpxClock">${CLOCK_OPTIONS.map(([min, label]) => `<option value="${min}"${min === clock ? " selected" : ""}>${label}</option>`).join("")}</select>
               </label>
             </div>
             <button type="button" class="mpx-btn primary big" id="mpxCreate">Create room</button>
@@ -557,8 +567,8 @@ async function onCreate() {
     button.disabled = true;
     button.textContent = "Creating…";
     try {
-        const turnSeconds = Number($("#mpxTimer", root)?.value) || 0;
-        lsSet(KEYS.timer, String(turnSeconds));
+        const clockMinutes = Number($("#mpxClock", root)?.value) || 0;
+        lsSet(KEYS.clock, String(clockMinutes));
         const lobbyName = ($("#mpxRoomName", root)?.value || "").trim().slice(0, 40) || `${nickname()}'s game`;
         const created = await createRoom(u, {
             isPublic: false,
@@ -566,7 +576,7 @@ async function onCreate() {
             nickname: nickname(),
             mode: createMode,
             draftCollection: createMode === "draft" ? ($("#mpxPool", root)?.value || "") : "",
-            settings: turnSeconds ? { turnSeconds } : null
+            settings: clockMinutes ? { clockSeconds: clockMinutes * 60 } : null
         });
         openRoom(created.roomCode, "p1");
     } catch (error) {
@@ -823,8 +833,8 @@ function renderRoomHead() {
     const chips = $("#mpxRoomChips", root);
     if (!chips) return;
     const items = [isDraftRoom() ? "Draft Battle" : "Regular match", "Private room"];
-    const seconds = Number(match?.settings?.turnSeconds) || 0;
-    if (seconds) items.push(`Turn timer: ${seconds / 60} min`);
+    const clockSeconds = Number(match?.settings?.clockSeconds) || 0;
+    if (clockSeconds) items.push(`Game clock: ${Math.round(clockSeconds / 60)} min each`);
     if (tournamentMeta) items.push("Tournament");
     chips.innerHTML = items.map((text) => `<span class="mpx-chip">${esc(text)}</span>`).join("");
 }

@@ -70,6 +70,24 @@
     // loads, then flushes. No-op when signed out (the module guards on uid).
     window.ccSyncPush = (key) => { userSync().then(mod => mod && mod.pushKey && mod.pushKey(key)); };
 
+    // Tournament alerts (red pop-ups in the corner: your round started, your match is
+    // due, the organiser must pick a winner, it ended...). Accounts only - tournaments
+    // need one - and on every page auth-ui is on.
+    let alertsPromise = null;
+    function tournamentAlerts() {
+        if (!alertsPromise) {
+            const v = (window.APP_VERSION ? `?v=${window.APP_VERSION}` : "");
+            const moduleUrl = SCRIPT_URL
+                ? new URL(`tournamentAlerts.js${v}`, SCRIPT_URL).href
+                : `js/tournamentAlerts.js${v}`;
+            alertsPromise = import(moduleUrl).catch(err => {
+                console.warn("Tournament alerts unavailable:", err);
+                return null;
+            });
+        }
+        return alertsPromise;
+    }
+
     // ── Styles (injected so this works on any page) ──────────────────────────
     function injectStyles() {
         if (document.getElementById("cc-auth-styles")) return;
@@ -375,6 +393,11 @@
                         mod.stopAccountSync();
                     }
                 });
+                if (account && account.uid) {
+                    tournamentAlerts().then(mod => mod && mod.startTournamentAlerts(account.uid));
+                } else if (alertsPromise) {
+                    alertsPromise.then(mod => mod && mod.stopTournamentAlerts());
+                }
                 // Show the popup once on first load for a brand-new visitor who
                 // is neither signed in nor has chosen to play as a guest.
                 if (!account && !guestAcked() && !overlayEl) openPopup();

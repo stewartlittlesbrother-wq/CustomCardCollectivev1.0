@@ -219,6 +219,8 @@ button { cursor: pointer; }
   border-color: rgba(226, 180, 81, .6);
 }
 .tn-me.out { background: rgba(224, 85, 90, .08); border-color: rgba(224, 85, 90, .35); }
+/* The organiser has to decide something before the tournament can go on. */
+.tn-me.urgent { background: rgba(224, 85, 90, .16); border-color: rgba(224, 85, 90, .75); }
 .tn-me strong { color: #fff; }
 .tn-me small { display: block; color: var(--muted); margin-top: 2px; }
 
@@ -357,6 +359,8 @@ button { cursor: pointer; }
 .tn-pairing .side.lose { color: var(--muted); }
 .tn-pairing .side.right { text-align: right; }
 .tn-pairing .note { grid-column: 1 / -1; color: var(--muted); font-size: .76rem; }
+.tn-pairing.awaiting { background: rgba(224, 85, 90, .1); box-shadow: inset 3px 0 0 var(--red); }
+.tn-pairing.awaiting .note { color: #ffb3b5; font-weight: 700; }
 
 .tn-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
 .tn-table th, .tn-table td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--line); }

@@ -21,7 +21,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 import { database } from "./firebaseApp.js";
-import { createRoom, joinRoom } from "./multiplayerService.js?v=draft-13";
+import { createRoom, joinRoom } from "./multiplayerService.js?v=clock-1";
 import { BASE_PATH, DECKS_PATH, SECRETS_PATH, JOIN_PATH } from "./tournamentPaths.js?v=tour-3";
 import { getSubmittedDeck } from "./tournamentDecks.js?v=tour-3";
 import {
@@ -40,12 +40,13 @@ import {
     bestOfOf,
     deckRequired,
     draftSettingsOf,
+    clockMinutesOf,
     canJoin,
     isKicked,
     myStatus,
     playerCount,
     minPlayersOf
-} from "../core/tournamentEngine.js?v=tour-3";
+} from "../core/tournamentEngine.js?v=tour-8";
 
 const basePath = BASE_PATH;
 const tournamentRef = (id, ...parts) => ref(database, [basePath, id, ...parts].join("/"));
@@ -396,7 +397,9 @@ export async function enterMatch(id, t, user, displayName) {
                 lobbyName: `${t.name} - Round ${round}${bestOfOf(t) > 1 ? ` · Game ${game}` : ""}`,
                 mode: t.matchType,
                 draftCollection: t.matchType === "draft" ? collectionsOf(t).join(",") : "",
-                tournament: matchMetadata(id, t, round, pairing, game)
+                tournament: matchMetadata(id, t, round, pairing, game),
+                // The organiser's chess clock (each player's own time for this game).
+                settings: clockMinutesOf(t) ? { clockSeconds: clockMinutesOf(t) * 60 } : null
             });
             return { code, slot: "p1" };
         } catch (error) {

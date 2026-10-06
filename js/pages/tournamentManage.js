@@ -9,7 +9,7 @@ import {
     cancelTournament,
     deleteTournament,
     isPermissionError
-} from "../firebase/tournamentService.js?v=tour-7";
+} from "../firebase/tournamentService.js?v=tour-8";
 import { watchDecks, deckListText } from "../firebase/tournamentDecks.js?v=tour-3";
 import { openViewDialog } from "./tournamentDeckUi.js?v=tour-3";
 import {
@@ -23,8 +23,9 @@ import {
     getRound,
     pairingsOf,
     seriesScore,
-    canEditResult
-} from "../core/tournamentEngine.js?v=tour-3";
+    canEditResult,
+    resultChangeImpact
+} from "../core/tournamentEngine.js?v=tour-8";
 
 /**
  * ctx: {
@@ -132,21 +133,30 @@ export function createManage(ctx) {
                 const cls = (uid) => (done ? (p.result.winner === uid ? "win" : "lose") : "");
                 const score = seriesScore(p);
                 const middle = bestOf > 1 ? `${score.a}–${score.b}` : "VS";
+                const waiting = !p.result && p.timedOut;
                 let status = "";
                 if (p.result) {
+                    const how = { organiser: " (set by you)", coin: " on a coin flip", lead: " — ahead when time ran out",
+                        forfeit: " by forfeit", seed: " — higher seed", kicked: " — opponent removed" }[p.result.reason] || "";
                     status = p.result.winner === "none" ? "Draw — nobody scores"
-                        : `${nameOf(t, p.result.winner)} won${p.result.reason === "organiser" ? " (set by you)" : ""}`;
+                        : `${nameOf(t, p.result.winner)} won${how}`;
+                } else if (waiting) {
+                    status = "⚖ Time ran out with no winner — pick one so the round can move on";
                 } else {
                     status = "Not decided yet";
                 }
+                const pick = (uid) => {
+                    const current = p.result && p.result.winner === uid;
+                    return `<button type="button" class="tn-btn tn-btn-small${waiting ? " tn-btn-primary" : ""}" data-result data-round="${n}" data-pairing="${esc(p.id)}" data-winner="${esc(uid)}"${current ? " disabled" : ""}>${current ? "✓ " : ""}${name(uid)} wins</button>`;
+                };
                 const controls = editable ? `
                     <div class="tn-pairing-controls">
-                        <button type="button" class="tn-btn tn-btn-small" data-result data-round="${n}" data-pairing="${esc(p.id)}" data-winner="${esc(p.a)}">${name(p.a)} wins</button>
-                        <button type="button" class="tn-btn tn-btn-small" data-result data-round="${n}" data-pairing="${esc(p.id)}" data-winner="${esc(p.b)}">${name(p.b)} wins</button>
-                        ${t.format === "swiss" ? `<button type="button" class="tn-btn tn-btn-small" data-result data-round="${n}" data-pairing="${esc(p.id)}" data-winner="none">Draw</button>` : ""}
+                        ${pick(p.a)}
+                        ${pick(p.b)}
+                        ${t.format === "swiss" ? `<button type="button" class="tn-btn tn-btn-small" data-result data-round="${n}" data-pairing="${esc(p.id)}" data-winner="none"${p.result && p.result.winner === "none" ? " disabled" : ""}>Draw</button>` : ""}
                         ${p.result && n === Number(t.currentRound) ? `<button type="button" class="tn-btn tn-btn-small tn-btn-danger" data-result data-round="${n}" data-pairing="${esc(p.id)}" data-winner="">Re-open</button>` : ""}
                     </div>` : "";
-                return `<div class="tn-pairing">
+                return `<div class="tn-pairing${waiting ? " awaiting" : ""}">
                     <span class="side ${cls(p.a)}">${name(p.a)}${done && p.result.winner === p.a ? " ✓" : ""}</span>
                     <span class="vs">${middle}</span>
                     <span class="side right ${cls(p.b)}">${name(p.b)}${done && p.result.winner === p.b ? " ✓" : ""}</span>
@@ -156,8 +166,8 @@ export function createManage(ctx) {
             html += `<div class="tn-round"><div class="tn-round-head">Round ${n}<span>${esc(ends)}</span></div>${rows}</div>`;
         }
         const note = t.format === "elimination"
-            ? "In a knockout you can change any match of the current round. Earlier rounds are locked, because the bracket has already moved on."
-            : "In Swiss you can change a match in any round — the standings update straight away.";
+            ? "You can change the result of any match, in any round, at any time — even after the tournament has finished. Changing an earlier round moves the new winner into the loser's place further up the bracket."
+            : "You can change the result of any match, in any round, at any time — the standings update straight away.";
         return `<p class="tn-hint">${esc(note)} Setting a winner ends that match; if it was the last open match the round moves on.</p>${html}`;
     }
 
@@ -267,9 +277,10 @@ export function createManage(ctx) {
         if (result) {
             const winner = result.dataset.winner === "" ? null : result.dataset.winner;
             const round = Number(result.dataset.round);
+            const impact = winner ? resultChangeImpact(t, round, result.dataset.pairing, winner) : "";
             const text = winner === null ? "Re-open this match so it can be played again?"
                 : winner === "none" ? "Record this match as a draw (nobody scores)?"
-                : `Set ${nameOf(t, winner)} as the winner of this match?`;
+                : `Set ${nameOf(t, winner)} as the winner of this match?${impact ? `\n\n${impact}` : ""}${t.status === "complete" ? "\n\nThe tournament has finished — its final standings will be worked out again." : ""}`;
             if (!window.confirm(text)) return;
             run(setMatchResult(t.id, round, result.dataset.pairing, winner), winner === null ? "Match re-opened." : "Result saved.");
             return;

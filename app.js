@@ -5683,8 +5683,9 @@ function closeDeckSharePanels() {
 // a grid of the cards with their card numbers + copy counts, and Cost / Type /
 // Counter distribution bars — then downloads it as a PNG. Card art comes from the
 // same cache the builder uses (base64 for custom cards, so the canvas isn't
-// tainted). Remote/official art is loaded with crossOrigin; if a host lacks CORS
-// the card shows a name placeholder rather than failing the whole export.
+// tainted). Remote/official art is loaded with crossOrigin; a host without CORS
+// (optcgapi, where the official cards' pictures live) is retried through the image
+// proxy, and only if that fails too does the card show a name placeholder.
 function roundRectPath(ctx, x, y, w, h, r) {
   const rr = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath();
@@ -5704,20 +5705,30 @@ function drawImageCover(ctx, img, x, y, w, h) {
   ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
 }
 
-function loadCardImageForExport(card) {
+function loadExportImage(url) {
   return new Promise(resolve => {
-    if (!card) return resolve(null);
-    Promise.resolve(resolveCardImageUrl(card)).then(url => {
-      if (!url) return resolve(null);
-      const img = new Image();
-      // data: URIs are same-origin (no taint); tag only remote URLs for CORS so a
-      // CORS-enabled host can be captured, and a non-CORS one just fails to load.
-      if (!/^data:/i.test(url)) img.crossOrigin = "anonymous";
-      img.onload = () => resolve(img);
-      img.onerror = () => resolve(null);
-      img.src = url;
-    }).catch(() => resolve(null));
+    const img = new Image();
+    // data: URIs are same-origin (no taint); tag only remote URLs for CORS so a
+    // CORS-enabled host can be captured, and a non-CORS one just fails to load.
+    if (!/^data:/i.test(url)) img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
   });
+}
+
+async function loadCardImageForExport(card) {
+  if (!card) return null;
+  try {
+    const url = await resolveCardImageUrl(card);
+    if (!url) return null;
+    const direct = await loadExportImage(url);
+    if (direct || !/^https?:\/\//i.test(url)) return direct;
+    // The proxy re-serves the picture with CORS, so it can go on the canvas.
+    return await loadExportImage(`${IMAGE_PROXY}?url=${encodeURIComponent(url)}&w=440&we&output=jpg&q=88`);
+  } catch {
+    return null;
+  }
 }
 
 function deckExportTitle(leader) {
@@ -6318,7 +6329,7 @@ function openMultiplayerTab() {
         .sort((a, b) => a.name.localeCompare(b.name));
     }
   };
-  import("./js/pages/multiplayerTab.js?v=mpx-3")
+  import("./js/pages/multiplayerTab.js?v=mpx-4")
     .then(mod => {
       multiplayerTabModule = mod;
       if (state.activeView === "multiplayer") mod.show();
@@ -8320,7 +8331,7 @@ async function maybeStartMultiplayerDraft() {
   try {
     [firebaseApp, svc] = await Promise.all([
       import("./js/firebase/firebaseApp.js"),
-      import("./js/firebase/multiplayerService.js?v=draft-13")
+      import("./js/firebase/multiplayerService.js?v=clock-1")
     ]);
     await firebaseApp.signInGuest();
   } catch (e) {

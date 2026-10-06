@@ -11,7 +11,7 @@ import {
     lookupCards,
     deckListText
 } from "../firebase/tournamentDecks.js?v=tour-3";
-import { collectionsOf, bannedOf } from "../core/tournamentEngine.js?v=tour-3";
+import { collectionsOf, bannedOf } from "../core/tournamentEngine.js?v=tour-8";
 
 // ── submitting ───────────────────────────────────────────────────────────────
 

@@ -9,11 +9,15 @@ import {
     syncTournament,
     enterMatch,
     isPermissionError
-} from "../firebase/tournamentService.js?v=tour-7";
+} from "../firebase/tournamentService.js?v=tour-8";
 import { lookupCards } from "../firebase/tournamentDecks.js?v=tour-3";
 import {
     ROUND_LENGTHS,
     DRAFT_DEFAULTS,
+    CLOCK_OPTIONS,
+    DEFAULT_CLOCK_MINUTES,
+    timeoutRuleOf,
+    clockMinutesOf,
     formatDuration,
     collectionsOf,
     bannedOf,
@@ -31,11 +35,12 @@ import {
     getRound,
     seriesScore,
     swissStandings,
+    awaitingOrganiser,
     nameOf
-} from "../core/tournamentEngine.js?v=tour-3";
+} from "../core/tournamentEngine.js?v=tour-8";
 import { $, esc, fmtDate, relative, toast, toLocalInput, copyText } from "./tournamentUi.js?v=tour-3";
 import { openSubmitDialog, closeSubmitDialog, closeViewDialog } from "./tournamentDeckUi.js?v=tour-3";
-import { createManage } from "./tournamentManage.js?v=tour-7";
+import { createManage } from "./tournamentManage.js?v=tour-8";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
@@ -53,7 +58,9 @@ const state = {
     banUnknown: new Set(),      // numbers the card library doesn't know
     editing: null,              // id of the tournament being edited (null = creating)
     openDetail: null,           // id of the tournament shown in the details dialog
-    deepLinkId: new URLSearchParams(location.search).get("t") || ""
+    deepLinkId: new URLSearchParams(location.search).get("t") || "",
+    // ?t=<id>&manage=matches - the organiser's "pick the winner" alert opens this.
+    deepLinkManage: new URLSearchParams(location.search).get("manage") || ""
 };
 let firebaseUser = null;
 
@@ -111,6 +118,7 @@ function settingChips(t) {
     if (isPrivate(t)) chips.push(`<span class="tn-chip flag">👁 Private</span>`);
     if (t.lateJoin) chips.push(`<span class="tn-chip flag">⏳ Late joining</span>`);
     if (deckRequired(t)) chips.push(`<span class="tn-chip flag">📄 Deck list</span>`);
+    if (clockMinutesOf(t)) chips.push(`<span class="tn-chip flag">⏱ ${clockMinutesOf(t)} min clock</span>`);
     if (bannedOf(t).length) chips.push(`<span class="tn-chip flag">🚫 ${bannedOf(t).length} banned</span>`);
     return chips.join("");
 }
@@ -177,7 +185,9 @@ function meStrip(t, now) {
             main = `<div class="tn-me action"><div>
                 <strong>⚔️ Round ${s.round} — ${what}</strong>
                 <small>${overdue
-                    ? "The round timer has run out — it will be settled as a forfeit."
+                    ? (timeoutRuleOf(t) === "organiser"
+                        ? "The round timer has run out — the organiser will pick the winner. You can still finish your game until they do."
+                        : "The round timer has run out — it's being settled now.")
                     : `All your games are due ${esc(fmtDate(s.dueAt))} (${esc(relative(s.dueAt, now))}).`}
                     ${t.matchType === "draft" ? " Draft battle: you'll open packs and build a deck first." : ""}</small>
                 </div>
@@ -233,9 +243,21 @@ function matchesFilter(t, now) {
     }
 }
 
+// The organiser's to-do: matches whose round ran out and that wait for their decision.
+function organiserStrip(t) {
+    if (!isCreator(t)) return "";
+    const waiting = awaitingOrganiser(t);
+    if (!waiting.length) return "";
+    const names = waiting.slice(0, 3).map(p => `${esc(nameOf(t, p.a))} vs ${esc(nameOf(t, p.b))}`).join(", ");
+    return `<div class="tn-me action urgent"><div><strong>⚖ ${waiting.length} match${waiting.length === 1 ? "" : "es"} need${waiting.length === 1 ? "s" : ""} you to pick the winner</strong>
+        <small>Round ${esc(t.currentRound)} ran out of time (${names}${waiting.length > 3 ? ", …" : ""}). The next round starts once you decide.</small></div>
+        <button type="button" class="tn-btn tn-btn-primary tn-btn-small" data-act="decide" data-id="${esc(t.id)}">Pick winners</button></div>`;
+}
+
 function sortRank(t, now) {
     const mine = isMember(t) ? myStatus(t, state.me.uid, now) : null;
     const d = deckState(t, now);
+    if (isCreator(t) && awaitingOrganiser(t).length) return 0;
     if ((mine && mine.needsAction) || (d && !d.has && d.canSubmit)) return 0;   // you owe something
     if (t.status === "running" || (t.status === "registration" && now >= Number(t.startAt))) return 1;
     if (t.status === "registration") return 2;
@@ -248,7 +270,7 @@ function cardHtml(t, now) {
     const creator = isCreator(t);
     const s = mine ? myStatus(t, state.me.uid, now) : null;
     const d = deckState(t, now);
-    const owes = (s && s.needsAction) || (d && !d.has && d.canSubmit);
+    const owes = (s && s.needsAction) || (d && !d.has && d.canSubmit) || (creator && awaitingOrganiser(t).length > 0);
 
     const startLine = t.status === "registration"
         ? `<span>🗓 Starts <b>${esc(fmtDate(t.startAt))}</b> (${esc(relative(t.startAt, now))})</span>`
@@ -285,6 +307,7 @@ function cardHtml(t, now) {
             ${settingChips(t)}
             ${collectionChips(t)}
         </div>
+        ${organiserStrip(t)}
         ${meStrip(t, now)}
         <div class="tn-actions">${buttons.join("")}</div>
     </article>`;
@@ -406,6 +429,7 @@ function handleAction(button) {
         case "deck": doDeck(id); break;
         case "view": openDetail(id); break;
         case "manage": closeDetail(); manage.open(id); break;
+        case "decide": closeDetail(); manage.open(id, "matches"); break;
     }
 }
 
@@ -431,6 +455,7 @@ function reasonNote(result) {
         case "seed": return "Neither finished in time — higher seed advances";
         case "timeout": return "Not finished in time — nobody scores";
         case "lead": return "Time ran out — the player ahead in the series wins";
+        case "coin": return "Not finished in time — won on a coin flip";
         case "kicked": return "Their opponent was removed from the tournament";
         case "organiser": return "Decided by the organiser";
         default: return "";
@@ -503,9 +528,13 @@ function rulesHtml(t) {
     lines.push(t.format === "swiss"
         ? `Swiss: a win or a bye is 1 point. You're paired with someone on a similar score and never face the same person twice if it can be avoided. ${t.totalRounds || t.roundsSetting ? `${t.totalRounds || t.roundsSetting} rounds. ` : ""}Highest points wins, then opponents' points, then sign-up order.`
         : "Single elimination: win and you go through, lose and you're out. If the player count isn't a power of two, some players get a round-1 bye.");
-    lines.push(t.format === "swiss"
-        ? `If a round runs out: ${bestOf > 1 ? "the player ahead in the series wins; " : ""}a player who showed up beats one who didn't. If neither played, nobody scores.`
-        : `If a round runs out: ${bestOf > 1 ? "the player ahead in the series wins; " : ""}a player who showed up beats one who didn't. If neither (or both without finishing) the higher seed — the earlier sign-up — advances.`);
+    const rule = timeoutRuleOf(t);
+    const level = rule === "coin" ? "a <b>coin flip</b> decides the winner."
+        : rule === "organiser" ? "the <b>organiser picks the winner</b> (until then you can still finish the game)."
+        : t.format === "swiss" ? "nobody scores." : "the higher seed — the earlier sign-up — advances.";
+    lines.push(`If a round runs out: ${bestOf > 1 ? "the player ahead in the series wins; " : ""}a player who showed up beats one who didn't. Otherwise ${level} The organiser can correct any result afterwards.`);
+    const clock = clockMinutesOf(t);
+    if (clock) lines.push(`<b>Game clock:</b> each player has <b>${clock} minutes</b> per game, and it only runs during their own turn. Whoever runs out of time loses that game.`);
     const slugs = collectionsOf(t);
     lines.push(t.matchType === "draft"
         ? `Draft battle: both players open <b>${draft.packs}</b> packs from ${slugs.length ? "the chosen collections" : "every collection"}, then build a <b>${draft.deckSize}-card</b> deck on a <b>${draft.minutes}-minute</b> timer.`
@@ -547,6 +576,7 @@ function detailHtml(t) {
         </div>
         <div class="tn-chips">${settingChips(t)}${collectionChips(t, 99)}</div>
         ${t.description ? `<p class="tn-desc full">${esc(t.description)}</p>` : ""}
+        ${organiserStrip(t)}
         ${meStrip(t, now)}
         <section><h3>How it works</h3>${rulesHtml(t)}</section>
         <section><h3>Players (${playerCount(t)})</h3><div class="tn-players">${players}</div></section>
@@ -763,6 +793,14 @@ function syncForm() {
     $("tnSwissRoundsField").hidden = !swiss;
     $("tnDeckDeadlineField").hidden = draft || !$("tnRequireDeck").checked;
     $("tnRoundCustom").hidden = $("tnRoundLength").value !== "custom";
+    const clock = Number($("tnClock").value) || 0;
+    $("tnTimeoutHint").textContent =
+        ($("tnTimeoutRule").value === "organiser"
+            ? "When a round runs out with a match still level, you'll get a red alert to pick the winner — the next round waits for you. "
+            : "When a round runs out with a match still level, a coin flip picks the winner. ")
+        + "A player ahead in a best-of series, or the only one who showed up, wins either way. You can change any result later. "
+        + (clock ? `Each player gets ${clock} minutes per game, ticking only on their own turn — run out and you lose that game.`
+                 : "No game clock: games can take as long as they need.");
     updateRulesHint();
 }
 
@@ -802,6 +840,11 @@ function fillForm(t) {
     fillRoundLengthOptions();
     setRoundLength(editing ? Number(t.roundMinutes) : 1440);
     $("tnRoundMode").value = editing && t.roundMode === "full" ? "full" : "asap";
+    $("tnTimeoutRule").value = editing && timeoutRuleOf(t) === "organiser" ? "organiser" : "coin";
+    const clock = editing ? clockMinutesOf(t) : DEFAULT_CLOCK_MINUTES;
+    const clockChoices = CLOCK_OPTIONS.includes(clock) ? CLOCK_OPTIONS : [...CLOCK_OPTIONS, clock].sort((a, b) => a - b);
+    $("tnClock").innerHTML = clockChoices.map(m => `<option value="${m}">${m ? `${m} minutes each` : "Off — no clock"}</option>`).join("");
+    $("tnClock").value = String(clock);
     $("tnSwissRounds").value = editing && t.roundsSetting ? String(t.roundsSetting) : "";
 
     $("tnMinPlayers").value = editing ? minPlayersOf(t) : 2;
@@ -864,6 +907,8 @@ function readForm() {
         startAt: new Date($("tnStart").value).getTime(),
         roundMinutes: readRoundLength(),
         roundMode: $("tnRoundMode").value,
+        timeoutRule: $("tnTimeoutRule").value,
+        clockMinutes: Number($("tnClock").value) || 0,
         roundsSetting: swiss && rounds ? Number(rounds) : undefined,
         minPlayers: Number($("tnMinPlayers").value),
         maxPlayers: Number($("tnMaxPlayers").value),
@@ -894,7 +939,7 @@ $("tnCollectionList").addEventListener("change", (event) => {
     if (box.checked) state.picked.add(box.value); else state.picked.delete(box.value);
     renderCollectionPicker();
 });
-document.querySelectorAll("input[name='tnMatchType'], input[name='tnFormat'], #tnRequireDeck, #tnRoundLength")
+document.querySelectorAll("input[name='tnMatchType'], input[name='tnFormat'], #tnRequireDeck, #tnRoundLength, #tnTimeoutRule, #tnClock")
     .forEach(input => input.addEventListener("change", syncForm));
 
 $("tnCreateForm").addEventListener("submit", async (event) => {
@@ -1008,7 +1053,9 @@ function onList(list) {
     // ?t=<id> opens that tournament straight away (the "Copy link" button).
     if (state.deepLinkId && !state.deepLinked && list.some(t => t.id === state.deepLinkId)) {
         state.deepLinked = true;
-        openDetail(state.deepLinkId);
+        const t = getTournament(state.deepLinkId);
+        if (state.deepLinkManage && isCreator(t)) manage.open(t.id, state.deepLinkManage === "matches" ? "matches" : "players");
+        else openDetail(state.deepLinkId);
     }
 }
 
