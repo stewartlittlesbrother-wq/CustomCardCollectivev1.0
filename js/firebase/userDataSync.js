@@ -57,6 +57,7 @@ const SYNC_SPECS = [
     { key: "optcgOcrEnabled",                            mode: "lww" },
     { key: "custom-cards-sim-sfx-muted-v1",              mode: "lww" },
     { key: "custom-img-playmat-v1",                      mode: "lww" },   // playmat
+    { key: "custom-img-playmat-style-v1",                mode: "lww" },   // playmat zones / both sides
     { key: "custom-img-cardback-v1",                     mode: "lww" },
     { key: "custom-img-donback-v1",                      mode: "lww" },
     { key: "cc_builder_cards_big",                       mode: "lww" },

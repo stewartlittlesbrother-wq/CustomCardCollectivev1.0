@@ -28,7 +28,7 @@
   <!-- Deck Builder new layout: on for everyone unless someone switched back to the classic one
        (decided before first paint so there is no flash). ?deckv2=0 / ?deckv2=1 switch it. -->
   <script>(function(){var on=true;try{var p=new URLSearchParams(location.search).get("deckv2");if(p==="1"||p==="0"){localStorage.setItem("cc_deck_v2",p);var u=new URL(location.href);u.searchParams.delete("deckv2");history.replaceState(null,"",u.pathname+u.search+u.hash);}if(localStorage.getItem("cc_deck_v2")==="0")on=false;}catch(e){}if(on)document.documentElement.classList.add("deck-v2");})();</script>
-  <link rel="stylesheet" href="styles.css?v=news-1">
+  <link rel="stylesheet" href="styles.css?v=playmat-1">
   <link rel="stylesheet" href="css/deck-v2.css?v=deckv2-5">
   <link rel="stylesheet" href="css/multiplayer-tab.css?v=mpx-2">
 </head>
@@ -127,13 +127,13 @@
           <section class="home-section" aria-labelledby="homeNewTitle">
             <h2 class="home-section-title" id="homeNewTitle">What's new</h2>
             <ul class="home-news">
+              <li><span class="home-news-badge">NEW</span><div><strong>Playmat studio</strong><span>Settings → Playmat: pick a picture (or a built-in one), drag and zoom to crop it to your side of the board with the zones drawn on top, adjust the look, and check it on computer and phone before saving.</span></div></li>
               <li><span class="home-news-badge">NEW</span><div><strong>Tournament alerts</strong><span>Red pop-ups in the corner on every page: your round has started, your match is due (a day, an hour, then 30% down to 1% of the round left), the organiser needs to pick a winner, or a tournament has finished.</span></div></li>
               <li><span class="home-news-badge">NEW</span><div><strong>Game clock</strong><span>Each player gets their own time for the game (18 minutes by default) that only runs on their turn — run out and you lose. Pick it when you create a room or a tournament.</span></div></li>
               <li><span class="home-news-badge">NEW</span><div><strong>Tournaments, your rules</strong><span>Organisers choose what happens to a match that isn't played in time — a coin flip, or they pick the winner — and can change any result, in any round, at any time.</span></div></li>
               <li><span class="home-news-badge">NEW</span><div><strong>Multiplayer, redesigned</strong><span>Now a normal tab with no reloading: invite links, a face-off lobby with chat, Rejoin for games in progress, live games to watch and your win/loss record.</span></div></li>
               <li><span class="home-news-badge fix">FIXED</span><div><strong>Official cards in deck images</strong><span>Save as image now shows the official One Piece cards in your deck instead of blank boxes with their names.</span></div></li>
-              <li><span class="home-news-badge fix">FIXED</span><div><strong>Steadier online games</strong><span>Joining a match no longer crashes the page ("Aw, Snap"), games no longer reset to the dice roll, mulligans stick, and cards you send to the top or bottom of your deck show up for your opponent straight away.</span></div></li>
-            </ul>
+              </ul>
           </section>
 
         </div>
@@ -220,14 +220,12 @@
             </p>
 
             <div class="custom-image-row" data-custom-image="playmat">
-              <div class="custom-image-preview" id="customPlaymatPreview"></div>
+              <div class="custom-image-preview playmat-preview" id="customPlaymatPreview"></div>
               <div class="custom-image-body">
                 <strong>Playmat</strong>
-                <small>The background behind both play areas.</small>
+                <small>Your side of the board — your opponent sees it too. Crop the picture, adjust the look and see it on the board before you save.</small>
                 <div class="custom-image-actions">
-                  <label class="red-button custom-image-upload">Upload
-                    <input type="file" accept="image/png,image/jpeg,image/webp" data-custom-image-input="playmat" hidden>
-                  </label>
+                  <button type="button" class="red-button" data-playmat-studio>Open playmat studio</button>
                   <button type="button" class="ghost" data-custom-image-clear="playmat" hidden>Remove</button>
                 </div>
               </div>
@@ -973,13 +971,13 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=262"></script>
+  <script src="js/version.js?v=263"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=262"></script>
+  <script src="js/auth-ui.js?v=263"></script>
   <script src="js/cards/cardCollections.js?v=draft-1"></script>
   <script src="js/cards/decks.js?v=creation-10"></script>
   <script src="js/manual-play.js?v=manual-28"></script>
-  <script src="app.js?v=creation-137"></script>
+  <script src="app.js?v=creation-138"></script>
   <script src="js/deck-v2.js?v=deckv2-5"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the

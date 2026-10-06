@@ -79,12 +79,23 @@ const CUSTOM_IMAGE_KEYS = {
 };
 let onlineCosmetics = {}; // { p1: {...}, p2: {...} } from the match
 
+// Playmat display options from the Playmat Studio: how the zones sit on top of the
+// picture ("glass" | "light" | "outline") and whether Practice uses it on both sides.
+const PLAYMAT_STYLE_KEY = "custom-img-playmat-style-v1";
+// Set only when the seat has a playmat (so phones without one keep their own look).
+const ZONE_BACKGROUNDS = { glass: "rgba(15, 20, 28, .42)", light: "rgba(15, 20, 28, .16)", outline: "transparent" };
+
 function getLocalCosmetics() {
     const read = key => { try { return localStorage.getItem(key) || ""; } catch { return ""; } };
+    let style = {};
+    try { style = JSON.parse(read(PLAYMAT_STYLE_KEY) || "{}") || {}; } catch { style = {}; }
     return {
         playmat: read(CUSTOM_IMAGE_KEYS.playmat),
         cardBack: read(CUSTOM_IMAGE_KEYS.cardBack),
-        donBack: read(CUSTOM_IMAGE_KEYS.donBack)
+        donBack: read(CUSTOM_IMAGE_KEYS.donBack),
+        // Sent with the rest, so your opponent sees your side the way you designed it.
+        playmatZones: ZONE_BACKGROUNDS[style.zones] !== undefined ? style.zones : "glass",
+        playmatBothSides: Boolean(style.bothSides)
     };
 }
 
@@ -103,10 +114,17 @@ function cosmeticTargetsForSeat(playerKey) {
 function applyCosmeticsToSeat(playerKey, cos = {}) {
     const isData = v => typeof v === "string" && v.startsWith("data:");
     const set = (el, name, val) => { if (val) el.style.setProperty(name, val); else el.style.removeProperty(name); };
+    const hasMat = isData(cos.playmat);
+    const zones = hasMat && ZONE_BACKGROUNDS[cos.playmatZones] !== undefined ? cos.playmatZones : "glass";
     cosmeticTargetsForSeat(playerKey).forEach(el => {
-        set(el, "--custom-playmat-bg", isData(cos.playmat) ? `url("${cos.playmat}") center / cover no-repeat` : "");
+        set(el, "--custom-playmat-bg", hasMat ? `url("${cos.playmat}") center / cover no-repeat` : "");
         set(el, "--custom-card-back", isData(cos.cardBack) ? `url("${cos.cardBack}")` : "");
         set(el, "--custom-don-back", isData(cos.donBack) ? `url("${cos.donBack}")` : "");
+        if (el.classList.contains("play-area")) {
+            set(el, "--zone-bg", hasMat ? ZONE_BACKGROUNDS[zones] : "");
+            if (zones === "glass") el.removeAttribute("data-mat-zones");
+            else el.setAttribute("data-mat-zones", zones);
+        }
     });
 }
 
@@ -119,7 +137,10 @@ function applyAllCosmetics() {
     const own = getLocalCosmetics();
     if (!isOnlineMatch) {
         applyCosmeticsToSeat("player1", own);   // solo: your field
-        applyCosmeticsToSeat("player2", {});
+        // Practice: the other side too if the Playmat Studio says so (card backs
+        // stay yours only - the opponent side keeps the standard backs).
+        applyCosmeticsToSeat("player2", own.playmatBothSides
+            ? { playmat: own.playmat, playmatZones: own.playmatZones } : {});
         return;
     }
     const ownKey = getOwnOnlinePlayerKey();

@@ -5004,7 +5004,26 @@ function setupCustomImages() {
   document.querySelectorAll("[data-custom-image-clear]").forEach(btn => {
     btn.addEventListener("click", () => clearCustomImage(btn.getAttribute("data-custom-image-clear")));
   });
+  // The playmat has its own editor (crop, look, zones, computer/phone preview).
+  document.querySelectorAll("[data-playmat-studio]").forEach(btn => {
+    btn.addEventListener("click", () => openPlaymatStudioDialog());
+  });
   Object.keys(CUSTOM_IMAGE_KEYS).forEach(refreshCustomImagePreview);
+  document.addEventListener("cc-sync-applied", () => Object.keys(CUSTOM_IMAGE_KEYS).forEach(refreshCustomImagePreview));
+}
+
+function openPlaymatStudioDialog(file = null) {
+  import("./js/playmatStudio.js?v=263")
+    .then(mod => mod.openPlaymatStudio({
+      file,
+      toast,
+      sync: syncPush,
+      onSaved: () => refreshCustomImagePreview("playmat")
+    }))
+    .catch(error => {
+      console.warn(error);
+      toast("Couldn't open the playmat studio — check your connection and try again.");
+    });
 }
 
 // New / edit collection dialog. slug = null creates a new one; otherwise edits

@@ -2714,12 +2714,20 @@ body {
         0 8px 20px rgba(0, 0, 0, .28);
 }
 
+/* --zone-bg is set per seat from the Playmat Studio's "Zones on top" choice
+   (light glass / outlines only); unset = the normal dark glass. */
 .area,
 .character-slot,
 .life-area {
-    background: rgba(15, 20, 28, .42);
+    background: var(--zone-bg, rgba(15, 20, 28, .42));
     color: var(--sim-ink);
     text-shadow: 0 2px 2px rgba(0, 0, 0, .7);
+}
+.play-area[data-mat-zones="outline"] :is(.area, .character-slot, .life-area) {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .38), 0 4px 12px rgba(0, 0, 0, .18) !important;
+}
+.play-area[data-mat-zones="light"] :is(.area, .character-slot, .life-area) {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14), 0 6px 16px rgba(0, 0, 0, .22) !important;
 }
 
 .hand {
@@ -4885,15 +4893,15 @@ html.touch-device .game-log {
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MOBILE BOARD REDESIGN (touch only) — increment: dark playmat theme.
-   Gated to html.touch-device so desktop is untouched. !important so it also
-   shows over any custom playmat image while we're prototyping the new look.
+   Gated to html.touch-device so desktop is untouched. A player's own playmat
+   (Playmat Studio) still wins; without one this dark theme shows.
    ═══════════════════════════════════════════════════════════════════════════ */
 html.touch-device .play-area,
 html.touch-device .opponent-area {
-    background:
+    background: var(--custom-playmat-bg,
         radial-gradient(120% 95% at 50% 0%, rgba(52, 209, 196, .10), rgba(52, 209, 196, 0) 55%),
         radial-gradient(130% 100% at 50% 100%, #2a2340 0%, rgba(42, 35, 64, 0) 60%),
-        linear-gradient(#1b1730, #120f1e) !important;
+        linear-gradient(#1b1730, #120f1e)) !important;
     border-color: rgba(255, 255, 255, .10) !important;
 }
 html.touch-device .game-board {
@@ -5078,14 +5086,15 @@ html.touch-device .manual-sidebar { padding-top: 44px !important; }
    restyle every zone as the mockup's soft dark rounded slots. */
 html.touch-device .play-area {
     border: none !important;
-    background: transparent !important;
+    /* A playmat from the Playmat Studio shows behind your zones on phones too. */
+    background: var(--custom-playmat-bg, transparent) !important;
 }
 html.touch-device .play-area .area,
 html.touch-device .play-area .character-slot,
 html.touch-device .play-area .life-area {
     border: 1px solid rgba(255, 255, 255, .12) !important;
     border-radius: 11px !important;
-    background: rgba(255, 255, 255, .045) !important;
+    background: var(--zone-bg, rgba(255, 255, 255, .045)) !important;
     box-shadow: none !important;
     backdrop-filter: none !important;
     color: rgba(255, 255, 255, .34);
@@ -5183,7 +5192,7 @@ html.touch-device .play-area {
         "dband dband dband dband  life dondeck" !important;
     gap: var(--mgap) !important;
     padding: 0 !important;
-    background: transparent !important;
+    background: var(--custom-playmat-bg, transparent) !important;
     border: none !important;
     align-items: stretch !important;
     justify-items: stretch !important;

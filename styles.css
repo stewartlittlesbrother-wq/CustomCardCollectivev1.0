@@ -5824,6 +5824,13 @@ button.trash-area {
   text-align: center;
 }
 .custom-image-preview:not(.has-image)::after { content: "No image"; }
+/* The playmat is wide (your side of the board is about 3 x 1). */
+.custom-image-preview.playmat-preview { width: 150px; height: 49px; }
+.custom-image-preview.playmat-preview:not(.has-image) {
+  background: linear-gradient(135deg, #d8e7f6 0%, #7da9cb 36%, #2d6399 68%, #183d68 100%);
+  color: rgba(255, 255, 255, .8);
+}
+.custom-image-preview.playmat-preview:not(.has-image)::after { content: "Standard"; }
 .custom-image-body {
   display: flex;
   flex-direction: column;
