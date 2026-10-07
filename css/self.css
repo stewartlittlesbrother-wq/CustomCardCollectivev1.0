@@ -372,8 +372,7 @@ body {
 
     padding: 12px;
     box-sizing: border-box;
-
-    backdrop-filter: blur(2px);
+    /* (No backdrop blur: it smeared custom playmats under every zone.) */
 }
 
 /* =========================
@@ -694,7 +693,9 @@ body {
     border: 3px solid black;
     border-radius: 8px;
 
-    background: rgba(120, 120, 120, 0.35);
+    /* --zone-tray is "transparent" when the seat has a custom playmat, so the
+       character row doesn't wash the picture out in grey. */
+    background: var(--zone-tray, rgba(120, 120, 120, 0.35));
 
     padding: 12px;
     box-sizing: border-box;

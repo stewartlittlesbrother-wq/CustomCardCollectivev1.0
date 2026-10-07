@@ -122,6 +122,7 @@ function applyCosmeticsToSeat(playerKey, cos = {}) {
         set(el, "--custom-don-back", isData(cos.donBack) ? `url("${cos.donBack}")` : "");
         if (el.classList.contains("play-area")) {
             set(el, "--zone-bg", hasMat ? ZONE_BACKGROUNDS[zones] : "");
+            set(el, "--zone-tray", hasMat ? "transparent" : "");
             if (zones === "glass") el.removeAttribute("data-mat-zones");
             else el.setAttribute("data-mat-zones", zones);
         }
