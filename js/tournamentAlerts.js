@@ -4,6 +4,9 @@
 // 1% of the round left), the organiser has to pick a winner, the tournament ended.
 // What to show is decided by ./core/tournamentAlertRules.js; this file draws it.
 //
+// A bell in the top bar keeps the last alerts (with an unread count), so one that was
+// dismissed or missed isn't lost.
+//
 // Loaded by auth-ui.js once someone is signed in (tournaments need an account).
 // It also keeps the player's tournaments moving: rounds only advance when a
 // participant's browser runs the rules (there is no server), so while the site is
@@ -12,10 +15,12 @@
 import { ref, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { database } from "./firebase/firebaseApp.js";
 import { BASE_PATH } from "./firebase/tournamentPaths.js?v=tour-3";
-import { tick } from "./core/tournamentEngine.js?v=tour-8";
-import { alertsFor } from "./core/tournamentAlertRules.js?v=tour-8";
+import { tick } from "./core/tournamentEngine.js?v=tab-1";
+import { alertsFor } from "./core/tournamentAlertRules.js?v=tab-1";
 
-const STORE_KEY = "cc_tn_alerts_v1";          // { dismissed: {key: ms}, announced: {key: ms} }
+const STORE_KEY = "cc_tn_alerts_v1";          // { dismissed: {key: ms}, announced: {key: ms}, history: [...] }
+const SERVICE_URL = "./firebase/tournamentService.js?v=tab-1";
+const HISTORY_MAX = 40;
 const STICKY_SNOOZE_MS = 20 * 60 * 1000;       // a dismissed "you must decide" comes back after this
 const KEEP_MS = 30 * 24 * 60 * 60 * 1000;      // forget dismissals after a month
 const MAX_SHOWN = 3;
@@ -23,8 +28,9 @@ const REFRESH_MS = 20 * 1000;                  // re-check deadlines
 const NUDGE_MS = 60 * 1000;                    // keep tournaments moving
 
 const onBoard = /\/self\.html$/i.test(location.pathname);
-const onTournamentsPage = /\/tournaments\.html$/i.test(location.pathname);
-const tournamentsUrl = new URL("../html/tournaments.html", import.meta.url);
+const appUrl = new URL("../index.html", import.meta.url);
+// The Tournaments tab keeps its own tournaments moving while it's on screen.
+const tournamentsTabVisible = () => Boolean(document.querySelector("#tournamentsView.view.active"));
 
 // On the game board the alerts start folded into a small pill (unless something new
 // arrives) so they never sit on top of the game.
@@ -36,14 +42,15 @@ const run = { uid: "", list: [], unsub: null, refresh: null, nudge: null, expand
 function readStore() {
     try {
         const raw = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
-        return { dismissed: raw.dismissed || {}, announced: raw.announced || {} };
-    } catch { return { dismissed: {}, announced: {} }; }
+        return { dismissed: raw.dismissed || {}, announced: raw.announced || {}, history: Array.isArray(raw.history) ? raw.history : [] };
+    } catch { return { dismissed: {}, announced: {}, history: [] }; }
 }
 function writeStore(store) {
     const cutoff = Date.now() - KEEP_MS;
     ["dismissed", "announced"].forEach(part => {
         Object.keys(store[part]).forEach(key => { if (store[part][key] < cutoff) delete store[part][key]; });
     });
+    store.history = (store.history || []).filter(h => h && h.at >= cutoff).slice(0, HISTORY_MAX);
     try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch { /* private mode: per page only */ }
 }
 
@@ -89,7 +96,35 @@ function injectStyles() {
 .cc-tn-more:hover, .cc-tn-pill:hover { filter: brightness(1.12); }
 @keyframes ccTnIn { from { opacity: 0; transform: translateY(16px) scale(.96); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .cc-tn-alert.fresh { animation: none; } }
-@media (max-width: 480px) { #ccTnAlerts { right: 10px; left: 10px; width: auto; align-items: stretch; } }`;
+@media (max-width: 480px) { #ccTnAlerts { right: 10px; left: 10px; width: auto; align-items: stretch; } }
+.cc-tn-bell { position: relative; display: inline-flex; align-items: center; }
+.cc-tn-bell .cc-tn-bell-btn { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
+  min-height: 0; padding: 0; border-radius: 9px; border: 1px solid rgba(255, 255, 255, .14); background: rgba(255, 255, 255, .06);
+  color: #dfe4ec; box-shadow: none; filter: none; cursor: pointer; }
+.cc-tn-bell .cc-tn-bell-btn:hover { background: rgba(255, 255, 255, .14); box-shadow: none; filter: none; }
+.cc-tn-bell .cc-tn-bell-btn[aria-expanded="true"] { border-color: rgba(77, 255, 158, .55); }
+.cc-tn-bell-n { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  background: #e0313c; color: #fff; font: 800 11px/18px system-ui, sans-serif; text-align: center; box-shadow: 0 0 0 2px #0d0f12; }
+.cc-tn-bell-panel { position: absolute; top: calc(100% + 10px); right: 0; z-index: 100001; width: min(360px, calc(100vw - 24px));
+  max-height: min(70vh, 520px); overflow-y: auto; border-radius: 12px; border: 1px solid #263029; background: #101614; color: #f3f8f5;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .55); font: 14px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; text-align: left; }
+.cc-tn-bell-head { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 11px 14px; background: #101614; border-bottom: 1px solid #263029; }
+.cc-tn-bell .cc-tn-bell-clear { min-height: 0; padding: 0; border: 0; background: none; color: #9db1a8; font: 600 12.5px/1.2 inherit;
+  text-decoration: underline; cursor: pointer; box-shadow: none; filter: none; }
+.cc-tn-bell-list { list-style: none; margin: 0; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.cc-tn-bell .cc-tn-bell-item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; width: 100%; min-height: 0;
+  padding: 9px 10px; border: 0; border-radius: 9px; background: none; color: inherit; text-align: left; font: inherit; font-weight: 400;
+  cursor: pointer; box-shadow: none; filter: none; }
+.cc-tn-bell .cc-tn-bell-item:hover:not(:disabled) { background: rgba(255, 255, 255, .06); box-shadow: none; filter: none; }
+.cc-tn-bell .cc-tn-bell-item:disabled { cursor: default; opacity: 1; filter: none; }
+.cc-tn-bell .cc-tn-bell-item.unread { background: rgba(224, 49, 60, .12); box-shadow: inset 3px 0 0 #e0313c; }
+.cc-tn-bell-item .i { font-size: 18px; line-height: 1.2; }
+.cc-tn-bell-item .t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cc-tn-bell-item strong { font-size: 13.5px; font-weight: 750; overflow-wrap: anywhere; }
+.cc-tn-bell-item small { color: #b7c7be; font-size: 12.5px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cc-tn-bell-item em { color: #8fa398; font-size: 11.5px; font-style: normal; }
+.cc-tn-bell-empty { margin: 0; padding: 16px 14px; color: #9db1a8; font-size: 13px; }`;
     document.head.appendChild(style);
 }
 
@@ -108,10 +143,20 @@ function container() {
 }
 
 function linkFor(action) {
-    const url = new URL(tournamentsUrl);
+    const url = new URL(appUrl);
+    url.searchParams.set("view", "tournaments");
     if (action && action.tid) url.searchParams.set("t", action.tid);
     if (action && action.manage) url.searchParams.set("manage", action.manage);
     return url.href;
+}
+
+// Go to what an alert is about. In the app it's the Tournaments tab (no reload); on
+// the game board a new browser tab, so the game in progress is never left.
+function openAction(action) {
+    if (!action) return;
+    if (onBoard) { window.open(linkFor(action), "_blank", "noopener"); return; }
+    if (typeof window.ccOpenTournament === "function") { window.ccOpenTournament(action.tid || "", action.manage || ""); return; }
+    location.href = linkFor(action);
 }
 
 let current = [];   // the alerts being shown, in order
@@ -127,18 +172,24 @@ function render() {
     const box = container();
     const now = Date.now();
     current = visibleAlerts(now);
-    if (!current.length) { box.innerHTML = ""; run.rendered.clear(); return; }
 
-    // Brand-new alerts (never seen in any tab): a chime, and on the game board they
-    // stay open a little before folding away so they don't cover the game.
+    // Brand-new alerts (never seen in any tab): a chime, a line in the bell's history,
+    // and on the game board they stay open a little before folding away.
     const store = readStore();
     const brandNew = current.filter(a => !store.announced[a.key]);
     if (brandNew.length) {
-        brandNew.forEach(a => { store.announced[a.key] = now; });
+        brandNew.forEach(a => {
+            store.announced[a.key] = now;
+            store.history = store.history.filter(h => h.key !== a.key);
+            store.history.unshift({ key: a.key, icon: a.icon, title: a.title, body: a.body, action: a.action || null, at: now, read: false });
+        });
         writeStore(store);
         chime();
         if (onBoard) { run.minimized = false; scheduleMinimize(); }
     }
+
+    renderBell();
+    if (!current.length) { box.innerHTML = ""; run.rendered.clear(); return; }
 
     if (run.minimized || (dialogOpen() && !run.forceOpen)) {
         box.innerHTML = `<button type="button" class="cc-tn-pill" data-tn="expand" aria-label="Show tournament alerts">🔔 ${current.length} tournament alert${current.length === 1 ? "" : "s"}</button>`;
@@ -203,9 +254,8 @@ function onClick(event) {
             const alert = current.find(a => a.key === key);
             if (!alert) return;
             if (!alert.sticky) dismiss(key);
-            // Never navigate away from a game in progress: open the tournament in a new tab.
-            if (onBoard) window.open(linkFor(alert.action), "_blank", "noopener");
-            else location.href = linkFor(alert.action);
+            markRead(key);
+            openAction(alert.action);
             break;
         }
     }
@@ -237,10 +287,117 @@ function chime() {
     try { if (audio && audio.state === "suspended") audio.resume(); } catch { /* ignore */ }
 }, { passive: true }));
 
+// ── the bell (alert history) ─────────────────────────────────────────────────
+// Lives in the top bar's right-hand slot (next to the account chip) on pages that
+// have one. Opening it marks everything read; items stay highlighted while open.
+
+let bellOpen = false;
+let bellUnreadAtOpen = new Set();
+
+function markRead(key) {
+    const store = readStore();
+    let changed = false;
+    store.history.forEach(h => { if (h.key === key && !h.read) { h.read = true; changed = true; } });
+    if (changed) { writeStore(store); renderBell(); }
+}
+
+function ago(ms) {
+    const minutes = Math.round((Date.now() - ms) / 60000);
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function bellHost() {
+    const slot = document.querySelector(".top-nav .nav-actions");
+    if (!slot) return null;
+    let bell = slot.querySelector(".cc-tn-bell");
+    if (!bell) {
+        bell = document.createElement("div");
+        bell.className = "cc-tn-bell";
+        bell.addEventListener("click", onBellClick);
+        slot.prepend(bell);
+    }
+    return bell;
+}
+
+function renderBell() {
+    if (!run.uid) return;
+    const bell = bellHost();
+    if (!bell) return;
+    const history = readStore().history;
+    const unread = history.filter(h => !h.read).length;
+    const items = history.map(h => {
+        const fresh = bellUnreadAtOpen.has(h.key) || !h.read;
+        return `<li><button type="button" class="cc-tn-bell-item${fresh ? " unread" : ""}" data-bell="open" data-key="${esc(h.key)}"${h.action ? "" : " disabled"}>
+            <span class="i" aria-hidden="true">${esc(h.icon || "🏆")}</span>
+            <span class="t"><strong>${esc(h.title)}</strong><small>${esc(h.body)}</small><em>${esc(ago(h.at))}</em></span>
+        </button></li>`;
+    }).join("");
+    const html = `
+        <button type="button" class="cc-tn-bell-btn" data-bell="toggle" aria-expanded="${bellOpen}" aria-haspopup="dialog"
+            aria-label="Tournament alerts${unread ? ` (${unread} new)` : ""}" title="Tournament alerts">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+            ${unread ? `<span class="cc-tn-bell-n">${unread > 9 ? "9+" : unread}</span>` : ""}
+        </button>
+        <div class="cc-tn-bell-panel" role="dialog" aria-label="Tournament alerts"${bellOpen ? "" : " hidden"}>
+            <div class="cc-tn-bell-head"><strong>Tournament alerts</strong>
+                ${history.length ? `<button type="button" class="cc-tn-bell-clear" data-bell="clear">Clear</button>` : ""}</div>
+            ${history.length ? `<ul class="cc-tn-bell-list">${items}</ul>`
+                : `<p class="cc-tn-bell-empty">Nothing yet — alerts about your tournaments (your round starting, a match due, results) show up here.</p>`}
+        </div>`;
+    // Only redraw when something changed (keeps the list's scroll position).
+    if (bell.__html !== html) { bell.__html = html; bell.innerHTML = html; }
+}
+
+function setBellOpen(open) {
+    bellOpen = open;
+    if (open) {
+        const store = readStore();
+        bellUnreadAtOpen = new Set(store.history.filter(h => !h.read).map(h => h.key));
+        if (bellUnreadAtOpen.size) { store.history.forEach(h => { h.read = true; }); writeStore(store); }
+    } else {
+        bellUnreadAtOpen = new Set();
+    }
+    renderBell();
+}
+
+function onBellClick(event) {
+    const button = event.target.closest("[data-bell]");
+    if (!button) return;
+    event.stopPropagation();
+    switch (button.dataset.bell) {
+        case "toggle": setBellOpen(!bellOpen); break;
+        case "clear": {
+            const store = readStore();
+            store.history = [];
+            writeStore(store);
+            bellUnreadAtOpen = new Set();
+            renderBell();
+            break;
+        }
+        case "open": {
+            const item = readStore().history.find(h => h.key === button.dataset.key);
+            setBellOpen(false);
+            if (item && item.action) openAction(item.action);
+            break;
+        }
+    }
+}
+document.addEventListener("click", (event) => {
+    if (bellOpen && !event.target.closest(".cc-tn-bell")) setBellOpen(false);
+});
+document.addEventListener("keydown", (event) => {
+    if (bellOpen && event.key === "Escape") setBellOpen(false);
+});
+
 // ── keeping tournaments moving ───────────────────────────────────────────────
 
 async function nudge() {
-    if (!run.uid || run.nudging || onTournamentsPage) return;   // that page does its own
+    if (!run.uid || run.nudging || tournamentsTabVisible()) return;   // that tab does its own
     const now = Date.now();
     const due = run.list.filter(t => {
         const involved = (t.players && t.players[run.uid]) || t.createdBy === run.uid;
@@ -252,7 +409,7 @@ async function nudge() {
     if (!due.length) return;
     run.nudging = true;
     try {
-        const service = await import("./firebase/tournamentService.js?v=tour-8");
+        const service = await import(SERVICE_URL);
         for (const t of due) {
             run.nudgedAt.set(t.id, Date.now());
             try { await service.syncTournament(t.id, run.uid); }
@@ -289,6 +446,7 @@ export function stopTournamentAlerts() {
     run.unsub = null;
     const box = document.getElementById("ccTnAlerts");
     if (box) box.innerHTML = "";
+    document.querySelector(".cc-tn-bell")?.remove();
 }
 
 // Dismissed in another tab -> gone here too.

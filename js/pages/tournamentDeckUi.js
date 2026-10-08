@@ -10,8 +10,8 @@ import {
     getSubmittedDeck,
     lookupCards,
     deckListText
-} from "../firebase/tournamentDecks.js?v=tour-3";
-import { collectionsOf, bannedOf } from "../core/tournamentEngine.js?v=tour-8";
+} from "../firebase/tournamentDecks.js?v=tab-1";
+import { collectionsOf, bannedOf } from "../core/tournamentEngine.js?v=tab-1";
 
 // ── submitting ───────────────────────────────────────────────────────────────
 
@@ -58,7 +58,7 @@ export function openSubmitDialog(t, ctx) {
             ${current ? `<div class="tn-me"><div><strong>✅ Submitted: ${esc(current.name)}</strong><small>${esc(fmtDate(current.submittedAt))}</small></div></div>` : ""}
             ${decks.length
                 ? `<div class="tn-choice tn-choice-1">${rows}</div>`
-                : `<div class="tn-empty">You don't have any saved decks yet. Build one in the <a href="../index.html">Deck Builder</a>, then come back.</div>`}
+                : `<div class="tn-empty">You don't have any saved decks yet. Build one in the <button type="button" class="tn-linkbtn" data-go-builder>Deck Builder</button>, then come back.</div>`}
             <div id="tnDeckProblems" class="tn-error" hidden></div>
             <div class="tn-modal-actions">
                 <button type="button" class="tn-btn" id="tnDeckCancel">Close</button>
@@ -66,6 +66,8 @@ export function openSubmitDialog(t, ctx) {
             </div>`;
 
         $("tnDeckCancel").onclick = () => { overlay.hidden = true; };
+        const goBuilder = body.querySelector("[data-go-builder]");
+        if (goBuilder) goBuilder.onclick = () => { overlay.hidden = true; window.ccTnHost?.showView?.("builder"); };
         $("tnDeckSubmit").onclick = async () => {
             const pick = body.querySelector("input[name='tnDeckPick']:checked");
             const problems = $("tnDeckProblems");
@@ -109,7 +111,7 @@ function tilesHtml(sub) {
     const entries = Array.isArray(sub.cards) ? sub.cards : Object.values(sub.cards || {});
     return entries.map(c => `<figure class="tn-card-tile${c.leader ? " leader" : ""}" data-number="${esc(c.number)}">
         <div class="tn-card-art"><span class="tn-card-fallback">${esc(c.name || c.number)}</span></div>
-        <figcaption><b>${c.leader ? "Leader" : `×${esc(c.qty)}`}</b> ${esc(c.name || "")}<small>${esc(c.number)}</small></figcaption>
+        <figcaption><b>${c.leader ? "Leader" : `×${esc(c.qty)}`}</b> <span class="nm">${esc(c.name || "")}</span><small>${esc(c.number)}</small></figcaption>
     </figure>`).join("");
 }
 
@@ -120,7 +122,13 @@ async function fillImages(sub) {
         if (!viewing || viewing.sub !== sub) return;
         $("tnDeckViewBody").querySelectorAll(".tn-card-tile").forEach(tile => {
             const info = found.get(tile.dataset.number);
-            if (!info || !info.imageUrl) return;
+            if (!info) return;
+            // Decks taken from a game only know card numbers: fill in the names.
+            const nm = tile.querySelector(".nm");
+            if (nm && !nm.textContent && info.name) nm.textContent = info.name;
+            const fallback = tile.querySelector(".tn-card-fallback");
+            if (fallback && info.name && fallback.textContent === tile.dataset.number) fallback.textContent = info.name;
+            if (!info.imageUrl) return;
             const art = tile.querySelector(".tn-card-art");
             const img = document.createElement("img");
             img.alt = info.name || tile.dataset.number;
@@ -141,7 +149,7 @@ export function openViewDialog(sub, who) {
         .filter(c => !c.leader).reduce((a, c) => a + (Number(c.qty) || 0), 0);
 
     $("tnDeckViewBody").innerHTML = `
-        <div class="tn-meta"><span>🃏 <b>${count}</b> cards + leader</span><span>🕒 Submitted ${esc(fmtDate(sub.submittedAt))}</span></div>
+        <div class="tn-meta"><span>🃏 <b>${count}</b> cards + leader</span><span>🕒 ${esc(sub.whenLabel || "Submitted")} ${esc(fmtDate(sub.submittedAt))}</span></div>
         <nav class="tn-tabs tn-tabs-inline" id="tnViewTabs">
             <button type="button" class="tn-tab active" data-view="images">Images</button>
             <button type="button" class="tn-tab" data-view="text">Text</button>

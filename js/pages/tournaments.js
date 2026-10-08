@@ -8,9 +8,10 @@ import {
     cancelTournament,
     syncTournament,
     enterMatch,
+    publishTopDecks,
     isPermissionError
-} from "../firebase/tournamentService.js?v=tour-8";
-import { lookupCards } from "../firebase/tournamentDecks.js?v=tour-3";
+} from "../firebase/tournamentService.js?v=tab-1";
+import { lookupCards } from "../firebase/tournamentDecks.js?v=tab-1";
 import {
     ROUND_LENGTHS,
     DRAFT_DEFAULTS,
@@ -36,11 +37,14 @@ import {
     seriesScore,
     swissStandings,
     awaitingOrganiser,
+    placings,
+    showsTopDecks,
     nameOf
-} from "../core/tournamentEngine.js?v=tour-8";
+} from "../core/tournamentEngine.js?v=tab-1";
 import { $, esc, fmtDate, relative, toast, toLocalInput, copyText } from "./tournamentUi.js?v=tour-3";
-import { openSubmitDialog, closeSubmitDialog, closeViewDialog } from "./tournamentDeckUi.js?v=tour-3";
-import { createManage } from "./tournamentManage.js?v=tour-8";
+import { openSubmitDialog, closeSubmitDialog, closeViewDialog, openViewDialog } from "./tournamentDeckUi.js?v=tab-1";
+import { bracketHtml } from "./tournamentBracket.js?v=tab-1";
+import { createManage } from "./tournamentManage.js?v=tab-1";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
@@ -58,6 +62,9 @@ const state = {
     banUnknown: new Set(),      // numbers the card library doesn't know
     editing: null,              // id of the tournament being edited (null = creating)
     openDetail: null,           // id of the tournament shown in the details dialog
+    bracketView: "tree",        // knockout details: "tree" (drawn bracket) or "list"
+    leaderArt: {},              // leader card number -> { name, imageUrl } (top decks)
+    publishTried: new Map(),    // tournament id -> when this browser last tried to publish its top decks
     deepLinkId: new URLSearchParams(location.search).get("t") || "",
     // ?t=<id>&manage=matches - the organiser's "pick the winner" alert opens this.
     deepLinkManage: new URLSearchParams(location.search).get("manage") || ""
@@ -284,6 +291,9 @@ function cardHtml(t, now) {
         buttons.push(`<button type="button" class="tn-btn tn-btn-small" data-act="leave" data-id="${esc(t.id)}">Leave</button>`);
     }
     buttons.push(`<button type="button" class="tn-btn tn-btn-small" data-act="view" data-id="${esc(t.id)}">Details</button>`);
+    if (t.status === "complete" && showsTopDecks(t)) {
+        buttons.push(`<button type="button" class="tn-btn tn-btn-small tn-btn-gold" data-act="topdecks" data-id="${esc(t.id)}">🏆 Top decks</button>`);
+    }
     if (creator) buttons.push(`<button type="button" class="tn-btn tn-btn-small tn-btn-gold" data-act="manage" data-id="${esc(t.id)}">⚙ Manage</button>`);
 
     const description = t.description
@@ -411,7 +421,9 @@ async function doPlay(id) {
         // Re-check first: a result may have just moved the tournament to a new round.
         const fresh = (await syncTournament(id, state.me.uid)) || getTournament(id);
         const { code, slot } = await enterMatch(id, fresh, firebaseUserOrId(), state.me.name);
-        window.location.href = `../index.html?view=multiplayer&room=${encodeURIComponent(code)}&slot=${encodeURIComponent(slot)}`;
+        // Straight into the room in the Multiplayer tab (same page, no reload).
+        if (window.ccTnHost && window.ccTnHost.enterRoom) window.ccTnHost.enterRoom(code, slot);
+        else window.location.href = `index.html?view=multiplayer&room=${encodeURIComponent(code)}&slot=${encodeURIComponent(slot)}`;
     } catch (error) { toast(error.message || "Couldn't open the match.", true); }
 }
 
@@ -428,6 +440,7 @@ function handleAction(button) {
         case "play": doPlay(id); break;
         case "deck": doDeck(id); break;
         case "view": openDetail(id); break;
+        case "topdecks": openDetail(id, "tnTopDecks"); break;
         case "manage": closeDetail(); manage.open(id); break;
         case "decide": closeDetail(); manage.open(id, "matches"); break;
     }
@@ -541,6 +554,7 @@ function rulesHtml(t) {
         : `Regular matches: decks may only contain cards from ${slugs.length ? "the chosen collections" : "any collection"}.${deckRequired(t) ? ` Everyone must submit a deck list by <b>${esc(fmtDate(t.deckDeadline))}</b> and plays that deck; anyone without one is removed at the start.` : ""}`);
     if (bannedOf(t).length) lines.push(`<b>Banned cards:</b> ${bannedNames(t).join(", ")}.`);
     lines.push(`It needs at least <b>${minPlayersOf(t)}</b> players (up to <b>${esc(t.maxPlayers)}</b>) or it's cancelled. ${t.lateJoin ? "Late joining is allowed while there's a free spot." : "You can't join once it has started."}`);
+    if (showsTopDecks(t)) lines.push(`When it ends, the top ${playerCount(t) >= 16 ? "8" : "4"} decks are shown to everyone here, so anyone can look at them or copy them.`);
     if (t.hasPassword) lines.push("Joining needs the password from the organiser.");
     if (isPrivate(t)) lines.push("This tournament is private — it's only shown to people who have the link.");
     return `<ul class="tn-rules">${lines.map(l => `<li>${l}</li>`).join("")}</ul>`;
@@ -558,6 +572,14 @@ function detailHtml(t) {
     if (t.rounds) {
         for (let n = Number(t.currentRound || 0); n >= 1; n--) rounds += roundHtml(t, n);
     }
+    // Knockouts: the drawn bracket (or the plain list of rounds).
+    const knockout = t.format !== "swiss" && t.rounds && Number(t.totalRounds) >= 1;
+    const bracketSection = knockout ? `<section><div class="tn-section-head"><h3>Bracket</h3>
+            <div class="tn-seg" role="group" aria-label="Bracket view">
+                <button type="button" data-bkview="tree" aria-pressed="${state.bracketView === "tree"}">Bracket</button>
+                <button type="button" data-bkview="list" aria-pressed="${state.bracketView === "list"}">List</button>
+            </div></div>
+            ${state.bracketView === "tree" ? bracketHtml(t, state.me.uid) : rounds}</section>` : "";
 
     const mine = isMember(t);
     const buttons = [];
@@ -580,12 +602,99 @@ function detailHtml(t) {
         ${meStrip(t, now)}
         <section><h3>How it works</h3>${rulesHtml(t)}</section>
         <section><h3>Players (${playerCount(t)})</h3><div class="tn-players">${players}</div></section>
+        ${topDecksHtml(t)}
         ${t.format === "swiss" && t.rounds ? `<section><h3>Standings</h3>${standingsHtml(t)}</section>` : ""}
-        ${rounds ? `<section><h3>${t.format === "swiss" ? "Rounds" : "Bracket"}</h3>${rounds}</section>` : ""}
+        ${knockout ? bracketSection : (rounds ? `<section><h3>Rounds</h3>${rounds}</section>` : "")}
         <div class="tn-actions">${buttons.join("")}</div>`;
 }
 
-function openDetail(id) {
+// ── top decks (finished tournaments) ─────────────────────────────────────────
+
+const MEDALS = { 1: "🥇", 2: "🥈", 3: "🥉" };
+
+function topDecksHtml(t) {
+    if (t.status !== "complete" || !showsTopDecks(t)) return "";
+    const places = placings(t);
+    if (!places.length) return "";
+    const decks = t.topDecks || {};
+    let missing = 0;
+    const rows = places.map(p => {
+        const d = decks[p.uid];
+        if (!d) missing++;
+        const art = d && state.leaderArt[d.leaderKey];
+        const leaderName = (art && art.name) || (d && d.leaderKey) || "";
+        const medal = MEDALS[p.place] || (p.place <= 4 ? "🥉" : "🎖");
+        return `<div class="tn-top-row${p.uid === state.me.uid ? " me" : ""}${d ? "" : " pending"}">
+            <span class="tn-top-place"><span aria-hidden="true">${medal}</span>${esc(p.label)}</span>
+            <span class="tn-top-art">${art && art.imageUrl ? `<img src="${esc(art.imageUrl)}" alt="" loading="lazy">` : ""}</span>
+            <span class="tn-top-who"><strong>${esc(nameOf(t, p.uid))}${p.uid === state.me.uid ? " (you)" : ""}</strong>
+                <small>${d ? `${esc(d.deckName || "Deck")}${leaderName ? ` · ${esc(leaderName)}` : ""}` : "Deck not published yet"}</small></span>
+            ${d ? `<span class="tn-top-actions">
+                <button type="button" class="tn-btn tn-btn-small" data-top="view" data-uid="${esc(p.uid)}">View</button>
+                <button type="button" class="tn-btn tn-btn-small" data-top="copy" data-uid="${esc(p.uid)}">Copy</button>
+                <button type="button" class="tn-btn tn-btn-small tn-btn-primary" data-top="open" data-uid="${esc(p.uid)}">Open in Deck Builder</button>
+            </span>` : ""}
+        </div>`;
+    }).join("");
+    return `<section id="tnTopDecks"><h3>Top decks</h3><div class="tn-top">${rows}</div>
+        ${missing ? `<p class="tn-hint">A missing deck fills in on its own when a player from this tournament (or the organiser) opens it.</p>` : ""}</section>`;
+}
+
+// The deck in the Deck Builder's import format ("Leader: …", "4x NUMBER").
+function deckImportText(d) {
+    const lines = [];
+    if (d.deckName) lines.push(`# ${d.deckName}`);
+    if (d.leaderKey) lines.push(`Leader: ${d.leaderKey}`);
+    if (d.leaderKey2) lines.push(`Leader2: ${d.leaderKey2}`);
+    String(d.deckText || "").split(/\n+/).forEach(line => {
+        const m = line.trim().match(/^(\d+)\s*x\s*(.+)$/i);
+        if (m) lines.push(`${m[1]}x ${m[2].trim()}`);
+    });
+    return lines.join("\n");
+}
+
+function topDeckAction(t, action, uid) {
+    const d = (t.topDecks || {})[uid];
+    if (!d) return;
+    const who = nameOf(t, uid);
+    if (action === "view") {
+        const cards = Array.isArray(d.cards) ? d.cards : Object.values(d.cards || {});
+        openViewDialog({ name: d.deckName || "Deck", cards, submittedAt: d.at, whenLabel: d.source === "list" ? "Submitted" : "Played" }, who);
+    } else if (action === "copy") {
+        copyText(deckImportText(d), "Deck copied — paste it into the Deck Builder's Import");
+    } else if (action === "open") {
+        const host = window.ccTnHost;
+        if (!host || !host.openDeckInBuilder) { copyText(deckImportText(d), "Deck copied — paste it into the Deck Builder's Import"); return; }
+        if (host.openDeckInBuilder({ name: `${d.deckName || "Deck"} (${who})`, leaderKey: d.leaderKey, leaderKey2: d.leaderKey2, deckText: d.deckText })) closeDetail();
+    }
+}
+
+// Leader pictures + names for the top decks (looked up once, then the details redraw).
+let leaderLookup = false;
+async function ensureLeaderArt(t) {
+    const wanted = Object.values(t.topDecks || {}).map(d => d && d.leaderKey).filter(n => n && !(n in state.leaderArt));
+    if (!wanted.length || leaderLookup) return;
+    leaderLookup = true;
+    try {
+        const found = await lookupCards(wanted, { withImages: true });
+        wanted.forEach(n => { const info = found.get(n); state.leaderArt[n] = info ? { name: info.name || "", imageUrl: info.imageUrl || "" } : null; });
+    } catch { wanted.forEach(n => { state.leaderArt[n] = null; }); }
+    finally { leaderLookup = false; refreshDetail(); }
+}
+
+// Fill in missing top decks from this browser (see publishTopDecks). Retried at most
+// every two minutes per tournament.
+function maybePublishTopDecks(t) {
+    if (!t || t.status !== "complete" || !showsTopDecks(t) || !state.me.uid) return;
+    const missing = placings(t).some(p => !(t.topDecks || {})[p.uid]);
+    if (!missing) return;
+    const last = state.publishTried.get(t.id) || 0;
+    if (Date.now() - last < 120000) return;
+    state.publishTried.set(t.id, Date.now());
+    publishTopDecks(t.id, t).catch(() => {});
+}
+
+function openDetail(id, scrollTo = "") {
     const t = getTournament(id);
     if (!t) return;
     state.openDetail = id;
@@ -593,6 +702,9 @@ function openDetail(id) {
     $("tnDetailBody").innerHTML = detailHtml(t);
     $("tnDetailOverlay").hidden = false;
     ensureBanNames(bannedOf(t));
+    ensureLeaderArt(t);
+    maybePublishTopDecks(t);
+    if (scrollTo) requestAnimationFrame(() => document.getElementById(scrollTo)?.scrollIntoView({ block: "start" }));
 }
 
 function refreshDetail() {
@@ -600,9 +712,14 @@ function refreshDetail() {
     const t = getTournament(state.openDetail);
     if (!t) return;
     const body = $("tnDetailBody");
-    const scroll = body.scrollTop;
+    const overlay = $("tnDetailOverlay");
+    const scroll = overlay.scrollTop;
+    const bracketScroll = body.querySelector(".tn-bracket-scroll")?.scrollLeft || 0;
     body.innerHTML = detailHtml(t);
-    body.scrollTop = scroll;
+    overlay.scrollTop = scroll;
+    const bracket = body.querySelector(".tn-bracket-scroll");
+    if (bracket) bracket.scrollLeft = bracketScroll;
+    ensureLeaderArt(t);
 }
 
 function closeDetail() {
@@ -615,9 +732,17 @@ $("tnDetailOverlay").addEventListener("click", (event) => { if (event.target ===
 $("tnDetailBody").addEventListener("click", (event) => {
     const action = event.target.closest("[data-act]");
     if (action) { handleAction(action); return; }
+    const view = event.target.closest("[data-bkview]");
+    if (view) { state.bracketView = view.dataset.bkview; refreshDetail(); return; }
+    const top = event.target.closest("[data-top]");
+    if (top) {
+        const t = getTournament(state.openDetail);
+        if (t) topDeckAction(t, top.dataset.top, top.dataset.uid);
+        return;
+    }
     const copy = event.target.closest("[data-copy]");
     if (copy) {
-        const url = `${location.origin}${location.pathname}?t=${encodeURIComponent(copy.dataset.copy)}`;
+        const url = `${location.origin}${location.pathname}?view=tournaments&t=${encodeURIComponent(copy.dataset.copy)}`;
         copyText(url, "Link copied");
     }
 });
@@ -678,7 +803,7 @@ async function ensureSearchLibrary() {
     searchLoading = true;
     $("tnBanResults").innerHTML = `<div class="tn-hint">Loading the card library…</div>`;
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-13");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-14");
         const result = await library.loadSharedCards({
             light: true,
             onProgress: ({ cards }) => { searchCards = cards; renderBanResults(); }
@@ -851,6 +976,7 @@ function fillForm(t) {
     $("tnMaxPlayers").value = editing ? Number(t.maxPlayers) : 16;
     $("tnLateJoin").checked = editing ? Boolean(t.lateJoin) : false;
     $("tnJoinSelf").checked = true;
+    $("tnShowTopDecks").checked = editing ? showsTopDecks(t) : true;
     $("tnJoinSelfRow").hidden = editing;
 
     $("tnPrivate").checked = editing ? isPrivate(t) : false;
@@ -913,6 +1039,7 @@ function readForm() {
         minPlayers: Number($("tnMinPlayers").value),
         maxPlayers: Number($("tnMaxPlayers").value),
         lateJoin: $("tnLateJoin").checked,
+        showTopDecks: $("tnShowTopDecks").checked,
         private: $("tnPrivate").checked,
         requireDeck: !draft && $("tnRequireDeck").checked,
         deckDeadline: deadline ? new Date(deadline).getTime() : NaN,
@@ -1008,7 +1135,7 @@ async function loadCollectionChoices() {
     const names = {};
     (window.BUILTIN_COLLECTIONS || []).forEach(c => { if (c && c.slug) names[c.slug] = c.name || c.slug; });
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-13");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-14");
         const registry = library.loadSharedCollections ? await library.loadSharedCollections() : [];
         (registry || []).forEach(c => { if (c && c.slug) names[c.slug] = c.name || names[c.slug] || c.slug; });
     } catch { /* the built-in list is enough */ }
@@ -1048,15 +1175,13 @@ function onList(list) {
     renderList();
     refreshDetail();
     manage.refresh();
-    syncMine();
+    if (tabVisible()) {
+        syncMine();
+        list.filter(t => t.status === "complete" && (isMember(t) || isCreator(t))).forEach(maybePublishTopDecks);
+    }
 
     // ?t=<id> opens that tournament straight away (the "Copy link" button).
-    if (state.deepLinkId && !state.deepLinked && list.some(t => t.id === state.deepLinkId)) {
-        state.deepLinked = true;
-        const t = getTournament(state.deepLinkId);
-        if (state.deepLinkManage && isCreator(t)) manage.open(t.id, state.deepLinkManage === "matches" ? "matches" : "players");
-        else openDetail(state.deepLinkId);
-    }
+    openPendingLink();
 }
 
 function onListError(error) {
@@ -1072,6 +1197,49 @@ function onListError(error) {
     renderList();
 }
 
+// ?t=<id> (a "Copy link" link) or an alert asking for a tournament opens it (and the
+// organiser's match list for "pick the winner") as soon as it has loaded.
+function openPendingLink() {
+    if (!state.deepLinkId || state.deepLinked || !state.list.some(t => t.id === state.deepLinkId)) return;
+    if (!viewActive()) return;
+    state.deepLinked = true;
+    const t = getTournament(state.deepLinkId);
+    closeDetail();
+    manage.close();
+    if (state.deepLinkManage && isCreator(t)) manage.open(t.id, state.deepLinkManage === "matches" ? "matches" : "players");
+    else openDetail(state.deepLinkId);
+}
+
+/** Open one tournament (from an alert): its details, or the organiser's panel. */
+export function openTournament(id, manageTab = "") {
+    state.deepLinkId = String(id || "");
+    state.deepLinkManage = manageTab || "";
+    state.deepLinked = false;
+    if (state.loaded) openPendingLink();
+}
+
+// The tab is part of the main page now: only redraw / nudge while it's on screen
+// (the corner alerts keep tournaments moving everywhere else).
+function viewActive() {
+    const view = document.getElementById("tournamentsView");
+    return Boolean(view && view.classList.contains("active"));
+}
+function tabVisible() {
+    return viewActive() && document.visibilityState !== "hidden";
+}
+
+let started = false;
+/** Called by the app every time the Tournaments tab is shown. */
+export function show() {
+    if (!started) { started = true; init(); return; }
+    refreshIdentity();
+    renderList();
+    refreshDetail();
+    manage.refresh();
+    syncMine();
+    openPendingLink();
+}
+
 async function init() {
     document.addEventListener("cc-account-change", () => { refreshIdentity(); renderList(); refreshDetail(); manage.refresh(); syncMine(); });
 
@@ -1084,11 +1252,9 @@ async function init() {
     loadCollectionChoices();
     watchTournaments(onList, onListError);
 
-    // Keep countdowns fresh and nudge the tournaments I'm in.
-    setInterval(() => { renderList(); refreshDetail(); manage.refresh(); syncMine(); }, 30000);
+    // Keep countdowns fresh and nudge the tournaments I'm in (while on screen).
+    setInterval(() => { if (tabVisible()) { renderList(); refreshDetail(); manage.refresh(); syncMine(); } }, 30000);
     document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") { renderList(); syncMine(); }
+        if (tabVisible()) { renderList(); syncMine(); }
     });
 }
-
-init();

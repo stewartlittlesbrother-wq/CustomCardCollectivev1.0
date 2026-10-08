@@ -129,6 +129,16 @@ let prevFoe = { known: false, present: false, ready: false };
 let handledStartError = "";
 
 // ── Entry point ──────────────────────────────────────────────────────────────
+// Open a room from elsewhere in the app (the Tournaments tab's "Play" button).
+// The host has already put ?room=&slot= in the URL, which boot() reads the first time.
+export function enterRoom(code, slot) {
+    const clean = cleanCode(code);
+    if (!clean) return;
+    if (!started) { show(); return; }
+    root = document.getElementById("mpxRoot");
+    openRoom(clean, slot === "p2" ? "p2" : "p1");
+}
+
 export function show() {
     root = document.getElementById("mpxRoot");
     if (!root) return;
@@ -804,9 +814,10 @@ async function leaveRoom() {
     room = null;
     match = null;
     if (leaving && wasReady) setPlayerReady(leaving.code, leaving.slot, false).catch(() => {});
-    if (toTournament) { location.href = "html/tournaments.html"; return; }
     setRoomUrl(null);
     renderHome();
+    // A tournament match: back to the Tournaments tab (same page, no reload).
+    if (toTournament && window.ccMpHost?.showView) window.ccMpHost.showView("tournaments");
 }
 
 function onMatch(next) {
@@ -860,7 +871,7 @@ async function loadRequiredDeck(meta) {
     if (lockedDeckRequested || !user) return;
     lockedDeckRequested = true;
     try {
-        const decks = await import("../firebase/tournamentDecks.js?v=tour-3");
+        const decks = await import("../firebase/tournamentDecks.js?v=tab-1");
         const submitted = await decks.getSubmittedDeck(meta.id, user.uid);
         if (!submitted || !submitted.deck) {
             showError("#mpxRoomError", "You haven't submitted a deck list for this tournament, so you can't play yet. Go back and submit one.");
@@ -882,7 +893,7 @@ async function tournamentDeckProblem(deck) {
     const banned = Object.values(tournamentMeta?.banned || {});
     if (!pool.length && !banned.length) return "";
     try {
-        const decks = await import("../firebase/tournamentDecks.js?v=tour-3");
+        const decks = await import("../firebase/tournamentDecks.js?v=tab-1");
         const result = await decks.checkDeck(deck, { collections: pool, banned, collectionName });
         return result.problems.join(" ");
     } catch {

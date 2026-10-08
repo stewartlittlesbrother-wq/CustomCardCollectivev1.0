@@ -1580,8 +1580,8 @@ function reportTournamentResult(winnerSlot) {
     if (!winnerUid) return;
     tournamentContext.iWon = winnerSlot === playerSlot;
     Promise.all([
-        import("../firebase/tournamentService.js?v=tour-8"),
-        import("../core/tournamentEngine.js?v=tour-8")
+        import("../firebase/tournamentService.js?v=tab-1"),
+        import("../core/tournamentEngine.js?v=tab-1")
     ])
         .then(async ([service, engine]) => {
             const doc = await service.reportMatchResult(tournamentContext.meta, winnerUid);
@@ -4228,7 +4228,9 @@ function showGameOverPopup(winnerPlayer, reasonTitle = "Victory", reasonText = "
         // Tournament match: no rematch, just back to the tournament.
         popup.appendChild(buildTournamentGameOverPanel());
         popup.appendChild(buildGameOverChat());
-        mainMenuButton.href = "tournaments.html";
+        // Tournaments is a tab in the main app; open it on this tournament.
+        const tid = tournamentContext.meta && tournamentContext.meta.id;
+        mainMenuButton.href = `../index.html?view=tournaments${tid ? `&t=${encodeURIComponent(tid)}` : ""}`;
         mainMenuButton.textContent = "Back to Tournament";
         buttons.appendChild(mainMenuButton);
     } else if (isOnlineMatch) {

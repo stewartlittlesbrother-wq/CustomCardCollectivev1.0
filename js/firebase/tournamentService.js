@@ -23,7 +23,7 @@ import {
 import { database } from "./firebaseApp.js";
 import { createRoom, joinRoom } from "./multiplayerService.js?v=clock-1";
 import { BASE_PATH, DECKS_PATH, SECRETS_PATH, JOIN_PATH } from "./tournamentPaths.js?v=tour-3";
-import { getSubmittedDeck } from "./tournamentDecks.js?v=tour-3";
+import { getSubmittedDeck, deckContents } from "./tournamentDecks.js?v=tab-1";
 import {
     tick,
     cleanSettings,
@@ -45,8 +45,12 @@ import {
     isKicked,
     myStatus,
     playerCount,
-    minPlayersOf
-} from "../core/tournamentEngine.js?v=tour-8";
+    minPlayersOf,
+    gamesOf,
+    placings,
+    showsTopDecks,
+    nameOf
+} from "../core/tournamentEngine.js?v=tab-1";
 
 const basePath = BASE_PATH;
 const tournamentRef = (id, ...parts) => ref(database, [basePath, id, ...parts].join("/"));
@@ -325,6 +329,80 @@ export function startNow(id) {
         }
         return { tournament: { ...current, startAt: now }, changed: true };
     });
+}
+
+// ── top decks of a finished tournament ───────────────────────────────────────
+
+/** The deck a player used in the last game they played in this tournament, read
+ *  from that game's room (every signed-in player can read rooms). */
+async function lastGameDeck(id, t, uid) {
+    for (let n = Number(t.currentRound) || 0; n >= 1; n--) {
+        const pairing = pairingsOf(getRound(t, n)).find(p => !p.bye && (p.a === uid || p.b === uid));
+        if (!pairing) continue;
+        const games = Math.max(1, gamesOf(pairing).length);
+        for (let g = games; g >= 1; g--) {
+            try {
+                const snap = await get(ref(database, `matches/${roomCodeFor(id, n, pairing.id, g)}/players`));
+                const players = snap.val() || {};
+                const seat = ["p1", "p2"].find(s => players[s] && players[s].uid === uid);
+                const deck = seat && players[seat].deck;
+                if (deck && (deck.deckText || deck.leaderKey)) return deck;
+            } catch { /* room gone or unreadable - try an earlier game */ }
+        }
+    }
+    return null;
+}
+
+function cardsFromDeck(deck) {
+    const { counts, leaders } = deckContents(deck);
+    return [
+        ...leaders.map(number => ({ number, name: "", qty: 1, leader: true })),
+        ...[...counts.entries()].map(([number, qty]) => ({ number, name: "", qty, leader: false }))
+    ];
+}
+
+/**
+ * Fill in a finished tournament's top decks (tournaments/<id>/topDecks/<uid>) with
+ * whatever this browser may read: a submitted deck list (the organiser can read all
+ * of them, a player their own) or else the deck the player used in their last game.
+ * Every participant's browser chips in, so the list completes itself. Never throws;
+ * returns how many decks it added.
+ */
+export async function publishTopDecks(id, t) {
+    try {
+        if (!t || t.status !== "complete" || !showsTopDecks(t)) return 0;
+        const have = t.topDecks || {};
+        const updates = {};
+        for (const p of placings(t)) {
+            if (have[p.uid]) continue;
+            let entry = null;
+            if (deckRequired(t)) {
+                const sub = await getSubmittedDeck(id, p.uid).catch(() => null);
+                if (sub && sub.deck) {
+                    entry = { deckName: sub.name || sub.deck.name || "Deck", leaderKey: sub.deck.leaderKey || "",
+                        leaderKey2: sub.deck.leaderKey2 || "", deckText: sub.deck.deckText || "",
+                        cards: Array.isArray(sub.cards) ? sub.cards : Object.values(sub.cards || {}), source: "list" };
+                }
+            }
+            if (!entry) {
+                const deck = await lastGameDeck(id, t, p.uid);
+                if (deck) {
+                    entry = { deckName: deck.name || "Deck", leaderKey: deck.leaderKey || "", leaderKey2: deck.leaderKey2 || "",
+                        deckText: deck.deckText || "", cards: cardsFromDeck(deck), source: "game" };
+                }
+            }
+            if (!entry) continue;
+            updates[`${basePath}/${id}/topDecks/${p.uid}`] = {
+                ...entry, place: p.place, label: p.label, player: nameOf(t, p.uid), at: Date.now()
+            };
+        }
+        const count = Object.keys(updates).length;
+        if (count) await update(ref(database), updates);
+        return count;
+    } catch (error) {
+        if (!isPermissionError(error)) console.warn("Couldn't publish the top decks:", error);
+        return 0;
+    }
 }
 
 // ── playing a match ──────────────────────────────────────────────────────────

@@ -298,7 +298,9 @@ function initialView() {
   // (A Draft Battle URL also carries ?room=, but it takes over the page itself.)
   if (params.get("draft") !== "1" && (params.get("join") || params.get("room"))) return "multiplayer";
   const requestedView = params.get("view");
-  return ["home", "builder", "game", "settings", "multiplayer"].includes(requestedView) ? requestedView : "home";
+  // A tournament link (?t=<id>) opens the Tournaments tab on that tournament.
+  if (!requestedView && params.get("t")) return "tournaments";
+  return ["home", "builder", "game", "settings", "multiplayer", "tournaments"].includes(requestedView) ? requestedView : "home";
 }
 
 const state = {
@@ -5665,6 +5667,24 @@ function importDeckFromText(text) {
   return true;
 }
 
+// A tournament's published top deck -> the Deck Builder (Tournaments tab, "Open in
+// Deck Builder"). deck = { name, leaderKey, leaderKey2?, deckText ("4xNUM" lines) }.
+// It replaces the deck being edited, so ask first when there is one.
+function openDeckFromTournament(deck) {
+  if (!deck || (!deck.leaderKey && !deck.deckText)) return false;
+  const lines = [];
+  if (deck.name) lines.push(`# ${deck.name}`);
+  if (deck.leaderKey) lines.push(`Leader: ${deck.leaderKey}`);
+  if (deck.leaderKey2) lines.push(`Leader2: ${deck.leaderKey2}`);
+  lines.push(String(deck.deckText || ""));
+  const editing = Boolean(state.leaderId) || deckMainCount() > 0;
+  if (editing && !window.confirm(`Open "${deck.name || "this deck"}" in the Deck Builder?\n\nIt replaces the deck you're editing there — save that one first if you want to keep it.`)) {
+    return false;
+  }
+  showView("builder");
+  return importDeckFromText(lines.join("\n"));
+}
+
 // Open the share panel in EXPORT mode: fill it with this deck's text and copy.
 function openDeckExport() {
   if (state.cardsLoading) {
@@ -6315,6 +6335,65 @@ function showView(view) {
   if (view === "builder") queueDeckTableResize();
   if (view === "hotkeys") renderHotkeys();
   if (view === "multiplayer") openMultiplayerTab();
+  if (view === "tournaments") openTournamentsTab();
+}
+
+// Tournament alerts (corner pop-ups and the bell) open a tournament on this page,
+// without a reload: the Tournaments tab, on that tournament (or the organiser's
+// match list when there's a winner to pick).
+window.ccOpenTournament = (tid, manage = "") => {
+  try {
+    const url = new URL(location.href);
+    url.search = "";
+    url.searchParams.set("view", "tournaments");
+    if (tid) url.searchParams.set("t", tid);
+    if (manage) url.searchParams.set("manage", manage);
+    history.replaceState(null, "", url.toString());
+  } catch { /* still opens */ }
+  showView("tournaments");
+  if (tournamentsTabModule && tournamentsTabModule.openTournament) tournamentsTabModule.openTournament(tid, manage);
+};
+
+// Tournaments is a tab on this page too (it used to be html/tournaments.html).
+// Its code is fetched the first time the tab opens. window.ccTnHost lets it open
+// a match room in the Multiplayer tab and a winning deck in the Deck Builder.
+let tournamentsTabModule = null;
+let tournamentsTabLoading = false;
+function openTournamentsTab() {
+  if (tournamentsTabModule) { tournamentsTabModule.show(); return; }
+  if (tournamentsTabLoading) return;
+  tournamentsTabLoading = true;
+  window.ccTnHost = {
+    showView,
+    // Straight into a tournament match's room (no page load).
+    enterRoom(code, slot) {
+      try {
+        const url = new URL(location.href);
+        url.search = "";
+        url.searchParams.set("view", "multiplayer");
+        url.searchParams.set("room", code);
+        url.searchParams.set("slot", slot);
+        history.replaceState(null, "", url.toString());
+      } catch { /* the room still opens */ }
+      showView("multiplayer");
+      if (multiplayerTabModule && multiplayerTabModule.enterRoom) multiplayerTabModule.enterRoom(code, slot);
+    },
+    // A published top deck -> the Deck Builder, as an unsaved deck the player can
+    // look at and save. deck = { name, leaderKey, leaderKey2?, deckText }.
+    openDeckInBuilder(deck) {
+      return openDeckFromTournament(deck);
+    }
+  };
+  import("./js/pages/tournaments.js?v=tab-1")
+    .then(mod => {
+      tournamentsTabModule = mod;
+      if (state.activeView === "tournaments") mod.show();
+    })
+    .catch(error => {
+      tournamentsTabLoading = false;
+      const list = document.getElementById("tnList");
+      if (list) list.innerHTML = `<div class="tn-empty">Tournaments couldn't load (${escapeHtml(error.message)}). Check your connection and refresh.</div>`;
+    });
 }
 
 // Multiplayer is a tab on this page (it used to be a separate page, which is
@@ -6348,7 +6427,7 @@ function openMultiplayerTab() {
         .sort((a, b) => a.name.localeCompare(b.name));
     }
   };
-  import("./js/pages/multiplayerTab.js?v=mpx-4")
+  import("./js/pages/multiplayerTab.js?v=mpx-5")
     .then(mod => {
       multiplayerTabModule = mod;
       if (state.activeView === "multiplayer") mod.show();
@@ -9535,13 +9614,6 @@ function bindEvents() {
   document.querySelectorAll("[data-forward-click]").forEach(button => {
     button.addEventListener("click", () => {
       document.getElementById(button.dataset.forwardClick)?.click();
-    });
-  });
-
-  // Tournaments: nav tab and the home card both open the tournaments page.
-  ["navTournaments", "tournamentsButton"].forEach(id => {
-    document.getElementById(id)?.addEventListener("click", () => {
-      window.location.href = "html/tournaments.html";
     });
   });
 

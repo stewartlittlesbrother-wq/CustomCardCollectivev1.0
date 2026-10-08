@@ -9,9 +9,9 @@ import {
     cancelTournament,
     deleteTournament,
     isPermissionError
-} from "../firebase/tournamentService.js?v=tour-8";
-import { watchDecks, deckListText } from "../firebase/tournamentDecks.js?v=tour-3";
-import { openViewDialog } from "./tournamentDeckUi.js?v=tour-3";
+} from "../firebase/tournamentService.js?v=tab-1";
+import { watchDecks, deckListText } from "../firebase/tournamentDecks.js?v=tab-1";
+import { openViewDialog } from "./tournamentDeckUi.js?v=tab-1";
 import {
     playersInOrder,
     playerCount,
@@ -25,7 +25,7 @@ import {
     seriesScore,
     canEditResult,
     resultChangeImpact
-} from "../core/tournamentEngine.js?v=tour-8";
+} from "../core/tournamentEngine.js?v=tab-1";
 
 /**
  * ctx: {

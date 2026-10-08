@@ -249,7 +249,8 @@
         const host = document.querySelector(".nav-actions");
         if (!host) return;
         host.removeAttribute("aria-hidden");
-        host.innerHTML = "";
+        // Only replace the account chip - the tournament alerts bell lives here too.
+        host.querySelectorAll(".cc-account-chip").forEach(node => node.remove());
         const chip = document.createElement("div");
         chip.className = "cc-account-chip";
         if (ccAccount.isSignedIn()) {

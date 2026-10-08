@@ -31,6 +31,7 @@
   <link rel="stylesheet" href="styles.css?v=playmat-1">
   <link rel="stylesheet" href="css/deck-v2.css?v=deckv2-5">
   <link rel="stylesheet" href="css/multiplayer-tab.css?v=mpx-2">
+  <link rel="stylesheet" href="css/tournaments-tab.css?v=tab-1">
 </head>
 <body>
   <div class="app-shell">
@@ -50,7 +51,7 @@
         <button class="nav-tab" type="button" data-view="builder">Deck Builder</button>
         <button class="nav-tab" type="button" data-view="game">Practice Board</button>
         <button class="nav-tab" type="button" id="navMultiplayer" data-view="multiplayer">Multiplayer</button>
-        <button class="nav-tab" type="button" id="navTournaments">Tournaments</button>
+        <button class="nav-tab" type="button" id="navTournaments" data-view="tournaments">Tournaments</button>
         <button class="nav-tab" type="button" data-view="hotkeys">Hotkeys</button>
         <button class="nav-tab" type="button" data-view="settings">Settings</button>
       </nav>
@@ -101,7 +102,7 @@
                 <span class="home-mode-icon" aria-hidden="true">🌐</span>
                 <span class="home-mode-body"><strong>Multiplayer</strong><small>Make a room, share the code, and play a live match — regular or Draft Battle.</small></span>
               </button>
-              <button type="button" id="tournamentsButton" class="home-mode featured">
+              <button type="button" id="tournamentsButton" data-view="tournaments" class="home-mode featured">
                 <span class="home-mode-icon" aria-hidden="true">🏆</span>
                 <span class="home-mode-body"><strong>Tournaments</strong><small>Join a bracket that hasn't started, or run your own — elimination or Swiss, regular or draft.</small></span>
               </button>
@@ -127,11 +128,11 @@
           <section class="home-section" aria-labelledby="homeNewTitle">
             <h2 class="home-section-title" id="homeNewTitle">What's new</h2>
             <ul class="home-news">
+              <li><span class="home-news-badge">NEW</span><div><strong>Tournaments, upgraded</strong><span>Tournaments is now a tab (no more page reload), knockouts show a real bracket, finished events show the top decks so anyone can view, copy or open them in the Deck Builder, and a bell in the top bar keeps your tournament alerts.</span></div></li>
               <li><span class="home-news-badge">NEW</span><div><strong>Playmat studio</strong><span>Settings → Playmat: pick a picture (or a built-in one), drag and zoom to crop it to your side of the board with the zones drawn on top, adjust the look, and check it on computer and phone before saving.</span></div></li>
               <li><span class="home-news-badge">NEW</span><div><strong>Tournament alerts</strong><span>Red pop-ups in the corner on every page: your round has started, your match is due (a day, an hour, then 30% down to 1% of the round left), the organiser needs to pick a winner, or a tournament has finished.</span></div></li>
               <li><span class="home-news-badge">NEW</span><div><strong>Game clock</strong><span>Each player gets their own time for the game (18 minutes by default) that only runs on their turn — run out and you lose. Pick it when you create a room or a tournament.</span></div></li>
               <li><span class="home-news-badge">NEW</span><div><strong>Tournaments, your rules</strong><span>Organisers choose what happens to a match that isn't played in time — a coin flip, or they pick the winner — and can change any result, in any round, at any time.</span></div></li>
-              <li><span class="home-news-badge">NEW</span><div><strong>Multiplayer, redesigned</strong><span>Now a normal tab with no reloading: invite links, a face-off lobby with chat, Rejoin for games in progress, live games to watch and your win/loss record.</span></div></li>
               <li><span class="home-news-badge fix">FIXED</span><div><strong>Official cards in deck images</strong><span>Save as image now shows the official One Piece cards in your deck instead of blank boxes with their names.</span></div></li>
               </ul>
           </section>
@@ -778,6 +779,369 @@
         <div id="mpxRoot"><div class="mpx-loading">Loading multiplayer…</div></div>
       </section>
 
+      <!-- Tournaments: driven by js/pages/tournaments.js (loaded the first time this
+           tab opens - see openTournamentsTab in app.js). It used to be its own page. -->
+      <section class="view" id="tournamentsView" data-view-panel="tournaments" aria-label="Tournaments">
+        <div class="tn-page">
+            <header class="tn-head">
+                <div>
+                    <h1>Tournaments</h1>
+                    <p class="tn-sub">Join a bracket that hasn't started, or run your own. Every match is played in a real multiplayer room.</p>
+                </div>
+                <button type="button" class="tn-btn tn-btn-primary" id="tnCreateBtn">＋ Create tournament</button>
+            </header>
+
+            <!-- Connection / "rules not published" / errors -->
+            <div id="tnNotice" class="tn-notice" hidden></div>
+
+            <nav class="tn-filters" id="tnFilters" aria-label="Filter tournaments">
+                <button type="button" class="tn-filter active" data-filter="all">All</button>
+                <button type="button" class="tn-filter" data-filter="open">Open for sign-up</button>
+                <button type="button" class="tn-filter" data-filter="running">In progress</button>
+                <button type="button" class="tn-filter" data-filter="done">Finished</button>
+                <button type="button" class="tn-filter" data-filter="mine">My tournaments</button>
+            </nav>
+
+            <section id="tnList" class="tn-list" aria-live="polite">
+                <div class="tn-empty">Loading tournaments…</div>
+            </section>
+        </div>
+
+        <!-- ══════════ Create / edit a tournament ══════════ -->
+        <div class="tn-overlay" id="tnCreateOverlay" hidden>
+            <div class="tn-modal tn-modal-wide" role="dialog" aria-modal="true" aria-labelledby="tnCreateTitle">
+                <div class="tn-modal-head">
+                    <h2 id="tnCreateTitle">Create a tournament</h2>
+                    <button type="button" class="tn-x" id="tnCreateClose" aria-label="Close">✕</button>
+                </div>
+
+                <form id="tnCreateForm" class="tn-form" autocomplete="off">
+                    <div id="tnLockedNote" class="tn-hint tn-locked-note" hidden>
+                        This tournament has started, so its format, match type, best-of, card pool and start time are locked.
+                        Everything else can still be changed.
+                    </div>
+
+                    <!-- Basics -->
+                    <section class="tn-section">
+                        <h3>Basics</h3>
+                        <label class="tn-field">
+                            <span>Name</span>
+                            <input type="text" id="tnName" maxlength="60" placeholder="e.g. Friday Night Brawl" required>
+                        </label>
+                        <label class="tn-field">
+                            <span>Description <small>— rules, prizes, anything players should know</small></span>
+                            <textarea id="tnDescription" maxlength="600" rows="3" placeholder="Optional"></textarea>
+                        </label>
+                    </section>
+
+                    <!-- Match setup -->
+                    <section class="tn-section">
+                        <h3>Matches</h3>
+                        <div class="tn-field" data-lock="match">
+                            <span>Match type</span>
+                            <div class="tn-choice" id="tnMatchType">
+                                <label class="tn-choice-card">
+                                    <input type="radio" name="tnMatchType" value="regular" checked>
+                                    <strong>Regular matches</strong>
+                                    <small>Players bring their own deck, built only from the chosen collections.</small>
+                                </label>
+                                <label class="tn-choice-card">
+                                    <input type="radio" name="tnMatchType" value="draft">
+                                    <strong>Draft battle</strong>
+                                    <small>Each match is a Draft Battle: both players open packs from the pool, then build a deck.</small>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="tn-field" data-lock="match">
+                            <span>Format</span>
+                            <div class="tn-choice" id="tnFormat">
+                                <label class="tn-choice-card">
+                                    <input type="radio" name="tnFormat" value="elimination" checked>
+                                    <strong>Single elimination</strong>
+                                    <small>Lose a match and you're out. Byes fill an uneven bracket.</small>
+                                </label>
+                                <label class="tn-choice-card">
+                                    <input type="radio" name="tnFormat" value="swiss">
+                                    <strong>Swiss</strong>
+                                    <small>Everyone plays every round against someone with a similar record. Most wins takes it.</small>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="tn-field" data-lock="match">
+                            <span>Games per match <small>— results are tracked automatically from each player's account</small></span>
+                            <div class="tn-choice tn-choice-3" id="tnBestOf">
+                                <label class="tn-choice-card">
+                                    <input type="radio" name="tnBestOf" value="1" checked>
+                                    <strong>Best of 1</strong>
+                                    <small>One game decides it.</small>
+                                </label>
+                                <label class="tn-choice-card">
+                                    <input type="radio" name="tnBestOf" value="3">
+                                    <strong>Best of 3</strong>
+                                    <small>First to win 2 games.</small>
+                                </label>
+                                <label class="tn-choice-card">
+                                    <input type="radio" name="tnBestOf" value="5">
+                                    <strong>Best of 5</strong>
+                                    <small>First to win 3 games.</small>
+                                </label>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Card pool + bans -->
+                    <section class="tn-section">
+                        <h3>Card pool</h3>
+                        <div class="tn-field" data-lock="match">
+                            <span>Collections <small>— which collections may be used</small></span>
+                            <label class="tn-check">
+                                <input type="checkbox" id="tnAllCollections" checked>
+                                All collections
+                            </label>
+                            <div id="tnCollectionPicker" class="tn-picker" hidden>
+                                <input type="text" id="tnCollectionSearch" placeholder="Search collections…" autocomplete="off">
+                                <div id="tnCollectionList" class="tn-picker-list"></div>
+                                <div id="tnCollectionCount" class="tn-hint"></div>
+                            </div>
+                        </div>
+
+                        <div class="tn-field">
+                            <span>Ban list <small>— banned cards can't be in a deck (and never show up in draft packs)</small></span>
+                            <div id="tnBanChips" class="tn-chips tn-ban-chips"></div>
+                            <div class="tn-inline">
+                                <input type="text" id="tnBanInput" placeholder="Card numbers, e.g. OP01-001, ST01-012" autocomplete="off">
+                                <button type="button" class="tn-btn tn-btn-small" id="tnBanAdd">Ban</button>
+                            </div>
+                            <details class="tn-details" id="tnBanSearchBox">
+                                <summary>Search cards by name</summary>
+                                <p class="tn-hint">Loads the card library, which can take a moment the first time.</p>
+                                <input type="text" id="tnBanSearch" placeholder="Search by card name or number…" autocomplete="off">
+                                <div id="tnBanResults" class="tn-ban-results"></div>
+                            </details>
+                        </div>
+                    </section>
+
+                    <!-- Schedule -->
+                    <section class="tn-section">
+                        <h3>Schedule</h3>
+                        <div class="tn-row">
+                            <label class="tn-field" data-lock="start">
+                                <span>Starts</span>
+                                <input type="datetime-local" id="tnStart" required>
+                            </label>
+                            <label class="tn-field">
+                                <span>Each round lasts <small>— time to play all the games</small></span>
+                                <select id="tnRoundLength"></select>
+                            </label>
+                            <label class="tn-field">
+                                <span>Next round starts</span>
+                                <select id="tnRoundMode">
+                                    <option value="asap">When everyone has finished</option>
+                                    <option value="full">When the round time is up</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="tn-row tn-row-custom" id="tnRoundCustom" hidden>
+                            <label class="tn-field">
+                                <span>Custom round length</span>
+                                <input type="number" id="tnRoundCustomValue" min="1" max="1440" step="1" value="1">
+                            </label>
+                            <label class="tn-field">
+                                <span>Unit</span>
+                                <select id="tnRoundCustomUnit">
+                                    <option value="1">minutes</option>
+                                    <option value="60">hours</option>
+                                    <option value="1440" selected>days</option>
+                                </select>
+                            </label>
+                            <div></div>
+                        </div>
+                        <p class="tn-hint">Players have the full round time to play their match whenever suits them — a week is fine. In a best-of-3 that's time for all three games.</p>
+                        <div class="tn-row tn-row-2">
+                            <label class="tn-field">
+                                <span>If a match isn't played in time</span>
+                                <select id="tnTimeoutRule">
+                                    <option value="coin">Coin flip decides the winner</option>
+                                    <option value="organiser">I choose the winner myself</option>
+                                </select>
+                            </label>
+                            <label class="tn-field">
+                                <span>Game clock <small>— each player's own time per game</small></span>
+                                <select id="tnClock"></select>
+                            </label>
+                        </div>
+                        <p class="tn-hint" id="tnTimeoutHint"></p>
+                        <label class="tn-field" id="tnSwissRoundsField" hidden>
+                            <span>Swiss rounds <small>— leave empty for automatic (about log₂ of the players)</small></span>
+                            <input type="number" id="tnSwissRounds" min="1" max="30" step="1" placeholder="Automatic">
+                        </label>
+                    </section>
+
+                    <!-- Players -->
+                    <section class="tn-section">
+                        <h3>Players</h3>
+                        <div class="tn-row tn-row-2">
+                            <label class="tn-field">
+                                <span>Fewest players <small>— cancelled if fewer sign up</small></span>
+                                <input type="number" id="tnMinPlayers" min="2" max="256" step="1" value="2">
+                            </label>
+                            <label class="tn-field">
+                                <span>Most players</span>
+                                <input type="number" id="tnMaxPlayers" min="2" max="256" step="1" value="16">
+                            </label>
+                        </div>
+                        <label class="tn-check">
+                            <input type="checkbox" id="tnLateJoin">
+                            Allow late joining <small class="tn-inline-hint">(people can still join once it has started, if there's a free spot)</small>
+                        </label>
+                        <label class="tn-check" id="tnJoinSelfRow">
+                            <input type="checkbox" id="tnJoinSelf" checked>
+                            I'm playing in it too
+                        </label>
+                        <label class="tn-check">
+                            <input type="checkbox" id="tnShowTopDecks" checked>
+                            Show the top decks when it ends <small class="tn-inline-hint">(top 4, or top 8 with 16+ players — anyone can view or copy them)</small>
+                        </label>
+                    </section>
+
+                    <!-- Access -->
+                    <section class="tn-section">
+                        <h3>Who can join</h3>
+                        <label class="tn-check">
+                            <input type="checkbox" id="tnPrivate">
+                            Private — hide it from the public list <small class="tn-inline-hint">(only people with the link can find it)</small>
+                        </label>
+                        <label class="tn-field">
+                            <span>Password <small id="tnPasswordHint">— optional; players must enter it to join</small></span>
+                            <input type="text" id="tnPassword" maxlength="40" placeholder="No password" autocomplete="off">
+                        </label>
+                        <label class="tn-check" id="tnClearPasswordRow" hidden>
+                            <input type="checkbox" id="tnClearPassword">
+                            Remove the password
+                        </label>
+                    </section>
+
+                    <!-- Deck lists (regular matches) -->
+                    <section class="tn-section" id="tnDeckSection">
+                        <h3>Deck lists</h3>
+                        <label class="tn-check" data-lock="deck">
+                            <input type="checkbox" id="tnRequireDeck">
+                            Players must submit their deck list before the tournament
+                        </label>
+                        <p class="tn-hint">When on, each player picks one of their saved decks and hands it in. It's checked against the card pool and ban list, you can see every list, and that's the deck they play with. Anyone who hasn't submitted by the start is removed.</p>
+                        <label class="tn-field" id="tnDeckDeadlineField" data-lock="deck" hidden>
+                            <span>Submit deck lists by</span>
+                            <input type="datetime-local" id="tnDeckDeadline">
+                        </label>
+                    </section>
+
+                    <!-- Draft settings -->
+                    <section class="tn-section" id="tnDraftSection" hidden>
+                        <h3>Draft settings</h3>
+                        <div class="tn-row">
+                            <label class="tn-field">
+                                <span>Packs per player</span>
+                                <input type="number" id="tnDraftPacks" min="1" max="30" step="1" value="10">
+                            </label>
+                            <label class="tn-field">
+                                <span>Deck building time <small>(minutes)</small></span>
+                                <input type="number" id="tnDraftMinutes" min="3" max="180" step="1" value="15">
+                            </label>
+                            <label class="tn-field">
+                                <span>Deck size <small>(cards)</small></span>
+                                <input type="number" id="tnDraftDeckSize" min="20" max="60" step="1" value="40">
+                            </label>
+                        </div>
+                        <p class="tn-hint">Each pack has 12 cards. Both players draft at the same time from the chosen collections, then build on a shared clock; anyone still building when it runs out gets their deck filled from their pulls.</p>
+                    </section>
+
+                    <p class="tn-hint" id="tnRulesHint"></p>
+
+                    <div id="tnCreateError" class="tn-error" hidden></div>
+                    <div class="tn-modal-actions">
+                        <button type="button" class="tn-btn" id="tnCreateCancel">Cancel</button>
+                        <button type="submit" class="tn-btn tn-btn-primary" id="tnCreateSubmit">Create tournament</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- ══════════ Tournament details ══════════ -->
+        <div class="tn-overlay" id="tnDetailOverlay" hidden>
+            <div class="tn-modal tn-modal-wide" role="dialog" aria-modal="true" aria-labelledby="tnDetailTitle">
+                <div class="tn-modal-head">
+                    <h2 id="tnDetailTitle">Tournament</h2>
+                    <button type="button" class="tn-x" id="tnDetailClose" aria-label="Close">✕</button>
+                </div>
+                <div id="tnDetailBody" class="tn-detail"></div>
+            </div>
+        </div>
+
+        <!-- ══════════ Organiser: manage ══════════ -->
+        <div class="tn-overlay" id="tnManageOverlay" hidden>
+            <div class="tn-modal tn-modal-wide" role="dialog" aria-modal="true" aria-labelledby="tnManageTitle">
+                <div class="tn-modal-head">
+                    <h2 id="tnManageTitle">Manage tournament</h2>
+                    <button type="button" class="tn-x" id="tnManageClose" aria-label="Close">✕</button>
+                </div>
+                <nav class="tn-tabs" id="tnManageTabs">
+                    <button type="button" class="tn-tab active" data-tab="players">Players</button>
+                    <button type="button" class="tn-tab" data-tab="matches">Matches</button>
+                    <button type="button" class="tn-tab" data-tab="decks" id="tnDecksTab">Deck lists</button>
+                </nav>
+                <div id="tnManageBody" class="tn-detail"></div>
+            </div>
+        </div>
+
+        <!-- ══════════ Join with a password ══════════ -->
+        <div class="tn-overlay" id="tnPasswordOverlay" hidden>
+            <div class="tn-modal tn-modal-small" role="dialog" aria-modal="true" aria-labelledby="tnPasswordTitle">
+                <div class="tn-modal-head">
+                    <h2 id="tnPasswordTitle">Password needed</h2>
+                    <button type="button" class="tn-x" id="tnPasswordClose" aria-label="Close">✕</button>
+                </div>
+                <form id="tnPasswordForm" class="tn-form" autocomplete="off">
+                    <p class="tn-hint" id="tnPasswordFor"></p>
+                    <label class="tn-field">
+                        <span>Password</span>
+                        <input type="password" id="tnPasswordInput" maxlength="40" required>
+                    </label>
+                    <div id="tnPasswordError" class="tn-error" hidden></div>
+                    <div class="tn-modal-actions">
+                        <button type="button" class="tn-btn" id="tnPasswordCancel">Cancel</button>
+                        <button type="submit" class="tn-btn tn-btn-primary">Join</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- ══════════ Submit a deck list ══════════ -->
+        <div class="tn-overlay" id="tnDeckOverlay" hidden>
+            <div class="tn-modal" role="dialog" aria-modal="true" aria-labelledby="tnDeckTitle">
+                <div class="tn-modal-head">
+                    <h2 id="tnDeckTitle">Submit your deck list</h2>
+                    <button type="button" class="tn-x" id="tnDeckClose" aria-label="Close">✕</button>
+                </div>
+                <div id="tnDeckBody" class="tn-detail"></div>
+            </div>
+        </div>
+
+        <!-- ══════════ View a submitted deck list ══════════ -->
+        <div class="tn-overlay" id="tnDeckViewOverlay" hidden>
+            <div class="tn-modal tn-modal-wide" role="dialog" aria-modal="true" aria-labelledby="tnDeckViewTitle">
+                <div class="tn-modal-head">
+                    <h2 id="tnDeckViewTitle">Deck list</h2>
+                    <button type="button" class="tn-x" id="tnDeckViewClose" aria-label="Close">✕</button>
+                </div>
+                <div id="tnDeckViewBody" class="tn-detail"></div>
+            </div>
+        </div>
+
+        <div id="tnToast" class="tn-toast" hidden></div>
+      </section>
+
       <section class="view" id="gameView" data-view-panel="game">
         <h2 id="gameTitle" class="visually-hidden">Self-practice setup</h2>
         <div class="practice-shell setup-mode">
@@ -971,13 +1335,13 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=264"></script>
+  <script src="js/version.js?v=265"></script>
   <script src="js/rotate-prompt.js"></script>
-  <script src="js/auth-ui.js?v=263"></script>
+  <script src="js/auth-ui.js?v=265"></script>
   <script src="js/cards/cardCollections.js?v=draft-1"></script>
   <script src="js/cards/decks.js?v=creation-10"></script>
   <script src="js/manual-play.js?v=manual-28"></script>
-  <script src="app.js?v=creation-138"></script>
+  <script src="app.js?v=creation-139"></script>
   <script src="js/deck-v2.js?v=deckv2-5"></script>
   <script>
     // Home-page Turn Automation settings. Persists to localStorage under the

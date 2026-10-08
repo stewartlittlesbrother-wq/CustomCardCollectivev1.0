@@ -20,7 +20,7 @@ import {
   nameOf,
   timeoutRuleOf,
   swissStandings
-} from "./tournamentEngine.js?v=tour-8";
+} from "./tournamentEngine.js?v=tab-1";
 
 const MINUTE = 60000;
 const HOUR = 60 * MINUTE;

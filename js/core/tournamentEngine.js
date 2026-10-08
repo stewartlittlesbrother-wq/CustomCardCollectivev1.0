@@ -845,6 +845,7 @@ export function cleanSettings(raw, ctx = {}) {
 
   f.lateJoin = Boolean(raw.lateJoin);
   f.private = Boolean(raw.private);
+  f.showTopDecks = raw.showTopDecks !== false;
 
   // Swiss: an optional custom number of rounds.
   const custom = intIn(raw.roundsSetting, 1, 30);
@@ -883,7 +884,7 @@ const LOCKED_AFTER_START = ["matchType", "format", "bestOf", "collections", "sta
 // Every field cleanSettings produces - they're all replaced together on an edit.
 const SETTING_KEYS = ["name", "description", "matchType", "format", "bestOf", "roundMode", "timeoutRule", "clockMinutes",
   "collections", "banned", "startAt", "roundMinutes", "minPlayers", "maxPlayers", "lateJoin", "private", "roundsSetting",
-  "requireDeck", "deckDeadline", "draft"];
+  "requireDeck", "deckDeadline", "draft", "showTopDecks"];
 
 /** Apply an organiser's edits to a stored tournament. Returns { tournament, changed, error }. */
 export function applySettings(input, raw, now = Date.now()) {
@@ -916,6 +917,95 @@ export function applySettings(input, raw, now = Date.now()) {
   }
   const changed = JSON.stringify(t) !== JSON.stringify(input);
   return { tournament: changed ? t : input, changed, error: null };
+}
+
+// ── bracket & final placings ────────────────────────────────────────────────
+
+/**
+ * Knockout bracket for drawing: every round from 1 to the final, including rounds
+ * not drawn yet (their slots are filled with whoever has already won the feeding
+ * match). Round r has size / 2^r matches; match j of round r is fed by matches 2j
+ * and 2j+1 of round r-1 (that's how eliminationNextPairings pairs the winners).
+ * Returns { size, rounds: [{ n, label, matches: [{ id, a, b, bye, winner, reason,
+ * scoreA, scoreB, drawn, live }] }], champion } - a/b are uids or "" (not known yet).
+ */
+export function bracketModel(t) {
+  const total = Math.max(1, Number(t.totalRounds) || 0);
+  const size = 2 ** total;
+  const rounds = [];
+  for (let n = 1; n <= total; n++) {
+    const count = size / 2 ** n;
+    const drawn = pairingsOf(getRound(t, n));
+    const matches = [];
+    for (let j = 0; j < count; j++) {
+      const p = drawn[j];
+      if (p) {
+        const score = seriesScore(p);
+        const winner = p.result && p.result.winner && p.result.winner !== "none" ? p.result.winner : "";
+        matches.push({
+          id: p.id, a: p.a || "", b: p.bye ? "" : (p.b || ""), bye: Boolean(p.bye), winner,
+          reason: (p.result && p.result.reason) || "", scoreA: score.a, scoreB: score.b, drawn: true,
+          live: !p.result && t.status === "running" && n === Number(t.currentRound)
+        });
+      } else {
+        const prev = rounds[n - 2] ? rounds[n - 2].matches : [];
+        const feed = (k) => (prev[k] && prev[k].winner) || "";
+        matches.push({ id: `r${n}m${j + 1}`, a: feed(2 * j), b: feed(2 * j + 1), bye: false, winner: "",
+          reason: "", scoreA: 0, scoreB: 0, drawn: false, live: false });
+      }
+    }
+    const left = total - n;
+    const label = left === 0 ? "Final" : left === 1 ? "Semi-finals" : left === 2 ? "Quarter-finals" : `Round ${n}`;
+    rounds.push({ n, label, matches });
+  }
+  const final = rounds[rounds.length - 1].matches[0];
+  return { size, rounds, champion: t.status === "complete" ? (t.winner || (final && final.winner) || "") : "" };
+}
+
+/** How many decks a finished tournament shows: top 4, or top 8 with 16+ players. */
+export function topDeckCount(t) {
+  const players = Object.keys((t && t.players) || {}).length;
+  return Math.min(players, players >= 16 ? 8 : 4);
+}
+
+/** Does this tournament publish its top decks when it ends? New tournaments choose
+ *  (on by default). Older ones: yes, unless they collected deck lists, which were
+ *  promised to be seen by the organiser only. */
+export function showsTopDecks(t) {
+  if (!t) return false;
+  if (typeof t.showTopDecks === "boolean") return t.showTopDecks;
+  return !deckRequired(t);
+}
+
+/**
+ * Final placings of a finished tournament, best first: [{ uid, place, label }].
+ * Knockout: 1st, 2nd, then "Top 4" (lost a semi-final), "Top 8"... Swiss: the
+ * standings (removed players left out). Only the first `limit` are returned.
+ */
+export function placings(t, limit = topDeckCount(t)) {
+  if (!t || t.status !== "complete") return [];
+  const out = [];
+  if (t.format === "swiss") {
+    swissStandings(t).filter(s => !s.kicked).forEach((s, i) => {
+      out.push({ uid: s.uid, place: i + 1, label: i === 0 ? "1st" : i === 1 ? "2nd" : i === 2 ? "3rd" : `${i + 1}th` });
+    });
+    return out.slice(0, limit);
+  }
+  const total = Number(t.totalRounds) || 0;
+  const seen = new Set();
+  const add = (uid, place, label) => { if (uid && !seen.has(uid)) { seen.add(uid); out.push({ uid, place, label }); } };
+  if (t.winner) add(t.winner, 1, "1st");
+  for (let n = total; n >= 1 && out.length < limit; n--) {
+    const left = total - n;   // 0 = final, 1 = semis...
+    const place = left === 0 ? 2 : 2 ** left + 1;
+    const label = left === 0 ? "2nd" : `Top ${2 ** (left + 1)}`;
+    pairingsOf(getRound(t, n)).forEach(p => {
+      if (p.bye || !p.result || !p.result.winner) return;
+      const loser = p.result.winner === p.a ? p.b : p.a;
+      add(loser, place, label);
+    });
+  }
+  return out.slice(0, limit);
 }
 
 // ── what a player should see ────────────────────────────────────────────────
