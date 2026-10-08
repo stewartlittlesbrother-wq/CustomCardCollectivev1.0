@@ -395,7 +395,7 @@
                     }
                 });
                 if (account && account.uid) {
-                    tournamentAlerts().then(mod => mod && mod.startTournamentAlerts(account.uid));
+                    tournamentAlerts().then(mod => mod && mod.startTournamentAlerts(account.uid, account.displayName || ""));
                 } else if (alertsPromise) {
                     alertsPromise.then(mod => mod && mod.stopTournamentAlerts());
                 }

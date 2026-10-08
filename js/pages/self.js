@@ -811,6 +811,9 @@ function applyOnlinePublicState(publicState = {}) {
         player2: publicState.player2 || null
     };
 
+    // A freshly dealt Quick match game: put my ladder rating in the room (once).
+    maybeWriteLadderSnapshot();
+
     // Self-heal a mulligan deadlock: if BOTH players are marked done but the
     // phase is still "mulligan" (they both decided at the same instant, so
     // neither write saw the other and neither advanced the phase), finish the
@@ -1451,6 +1454,7 @@ function handleOnlineGameOver() {
 // Each player records their own result once per dealt game (public/gameId), then
 // the game-over screen shows the updated record.
 async function recordOnlineResult(won) {
+    recordProfileGame(won);
     if (isSpectator || !onlineMultiplayerService?.recordMatchResult) return;
     if (!onlineUser || onlineUser.isAnonymous || !onlinePublicState?.gameId) return;
     try {
@@ -1465,6 +1469,86 @@ async function recordOnlineResult(won) {
         if (reason) reason.after(line); else popup.appendChild(line);
     } catch (error) {
         console.warn("Couldn't update your win/loss record:", error);
+    }
+}
+
+// ── Player profile + ranked ladder (accounts only) ──
+// Every finished online game goes on the player's public profile (record, leaders,
+// recent games). Quick match games where both players are on the ladder also move
+// their rating: each board writes its player's rating into the room when the game
+// is dealt, and at the end each player's own browser updates its own rating from
+// those two numbers (see js/firebase/profileService.js).
+let profileSvc = null;
+let roomQuick = false;
+let seatUids = { p1: "", p2: "" };
+let ladderSnapshotFor = "";
+
+function loadProfileService() {
+    if (!profileSvc) profileSvc = import("../firebase/profileService.js?v=1");
+    return profileSvc;
+}
+
+async function loadRoomFacts() {
+    if (!isOnlineMatch || !onlineFirebaseApp) return;
+    try {
+        const db = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
+        const read = (path) => db.get(db.ref(onlineFirebaseApp.database, `matches/${roomCode}/${path}`)).then(s => s.val());
+        const [quick, p1, p2] = await Promise.all([read("quickMatch"), read("players/p1/uid"), read("players/p2/uid")]);
+        roomQuick = Boolean(quick);
+        seatUids = { p1: p1 || "", p2: p2 || "" };
+        maybeWriteLadderSnapshot();
+    } catch (error) {
+        console.warn("Couldn't read the room details:", error);
+    }
+}
+
+function maybeWriteLadderSnapshot() {
+    if (isSpectator || !roomQuick || !onlineUser || onlineUser.isAnonymous) return;
+    const gameId = onlinePublicState?.gameId;
+    if (!gameId || ladderSnapshotFor === gameId || onlinePublicState.winner) return;
+    ladderSnapshotFor = gameId;
+    loadProfileService()
+        .then(svc => svc.writeLadderSnapshot(roomCode, gameId, playerSlot, onlineUser.uid))
+        .catch(error => console.warn("Couldn't note your ladder rating:", error));
+}
+
+async function recordProfileGame(won) {
+    if (isSpectator || !onlineUser || onlineUser.isAnonymous || !onlinePublicState?.gameId) return;
+    try {
+        const svc = await loadProfileService();
+        const gameId = onlinePublicState.gameId;
+        const foeSlot = playerSlot === "p1" ? "p2" : "p1";
+        const ownKey = getOwnOnlinePlayerKey();
+        const own = (gameState && gameState[ownKey]) || {};
+        const foe = (gameState && gameState[ownKey === "player1" ? "player2" : "player1"]) || {};
+        let ladder = null;
+        if (roomQuick) {
+            const snap = await svc.readLadderSnapshot(roomCode, gameId);
+            const mine = snap[playerSlot], theirs = snap[foeSlot];
+            if (mine && theirs && theirs.uid !== onlineUser.uid) ladder = { mine: mine.elo, theirs: theirs.elo };
+        }
+        const delta = await svc.recordGame(onlineUser.uid, {
+            gameId, won,
+            myName: onlinePlayerLabels[playerSlot] || "",
+            opp: onlinePlayerLabels[foeSlot] || "Opponent",
+            oppUid: seatUids[foeSlot] || "",
+            leader: own.leader ? (own.leader.cardNumber || own.leader.id || "") : "",
+            leaderName: own.leader ? (own.leader.name || "") : "",
+            oppLeader: foe.leader ? (foe.leader.cardNumber || foe.leader.id || "") : "",
+            oppLeaderName: foe.leader ? (foe.leader.name || "") : "",
+            quick: roomQuick, ladder
+        });
+        if (delta === null) return;
+        const popup = document.querySelector("#gameOverOverlay .game-over-popup");
+        if (!popup || popup.querySelector(".game-over-ladder")) return;
+        const line = document.createElement("p");
+        line.className = "game-over-ladder";
+        line.style.cssText = `margin:4px 0 0;font-weight:800;color:${delta >= 0 ? "#4dff9e" : "#ffb3b5"};`;
+        line.textContent = `Ladder rating ${delta >= 0 ? "+" : ""}${delta}`;
+        const anchor = popup.querySelector(".game-over-record") || popup.querySelector(".game-over-reason-text");
+        if (anchor) anchor.after(line); else popup.appendChild(line);
+    } catch (error) {
+        if (!/permission|denied/i.test(String(error?.message || ""))) console.warn("Couldn't update your profile:", error);
     }
 }
 
@@ -2333,6 +2417,7 @@ async function initializeOnlineMultiplayer() {
         setupOnlinePlayerNames();
         setupOnlineCosmetics();
         loadTournamentContext();   // is this room a tournament match? (fire and forget)
+        loadRoomFacts();           // Quick match? who sits where? (profiles + ladder)
         startGameClock();          // optional per-player game clock
 
         // Multiplayer code reads public board/count state plus this user's private zones only.

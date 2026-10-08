@@ -300,7 +300,7 @@ function initialView() {
   const requestedView = params.get("view");
   // A tournament link (?t=<id>) opens the Tournaments tab on that tournament.
   if (!requestedView && params.get("t")) return "tournaments";
-  return ["home", "builder", "game", "settings", "multiplayer", "tournaments"].includes(requestedView) ? requestedView : "home";
+  return ["home", "builder", "game", "settings", "multiplayer", "tournaments", "players"].includes(requestedView) ? requestedView : "home";
 }
 
 const state = {
@@ -6353,7 +6353,61 @@ function showView(view) {
   if (view === "hotkeys") renderHotkeys();
   if (view === "multiplayer") openMultiplayerTab();
   if (view === "tournaments") openTournamentsTab();
+  if (view === "players") openPlayersTab();
 }
+
+// Players is a tab too (profiles, friends, ranked ladder - js/pages/playersTab.js).
+let playersTabModule = null;
+let playersTabLoading = false;
+function openPlayersTab() {
+  if (playersTabModule) { playersTabModule.show(); return; }
+  if (playersTabLoading) return;
+  playersTabLoading = true;
+  import("./js/pages/playersTab.js?v=1")
+    .then(mod => {
+      playersTabModule = mod;
+      if (state.activeView === "players") mod.show();
+    })
+    .catch(error => {
+      playersTabLoading = false;
+      const rootEl = document.getElementById("plRoot");
+      if (rootEl) rootEl.innerHTML = `<p class="pl-loading">Players couldn't load (${escapeHtml(error.message)}). Check your connection and refresh.</p>`;
+    });
+}
+
+// Shared by the Multiplayer, Tournaments and Players tabs and the alerts:
+// - ccShowView(view): switch tab
+// - ccEnterRoom(code, slot): straight into a room I already have a seat in
+// - ccJoinRoom(code): join someone's room (a friend's invite)
+// - ccCardArt(number): a card's picture (leader art on profiles)
+window.ccShowView = (view) => showView(view);
+window.ccEnterRoom = (code, slot) => {
+  try {
+    const url = new URL(location.href);
+    url.search = "";
+    url.searchParams.set("view", "multiplayer");
+    url.searchParams.set("room", code);
+    url.searchParams.set("slot", slot);
+    history.replaceState(null, "", url.toString());
+  } catch { /* the room still opens */ }
+  showView("multiplayer");
+  if (multiplayerTabModule && multiplayerTabModule.enterRoom) multiplayerTabModule.enterRoom(code, slot);
+};
+window.ccJoinRoom = (code) => {
+  try {
+    const url = new URL(location.href);
+    url.search = "";
+    url.searchParams.set("view", "multiplayer");
+    url.searchParams.set("join", code);
+    history.replaceState(null, "", url.toString());
+  } catch { /* still joins */ }
+  showView("multiplayer");
+  if (multiplayerTabModule && multiplayerTabModule.joinFromOutside) multiplayerTabModule.joinFromOutside(code);
+};
+window.ccCardArt = async (key) => {
+  const card = getCardByKey(key) || getCard(key) || state.cards.find(c => c.cardNumber === key);
+  return card ? resolveCardImageUrl(card) : "";
+};
 
 // Tournament alerts (corner pop-ups and the bell) open a tournament on this page,
 // without a reload: the Tournaments tab, on that tournament (or the organiser's
@@ -6383,25 +6437,14 @@ function openTournamentsTab() {
   window.ccTnHost = {
     showView,
     // Straight into a tournament match's room (no page load).
-    enterRoom(code, slot) {
-      try {
-        const url = new URL(location.href);
-        url.search = "";
-        url.searchParams.set("view", "multiplayer");
-        url.searchParams.set("room", code);
-        url.searchParams.set("slot", slot);
-        history.replaceState(null, "", url.toString());
-      } catch { /* the room still opens */ }
-      showView("multiplayer");
-      if (multiplayerTabModule && multiplayerTabModule.enterRoom) multiplayerTabModule.enterRoom(code, slot);
-    },
+    enterRoom(code, slot) { window.ccEnterRoom(code, slot); },
     // A published top deck -> the Deck Builder, as an unsaved deck the player can
     // look at and save. deck = { name, leaderKey, leaderKey2?, deckText }.
     openDeckInBuilder(deck) {
       return openDeckFromTournament(deck);
     }
   };
-  import("./js/pages/tournaments.js?v=tab-1")
+  import("./js/pages/tournaments.js?v=tab-2")
     .then(mod => {
       tournamentsTabModule = mod;
       if (state.activeView === "tournaments") mod.show();
@@ -6444,7 +6487,7 @@ function openMultiplayerTab() {
         .sort((a, b) => a.name.localeCompare(b.name));
     }
   };
-  import("./js/pages/multiplayerTab.js?v=mpx-6")
+  import("./js/pages/multiplayerTab.js?v=mpx-7")
     .then(mod => {
       multiplayerTabModule = mod;
       if (state.activeView === "multiplayer") mod.show();

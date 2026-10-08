@@ -19,7 +19,8 @@ import {
   deckRequired,
   nameOf,
   timeoutRuleOf,
-  swissStandings
+  swissStandings,
+  placings
 } from "./tournamentEngine.js?v=tab-1";
 
 const MINUTE = 60000;
@@ -223,4 +224,46 @@ export function alertsFor(tournaments, uid, now = Date.now()) {
   const byGroup = new Map();
   out.sort((a, b) => b.at - a.at).forEach(a => { if (!byGroup.has(a.group)) byGroup.set(a.group, a); });
   return [...byGroup.values()];
+}
+
+// ── friends & invites (inbox messages) ───────────────────────────────────────
+
+export const INVITE_FRESH_MS = 30 * 60 * 1000;
+
+/** Alerts for inbox messages: friend requests, accepted requests and game invites
+ *  (invites only while fresh). `inbox` = the message id; deleteOnDismiss = the
+ *  message is removed when the alert is dismissed or acted on. */
+export function inboxAlertsFor(items, now = Date.now()) {
+  return (items || []).map(item => {
+    if (!item || !item.id) return null;
+    const at = Number(item.at) || now;
+    const name = item.fromName || "A player";
+    const base = { key: `inbox|${item.id}`, group: `inbox|${item.id}`, at, inbox: item.id };
+    if (item.type === "friendRequest") {
+      return { ...base, tone: "info", icon: "🤝", title: `${name} wants to be friends`,
+        body: "Accept or decline on the Players tab.", action: { label: "View", kind: "players" } };
+    }
+    if (item.type === "friendAccept") {
+      return { ...base, tone: "info", icon: "🤝", title: `${name} accepted your friend request`,
+        body: "You can invite each other to games from the Players tab now.", action: { label: "View", kind: "players" }, deleteOnDismiss: true };
+    }
+    if (item.type === "invite" && item.room && now - at < INVITE_FRESH_MS) {
+      return { ...base, tone: "urgent", icon: "🎮", title: `${name} invited you to a game`,
+        body: "Their room is waiting for you — join to play.", action: { label: "Join", kind: "join", room: item.room }, deleteOnDismiss: true };
+    }
+    return null;
+  }).filter(Boolean);
+}
+
+/** The tournaments where this player finished in the top places, as profile trophies. */
+export function trophiesFor(tournaments, uid) {
+  const out = {};
+  (tournaments || []).forEach(t => {
+    if (!t || !t.id || t.status !== "complete") return;
+    const mine = placings(t).find(p => p.uid === uid);
+    if (!mine) return;
+    out[t.id] = { name: String(t.name || "Tournament").slice(0, 60), place: mine.place, label: mine.label,
+      players: Object.keys(t.players || {}).length, at: Number(t.completedAt) || 0 };
+  });
+  return out;
 }

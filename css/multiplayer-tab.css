@@ -216,3 +216,4 @@ html.touch-device #multiplayerView.view.active { overflow: visible; }
 @media (prefers-reduced-motion: reduce) {
   #multiplayerView .mpx-spinner, #multiplayerView .mpx-quick-live .mpx-dot { animation: none; }
 }
+#multiplayerView .mpx-profile-link { font-size: .78rem; font-weight: 700; vertical-align: middle; margin-left: 6px; }

@@ -500,7 +500,7 @@ function roundHtml(t, n) {
 
 function standingsHtml(t) {
     const rows = swissStandings(t).map(r => `<tr class="${r.uid === state.me.uid ? "me" : ""}${r.kicked ? " removed" : ""}">
-        <td>${r.rank}</td><td>${esc(r.name)}${r.kicked ? " (removed)" : ""}</td><td>${r.points}</td><td>${r.wins}–${r.losses}</td><td>${r.buchholz}</td></tr>`).join("");
+        <td>${r.rank}</td><td><button type="button" class="tn-name-link" data-profile="${esc(r.uid)}" data-name="${esc(r.name)}">${esc(r.name)}</button>${r.kicked ? " (removed)" : ""}</td><td>${r.points}</td><td>${r.wins}–${r.losses}</td><td>${r.buchholz}</td></tr>`).join("");
     return `<table class="tn-table"><thead><tr><th>#</th><th>Player</th><th>Points</th><th>W–L</th><th>Opp. points</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
@@ -565,7 +565,7 @@ function detailHtml(t) {
     const status = statusInfo(t, now);
     const players = playersInOrder(t).map(p => {
         const cls = p.uid === t.winner ? "champ" : p.uid === state.me.uid ? "me" : "";
-        return `<span class="tn-player ${cls}">${p.uid === t.winner ? "🏆 " : ""}${esc(p.name)}${p.uid === state.me.uid ? " (you)" : ""}</span>`;
+        return `<button type="button" class="tn-player ${cls}" data-profile="${esc(p.uid)}" data-name="${esc(p.name)}" title="See ${esc(p.name)}'s profile">${p.uid === t.winner ? "🏆 " : ""}${esc(p.name)}${p.uid === state.me.uid ? " (you)" : ""}</button>`;
     }).join("") || `<span class="tn-hint">Nobody has joined yet.</span>`;
 
     let rounds = "";
@@ -732,6 +732,11 @@ $("tnDetailOverlay").addEventListener("click", (event) => { if (event.target ===
 $("tnDetailBody").addEventListener("click", (event) => {
     const action = event.target.closest("[data-act]");
     if (action) { handleAction(action); return; }
+    const person = event.target.closest("[data-profile]");
+    if (person) {
+        import("../profileDialog.js?v=1").then(m => m.openProfile(person.dataset.profile, person.dataset.name)).catch(() => {});
+        return;
+    }
     const view = event.target.closest("[data-bkview]");
     if (view) { state.bracketView = view.dataset.bkview; refreshDetail(); return; }
     const top = event.target.closest("[data-top]");

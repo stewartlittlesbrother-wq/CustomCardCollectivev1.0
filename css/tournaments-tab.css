@@ -562,3 +562,7 @@ html.touch-device #tournamentsView.view.active { overflow: visible; }
   #tournamentsView .tn-top-row { grid-template-columns: 64px 40px minmax(0, 1fr); }
   #tournamentsView .tn-top-actions { grid-column: 1 / -1; justify-content: flex-start; }
 }
+#tournamentsView button.tn-player { cursor: pointer; }
+#tournamentsView button.tn-player:hover { border-color: rgba(77, 255, 158, .55); }
+#tournamentsView .tn-name-link { color: inherit; font-weight: 600; }
+#tournamentsView .tn-name-link:hover { color: var(--accent-neon); text-decoration: underline; }

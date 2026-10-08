@@ -95,6 +95,38 @@
           ".validate": "newData.hasChildren(['name', 'cards', 'deck', 'submittedAt']) && newData.child('name').isString() && newData.child('name').val().length <= 60"
         }
       }
+    },
+    "profiles": {
+      ".read": "auth != null",
+      ".indexOn": [
+        "ladderElo",
+        "nameLower"
+      ],
+      "$uid": {
+        ".write": "auth != null && auth.token.firebase.sign_in_provider !== 'anonymous' && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['name']) && newData.child('name').isString() && newData.child('name').val().length <= 30 && (!newData.child('ladderElo').exists() || newData.child('ladderElo').isNumber())"
+      }
+    },
+    "friends": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.token.firebase.sign_in_provider !== 'anonymous' && auth.uid === $uid"
+      }
+    },
+    "inbox": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$msg": {
+          ".write": "auth != null && auth.token.firebase.sign_in_provider !== 'anonymous' && ((!data.exists() && newData.child('fromUid').val() === auth.uid) || (auth.uid === $uid && !newData.exists()))",
+          ".validate": "newData.hasChildren(['type', 'fromUid', 'fromName', 'at']) && newData.child('fromName').isString() && newData.child('fromName').val().length <= 30 && (newData.child('type').val() === 'friendRequest' || newData.child('type').val() === 'friendAccept' || newData.child('type').val() === 'invite')"
+        }
+      }
+    },
+    "status": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid"
+      }
     }
   }
 }

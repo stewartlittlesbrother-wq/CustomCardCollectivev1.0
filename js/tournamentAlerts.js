@@ -5,7 +5,11 @@
 // What to show is decided by ./core/tournamentAlertRules.js; this file draws it.
 //
 // A bell in the top bar keeps the last alerts (with an unread count), so one that was
-// dismissed or missed isn't lost.
+// dismissed or missed isn't lost. Friend requests and game invites from the Players
+// tab (the account's inbox) show up here the same way.
+//
+// While signed in it also: marks the account online (for friends lists), creates
+// / renames the player profile, and adds tournament trophies to it.
 //
 // Loaded by auth-ui.js once someone is signed in (tournaments need an account).
 // It also keeps the player's tournaments moving: rounds only advance when a
@@ -16,7 +20,8 @@ import { ref, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebas
 import { database } from "./firebase/firebaseApp.js";
 import { BASE_PATH } from "./firebase/tournamentPaths.js?v=tour-3";
 import { tick } from "./core/tournamentEngine.js?v=tab-1";
-import { alertsFor } from "./core/tournamentAlertRules.js?v=tab-1";
+import { alertsFor, inboxAlertsFor, trophiesFor, INVITE_FRESH_MS } from "./core/tournamentAlertRules.js?v=tab-2";
+import * as profiles from "./firebase/profileService.js?v=1";
 
 const STORE_KEY = "cc_tn_alerts_v1";          // { dismissed: {key: ms}, announced: {key: ms}, history: [...] }
 const SERVICE_URL = "./firebase/tournamentService.js?v=tab-1";
@@ -34,7 +39,8 @@ const tournamentsTabVisible = () => Boolean(document.querySelector("#tournaments
 
 // On the game board the alerts start folded into a small pill (unless something new
 // arrives) so they never sit on top of the game.
-const run = { uid: "", list: [], unsub: null, refresh: null, nudge: null, expanded: false, minimized: onBoard,
+const run = { uid: "", name: "", list: [], inbox: [], unsubInbox: null, confirmed: new Set(), trophies: null,
+              unsub: null, refresh: null, nudge: null, expanded: false, minimized: onBoard,
               minimizeTimer: null, rendered: new Set(), nudgedAt: new Map(), nudging: false };
 
 // ── remembered state (shared by every tab) ───────────────────────────────────
@@ -154,6 +160,22 @@ function linkFor(action) {
 // the game board a new browser tab, so the game in progress is never left.
 function openAction(action) {
     if (!action) return;
+    if (action.kind === "players") {
+        const url = new URL(appUrl);
+        url.searchParams.set("view", "players");
+        if (onBoard) window.open(url.href, "_blank", "noopener");
+        else if (typeof window.ccShowView === "function") window.ccShowView("players");
+        else location.href = url.href;
+        return;
+    }
+    if (action.kind === "join") {
+        const url = new URL(appUrl);
+        url.searchParams.set("join", action.room);
+        if (onBoard) window.open(url.href, "_blank", "noopener");
+        else if (typeof window.ccJoinRoom === "function") window.ccJoinRoom(action.room);
+        else location.href = url.href;
+        return;
+    }
     if (onBoard) { window.open(linkFor(action), "_blank", "noopener"); return; }
     if (typeof window.ccOpenTournament === "function") { window.ccOpenTournament(action.tid || "", action.manage || ""); return; }
     location.href = linkFor(action);
@@ -163,7 +185,9 @@ let current = [];   // the alerts being shown, in order
 
 function visibleAlerts(now = Date.now()) {
     const store = readStore();
-    return alertsFor(run.list, run.uid, now).filter(a => !isDismissed(a, store, now));
+    return [...alertsFor(run.list, run.uid, now), ...inboxAlertsFor(run.inbox, now)]
+        .filter(a => !isDismissed(a, store, now))
+        .sort((a, b) => b.at - a.at);
 }
 
 function render() {
@@ -236,6 +260,9 @@ function dismiss(key) {
     const store = readStore();
     store.dismissed[key] = Date.now();
     writeStore(store);
+    // Accepted requests and invites are done with once seen: clear them from the inbox.
+    const alert = current.find(a => a.key === key);
+    if (alert && alert.inbox && alert.deleteOnDismiss && run.uid) profiles.deleteInbox(run.uid, alert.inbox).catch(() => {});
     render();
 }
 
@@ -420,23 +447,76 @@ async function nudge() {
 
 // ── start / stop ─────────────────────────────────────────────────────────────
 
-export function startTournamentAlerts(uid) {
+export function startTournamentAlerts(uid, name = "") {
     if (!uid) { stopTournamentAlerts(); return; }
-    if (run.uid === uid && run.unsub) return;
+    if (run.uid === uid && run.unsub) {
+        // Same account, new name (the saved name can arrive just after sign-in).
+        if (name && name !== run.name) {
+            run.name = name;
+            profiles.ensureProfile(uid, name).catch(() => {});
+            profiles.startPresence(uid, name);
+        }
+        return;
+    }
     stopTournamentAlerts();
     run.uid = uid;
+    run.name = name || "Player";
     run.unsub = onValue(ref(database, BASE_PATH), (snapshot) => {
         run.list = Object.entries(snapshot.val() || {})
             .map(([id, t]) => ({ ...t, id }))
             .filter(t => t && t.name);
         render();
         nudge();
+        syncTrophies();
     }, (error) => console.warn("Tournament alerts unavailable:", error));
+    startSocial();
     run.refresh = setInterval(render, REFRESH_MS);
     run.nudge = setInterval(nudge, NUDGE_MS);
 }
 
+// ── profile, online status, inbox ────────────────────────────────────────────
+// (All of this needs the database rules published; until then it quietly does
+// nothing.)
+
+function startSocial() {
+    const uid = run.uid;
+    profiles.ensureProfile(uid, run.name)
+        .then((profile) => { if (run.uid === uid) { run.trophies = new Set(Object.keys((profile && profile.trophies) || {})); syncTrophies(); } })
+        .catch(() => {});
+    profiles.startPresence(uid, run.name);
+    run.unsubInbox = profiles.watchInbox(uid, (items) => {
+        if (run.uid !== uid) return;
+        run.inbox = items;
+        const now = Date.now();
+        items.forEach(item => {
+            // They accepted my request: they're my friend now too.
+            if (item.type === "friendAccept" && !run.confirmed.has(item.id)) {
+                run.confirmed.add(item.id);
+                profiles.confirmAccepted(uid, item.fromUid, item.fromName, null).catch(() => {});
+            }
+            // An invite to a room that's long gone: tidy it away.
+            if (item.type === "invite" && now - Number(item.at || 0) > INVITE_FRESH_MS * 4) profiles.deleteInbox(uid, item.id).catch(() => {});
+        });
+        render();
+    }, () => {});
+}
+
+// Tournament trophies on my profile: any top finish not on it yet.
+function syncTrophies() {
+    if (!run.uid || !run.trophies) return;
+    const mine = trophiesFor(run.list, run.uid);
+    const missing = Object.fromEntries(Object.entries(mine).filter(([tid]) => !run.trophies.has(tid)));
+    if (!Object.keys(missing).length) return;
+    Object.keys(missing).forEach(tid => run.trophies.add(tid));
+    profiles.addTrophies(run.uid, missing).catch(() => {});
+}
+
 export function stopTournamentAlerts() {
+    if (run.unsubInbox) { try { run.unsubInbox(); } catch { /* already gone */ } }
+    run.unsubInbox = null;
+    run.inbox = [];
+    run.trophies = null;
+    profiles.stopPresence();
     if (run.unsub) { try { run.unsub(); } catch { /* already gone */ } }
     clearInterval(run.refresh);
     clearInterval(run.nudge);

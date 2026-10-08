@@ -1,0 +1,87 @@
+/* ═════════════════════════════════════════════════════════════════════════════
+   Players tab (inside the main app, see js/pages/playersTab.js): my profile with
+   the ranked-ladder switch, friends, and the ladder. Scoped to #playersView, with
+   the app's global button / input look reset inside it. The profile body itself
+   (pf-*) is styled by js/profileDialog.js, which the dialog shares.
+   ═════════════════════════════════════════════════════════════════════════════ */
+#playersView {
+  --pl-bg: #07090a;
+  --pl-surface: #0e1411;
+  --pl-surface-2: #141c18;
+  --pl-ink: #eef6f2;
+  --pl-soft: #b7c7be;
+  --pl-muted: #8fa398;
+  --pl-line: #222d27;
+  --pl-green-line: rgba(77, 255, 158, .34);
+  --pl-accent: #10b981;
+  --pl-accent-hi: #4dff9e;
+  --pl-gold: #e2b451;
+  color: var(--pl-ink);
+}
+#playersView.view.active { overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: rgba(77, 255, 158, .35) transparent; }
+html.touch-device #playersView.view.active { overflow: visible; }
+#playersView [hidden] { display: none !important; }
+#playersView button {
+  background: none; border: 0; border-radius: 0; min-height: 0; padding: 0; width: auto;
+  color: inherit; font: inherit; font-weight: inherit; box-shadow: none; filter: none; transition: none; cursor: pointer; text-transform: none;
+}
+#playersView button:hover { filter: none; box-shadow: none; }
+#playersView input { margin: 0; text-transform: none; }
+
+#playersView .pl-page { max-width: 1240px; margin: 0 auto; padding: 6px 4px 48px; display: flex; flex-direction: column; gap: 18px; }
+#playersView .pl-loading { padding: 60px 0; text-align: center; color: var(--pl-muted); }
+#playersView .pl-head h1 { margin: 0; font-size: clamp(1.8rem, 3.2vw, 2.5rem); letter-spacing: -.02em; line-height: 1.1; max-width: none; }
+#playersView .pl-head p { margin: 4px 0 0; color: var(--pl-soft); }
+#playersView .pl-notice { padding: 12px 16px; border-radius: 12px; border: 1px solid rgba(226, 180, 81, .5); background: rgba(226, 180, 81, .09); color: #f3dca0; line-height: 1.5; font-size: .92rem; }
+#playersView .pl-notice.ok { border-color: rgba(77, 255, 158, .45); background: rgba(16, 185, 129, .1); color: var(--pl-accent-hi); }
+#playersView .pl-notice code { background: rgba(0, 0, 0, .35); padding: 1px 6px; border-radius: 5px; }
+
+#playersView .pl-cols { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+#playersView .pl-card { display: flex; flex-direction: column; gap: 14px; padding: 20px; border: 1px solid var(--pl-line); border-radius: 16px; background: var(--pl-surface); min-width: 0; }
+#playersView .pl-card h2 { margin: 0; font-size: 1.2rem; font-weight: 850; }
+#playersView .pl-cardhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+#playersView .pl-hint { color: var(--pl-muted); font-size: .84rem; }
+#playersView .pl-signin { border-color: var(--pl-green-line); align-items: flex-start; }
+#playersView .pl-signin p { margin: 0; color: var(--pl-soft); max-width: 640px; line-height: 1.5; }
+#playersView .pl-me .pf-top { padding-right: 0; }
+
+#playersView .pl-switch { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--pl-green-line); background: rgba(16, 185, 129, .07); cursor: pointer; }
+#playersView .pl-switch input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--pl-accent); flex: none; }
+#playersView .pl-switch span { display: flex; flex-direction: column; gap: 2px; }
+#playersView .pl-switch small { color: var(--pl-soft); font-size: .84rem; }
+#playersView .pl-link { align-self: flex-start; color: var(--pl-accent-hi); font-weight: 700; font-size: .88rem; }
+#playersView .pl-link:hover { text-decoration: underline; }
+
+#playersView .pl-sub { display: flex; flex-direction: column; gap: 8px; }
+#playersView .pl-sub h3 { margin: 0; font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--pl-muted); font-weight: 750; }
+#playersView .pl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 360px; overflow-y: auto; }
+#playersView .pl-list li { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 10px; background: var(--pl-surface-2); min-width: 0; }
+#playersView .pl-name { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; flex: 1; text-align: left; font-weight: 750; }
+#playersView .pl-name small { color: var(--pl-muted); font-weight: 600; font-size: .78rem; }
+#playersView .pl-name small.on { color: var(--pl-accent-hi); }
+#playersView .pl-name:hover { color: var(--pl-accent-hi); }
+#playersView .pl-name.inline { flex-direction: row; align-items: center; gap: 8px; }
+#playersView .pl-name.inline small { display: inline; }
+#playersView .pl-row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+#playersView .pl-muted { color: var(--pl-muted); font-size: .84rem; }
+#playersView .pf-btn { padding: 7px 12px; border-radius: 9px; border: 1px solid var(--pl-line); background: var(--pl-surface-2); color: var(--pl-ink); font-weight: 700; font-size: .86rem; white-space: nowrap; }
+#playersView .pf-btn:hover:not(:disabled) { border-color: rgba(77, 255, 158, .5); }
+#playersView .pf-btn.primary { background: #0e9f70; border-color: transparent; color: #fff; }
+#playersView .pf-btn:disabled { opacity: .55; cursor: default; }
+#playersView .pl-search { display: flex; gap: 8px; }
+#playersView .pl-search input { flex: 1; min-width: 0; min-height: 38px; padding: 7px 11px; border-radius: 10px; border: 1px solid #2b3a32; background: var(--pl-bg); color: var(--pl-ink); font: inherit; font-size: .92rem; }
+#playersView .pl-search input:focus { outline: 2px solid var(--pl-accent); outline-offset: 0; }
+
+#playersView .pl-table-wrap { overflow-x: auto; }
+#playersView .pl-table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+#playersView .pl-table th { text-align: left; color: var(--pl-muted); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; padding: 6px 10px; border-bottom: 1px solid var(--pl-line); }
+#playersView .pl-table td { padding: 7px 10px; border-bottom: 1px solid #18211d; }
+#playersView .pl-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#playersView .pl-table .muted { color: var(--pl-muted); }
+#playersView .pl-table .rank { width: 44px; font-weight: 800; font-variant-numeric: tabular-nums; }
+#playersView .pl-table tr.me td { background: rgba(16, 185, 129, .1); }
+#playersView .pl-table tr.me td:first-child { box-shadow: inset 3px 0 0 var(--pl-accent-hi); }
+
+@media (max-width: 900px) {
+  #playersView .pl-cols { grid-template-columns: minmax(0, 1fr); }
+}

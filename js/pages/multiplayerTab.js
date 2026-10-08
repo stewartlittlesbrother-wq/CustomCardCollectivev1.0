@@ -150,6 +150,16 @@ export function enterRoom(code, slot) {
     openRoom(clean, slot === "p2" ? "p2" : "p1");
 }
 
+// Join someone's room from elsewhere in the app (a friend's game invite). The host
+// has already put ?join= in the URL, which boot() reads the first time.
+export function joinFromOutside(code) {
+    const clean = cleanCode(code);
+    if (!clean) return;
+    if (!started) { show(); return; }
+    root = document.getElementById("mpxRoot");
+    joinByCode(clean);
+}
+
 export function show() {
     root = document.getElementById("mpxRoot");
     if (!root) return;
@@ -1268,7 +1278,7 @@ function sidePanel(player, label, isMe) {
         <div class="mpx-side-body">
           <div>
             <div class="mpx-who">${label}</div>
-            <div class="mpx-name">${esc(player.name || label)}</div>
+            <div class="mpx-name">${esc(player.name || label)}${player.uid ? ` <button type="button" class="mpx-link mpx-profile-link" data-profile="${esc(player.uid)}" data-name="${esc(player.name || label)}">Profile</button>` : ""}</div>
             <div class="mpx-deckline">${deckLine}</div>
           </div>
           ${chips}
@@ -1300,6 +1310,11 @@ function renderVersus() {
     box.innerHTML = sidePanel(me, "You", true) +
         `<div class="mpx-vs" aria-hidden="true">VS</div>` +
         (foe ? sidePanel(foe, "Opponent", false) : waitingPanel());
+    box.querySelectorAll("[data-profile]").forEach((button) => {
+        button.addEventListener("click", () => {
+            import("../profileDialog.js?v=1").then(m => m.openProfile(button.dataset.profile, button.dataset.name)).catch(() => {});
+        });
+    });
     const copy = $("#mpxInviteCopy", box);
     if (copy) copy.addEventListener("click", (event) => copyText(inviteLink(room.code), event.currentTarget));
     const input = $("#mpxInviteInput", box);
