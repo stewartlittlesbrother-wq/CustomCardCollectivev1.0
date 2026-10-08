@@ -5667,6 +5667,23 @@ function importDeckFromText(text) {
   return true;
 }
 
+// Deck Builder "Test hand": sample opening hands, mulligan, draws and the odds of
+// drawing a card by a given turn (js/handTester.js, loaded on first use).
+window.ccOpenHandTester = () => {
+  if (state.cardsLoading) { toast("Cards are still loading — try again in a moment."); return; }
+  if (deckMainCount() < 5) { toast("Add at least 5 cards to your deck to test hands."); return; }
+  import("./js/handTester.js?v=1")
+    .then(mod => mod.openHandTester({
+      entries: () => deckEntries(),
+      deckName: () => (el.deckName?.value || state.deckName || "").trim(),
+      imageFor: (card) => resolveCardImageUrl(card)
+    }))
+    .catch(error => {
+      console.warn(error);
+      toast("Couldn't open the hand tester — check your connection and try again.");
+    });
+};
+
 // A tournament's published top deck -> the Deck Builder (Tournaments tab, "Open in
 // Deck Builder"). deck = { name, leaderKey, leaderKey2?, deckText ("4xNUM" lines) }.
 // It replaces the deck being edited, so ask first when there is one.
@@ -6427,7 +6444,7 @@ function openMultiplayerTab() {
         .sort((a, b) => a.name.localeCompare(b.name));
     }
   };
-  import("./js/pages/multiplayerTab.js?v=mpx-5")
+  import("./js/pages/multiplayerTab.js?v=mpx-6")
     .then(mod => {
       multiplayerTabModule = mod;
       if (state.activeView === "multiplayer") mod.show();
@@ -8429,7 +8446,7 @@ async function maybeStartMultiplayerDraft() {
   try {
     [firebaseApp, svc] = await Promise.all([
       import("./js/firebase/firebaseApp.js"),
-      import("./js/firebase/multiplayerService.js?v=clock-1")
+      import("./js/firebase/multiplayerService.js?v=quick-1")
     ]);
     await firebaseApp.signInGuest();
   } catch (e) {

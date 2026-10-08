@@ -341,6 +341,13 @@
 
         const actions = make("div", "v2-dactions");
 
+        // Opening-hand tester (app.js window.ccOpenHandTester).
+        const testButton = make("button", "v2-btn", "🖐 Test hand");
+        testButton.type = "button";
+        testButton.title = "Draw sample opening hands and see the odds of drawing a card by turn X";
+        testButton.addEventListener("click", () => { if (window.ccOpenHandTester) window.ccOpenHandTester(); });
+        actions.append(testButton);
+
         // Export / import
         const exportWrap = make("div", "v2-menu-wrap");
         const exportButton = make("button", "v2-btn", "Export ▾");

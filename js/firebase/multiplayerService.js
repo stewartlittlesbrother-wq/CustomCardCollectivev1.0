@@ -573,8 +573,10 @@ export async function createRoom(user, opts = {}) {
         // Tournament matches: who may play, which tournament/round this is, and the
         // card pool the decks are restricted to. Absent for ordinary rooms.
         ...(opts.tournament ? { tournament: opts.tournament } : {}),
-        // Room options chosen on the create screen (e.g. { turnSeconds: 120 }).
+        // Room options chosen on the create screen (e.g. { clockSeconds: 1080 }).
         ...(opts.settings ? { settings: opts.settings } : {}),
+        // A Quick match room (two strangers paired automatically).
+        ...(opts.quickMatch ? { quickMatch: true } : {}),
 
         players: {
             p1: {
@@ -622,6 +624,100 @@ export async function createRoom(user, opts = {}) {
     // removed - the database rules denied it and it was never usable.
     console.log("Firebase set() finished.");
     return { roomCode, publicListingFailed: false };
+}
+
+// ── Quick match ──────────────────────────────────────────
+// "Find a game" pairs you with whoever else is looking, with no room code. There's
+// one waiting spot: { uid, name, room, at }. Pressing Find a game in a transaction
+// either TAKES the spot (someone fresh is waiting -> you join their room) or PUTS
+// YOU in it (you create a room and wait there; the next player joins you). The
+// waiting player refreshes `at` every ~25 s, so a closed tab stops counting after
+// QUICK_STALE_MS. Lives under /lobbies, which every signed-in player may use.
+const QUICK_PATH = "lobbies/quickMatch/waiting";
+const QUICK_STALE_MS = 75 * 1000;
+export const QUICK_MATCH_CLOCK_SECONDS = 18 * 60;
+
+function quickRef() { return ref(database, QUICK_PATH); }
+const quickFresh = (entry) => Boolean(entry && entry.uid && entry.room && serverNow() - Number(entry.at || 0) < QUICK_STALE_MS);
+
+/**
+ * Find a game. Returns { code, slot, waiting, opponent }: waiting = true means you
+ * are in your own new room waiting for someone; false means you joined a waiting
+ * player's room (opponent = their name).
+ */
+export async function findQuickMatch(user, nickname) {
+    if (!user?.uid) throw new Error("Not connected yet - try again in a moment.");
+    const name = String(nickname || "Player").slice(0, 24);
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const myCode = generateRoomCode();
+        let claimed = null;
+        const result = await runTransaction(quickRef(), (current) => {
+            claimed = null;
+            if (current && current.uid !== user.uid && quickFresh(current)) {
+                claimed = current;
+                return null;   // take them off the waiting spot
+            }
+            return { uid: user.uid, name, room: myCode, at: serverNow() };
+        }, SERVER_CONFIRMED);
+        if (!result.committed) continue;
+
+        if (claimed) {
+            // Their room can be a moment behind their waiting entry: retry briefly.
+            for (let i = 0; i < 5; i++) {
+                try {
+                    const joined = await joinRoom(claimed.room, user, name);
+                    return { code: joined.code, slot: joined.slot, waiting: false, opponent: claimed.name || "Opponent" };
+                } catch (error) {
+                    if (i === 4) break;
+                    await new Promise(resolve => setTimeout(resolve, 700));
+                }
+            }
+            continue;   // their room was gone/full: look again (maybe wait ourselves)
+        }
+
+        await createRoom(user, {
+            roomCode: myCode,
+            nickname: name,
+            lobbyName: "Quick match",
+            mode: "regular",
+            quickMatch: true,
+            settings: { clockSeconds: QUICK_MATCH_CLOCK_SECONDS }
+        });
+        return { code: myCode, slot: "p1", waiting: true, opponent: "" };
+    }
+    throw new Error("Couldn't find a game right now - try again.");
+}
+
+/** Still waiting: keep the spot fresh (does nothing once someone has taken it). */
+export async function keepQuickMatchAlive(user, code) {
+    await runTransaction(quickRef(), (current) => {
+        if (current === null) return null;   // no local copy yet - let the server answer
+        if (current.uid !== user.uid || current.room !== code) return;
+        return { ...current, at: serverNow() };
+    }, SERVER_CONFIRMED);
+}
+
+/** Stop looking: free the spot (if it's still ours) and drop the room if nobody joined. */
+export async function cancelQuickMatch(user, code) {
+    await runTransaction(quickRef(), (current) => {
+        if (current === null) return null;
+        if (current.uid !== user.uid || current.room !== code) return;
+        return null;
+    }, SERVER_CONFIRMED).catch(() => {});
+    const roomRef = ref(database, `matches/${cleanRoomCode(code)}`);
+    const p2 = await get(ref(database, `matches/${cleanRoomCode(code)}/players/p2/uid`)).catch(() => null);
+    if (p2 && !p2.exists()) await set(roomRef, null).catch(() => {});
+}
+
+/** Is someone waiting right now? callback({ waiting: bool, name, uid }). */
+export function subscribeToQuickMatch(callback) {
+    let entry = null;
+    const report = () => callback(quickFresh(entry) ? { waiting: true, name: entry.name || "", uid: entry.uid } : { waiting: false });
+    const unsubscribe = onValue(quickRef(), (snapshot) => { entry = snapshot.val(); report(); },
+        () => callback({ waiting: false }));
+    // A waiting entry goes stale without changing, so re-check now and then.
+    const timer = setInterval(report, 15000);
+    return () => { clearInterval(timer); unsubscribe(); };
 }
 
 // Returns { code, slot } - the seat you have in the room ("p1" or "p2").
@@ -700,7 +796,7 @@ export function subscribeToMatch(roomCode, callback) {
     // `mode` + `draftCollection` let the lobby switch to the draft layout; they're
     // small scalars so watching them adds no meaningful traffic. `tournament` is a
     // small object (names + ids), present only on tournament matches.
-    const paths = ["status", "players", "isPublic", "lobbyName", "startError", "mode", "draftCollection", "tournament", "settings"];
+    const paths = ["status", "players", "isPublic", "lobbyName", "startError", "mode", "draftCollection", "tournament", "settings", "quickMatch"];
     const latest = {};
     const reported = new Set();
     const unsubscribers = [];

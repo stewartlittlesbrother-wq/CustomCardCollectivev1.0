@@ -2310,7 +2310,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=clock-1");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=quick-1");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2384,7 +2384,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=clock-1");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=quick-1");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();

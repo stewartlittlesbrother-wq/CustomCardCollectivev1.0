@@ -3,9 +3,10 @@
 // tab: same top bar, no page reload, no second card-library download.
 //
 // Two screens, both drawn into #mpxRoot:
-//   home - create a room (deck tiles with leader art, Regular / Draft Battle,
-//          optional turn timer), join by code or invite link, live games to
-//          watch, and a "game in progress - Rejoin" banner.
+//   home - Quick match ("Find a game": paired with the next player looking),
+//          create a room (deck tiles with leader art, Regular / Draft Battle,
+//          game clock), join by code or invite link, live games to watch, and a
+//          "game in progress - Rejoin" banner.
 //   room - the lobby: both players face off with their leaders and ready lights,
 //          deck panel with the Ready button, lobby chat, code + invite link.
 //
@@ -29,8 +30,12 @@ import {
     clearMatchStartError,
     sendChatMessage,
     subscribeToChat,
-    getMatchRecord
-} from "../firebase/multiplayerService.js?v=clock-1";
+    getMatchRecord,
+    findQuickMatch,
+    keepQuickMatchAlive,
+    cancelQuickMatch,
+    subscribeToQuickMatch
+} from "../firebase/multiplayerService.js?v=quick-1";
 
 const host = window.ccMpHost || {};
 
@@ -127,6 +132,12 @@ let navigating = false;
 let busy = false;
 let prevFoe = { known: false, present: false, ready: false };
 let handledStartError = "";
+// Quick match: { code, waiting, since, opponent } while in a Quick match room.
+let quick = null;
+let quickTicker = null;     // 1 s: the "looking for…" timer
+let quickHeartbeat = null;  // 25 s: keeps our waiting spot fresh
+let quickLive = { waiting: false };
+let unsubQuick = null;
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 // Open a room from elsewhere in the app (the Tournaments tab's "Play" button).
@@ -342,6 +353,16 @@ function renderHome() {
 
       <section class="mpx-rejoin" id="mpxRejoin" aria-label="Game in progress" hidden></section>
 
+      <section class="mpx-card green mpx-quick" aria-labelledby="mpxQuickTitle">
+        <div class="mpx-quick-text">
+          <h2 id="mpxQuickTitle"><span aria-hidden="true">⚡</span> Quick match</h2>
+          <p>Get paired with the next player looking for a game — no code needed. You play the deck picked below, with an 18-minute game clock each.</p>
+          <p class="mpx-quick-live" id="mpxQuickLive" hidden></p>
+          <p class="mpx-error" id="mpxQuickError" hidden></p>
+        </div>
+        <button type="button" class="mpx-btn primary big" id="mpxQuick">Find a game</button>
+      </section>
+
       <div class="mpx-cols">
         <section class="mpx-card green mpx-main" aria-labelledby="mpxCreateTitle">
           <div class="mpx-cardhead">
@@ -393,6 +414,9 @@ function renderHome() {
         });
     });
     $("#mpxCreate", root).addEventListener("click", onCreate);
+    $("#mpxQuick", root).addEventListener("click", onQuickMatch);
+    watchQuick();
+    renderQuickLive();
     $("#mpxJoinForm", root).addEventListener("submit", (event) => {
         event.preventDefault();
         joinByCode($("#mpxCode", root).value);
@@ -596,6 +620,113 @@ async function onCreate() {
     }
 }
 
+// ── Quick match ──────────────────────────────────────────────────────────────
+// Reading the waiting spot needs a signed-in player, so wait for sign-in first (a
+// listener refused for not being signed in never comes back).
+let quickWatchStarting = false;
+async function watchQuick() {
+    if (unsubQuick || quickWatchStarting) return;
+    quickWatchStarting = true;
+    try {
+        if (!(await ensureUser())) return;
+        unsubQuick = subscribeToQuickMatch((info) => {
+            quickLive = info || { waiting: false };
+            if (screen === "home") renderQuickLive();
+        });
+    } finally { quickWatchStarting = false; }
+}
+
+function renderQuickLive() {
+    const line = root && $("#mpxQuickLive", root);
+    if (!line) return;
+    const someone = quickLive.waiting && (!user || quickLive.uid !== user.uid);
+    line.hidden = !someone;
+    if (someone) line.innerHTML = `<span class="mpx-dot"></span> ${esc(quickLive.name || "Someone")} is looking for a game right now — press Find a game to play them.`;
+}
+
+async function onQuickMatch() {
+    showError("#mpxQuickError", "");
+    const button = $("#mpxQuick", root);
+    const deck = findDeck(selectedDeckId);
+    if (!deck) {
+        if (createMode !== "regular") { createMode = "regular"; renderCreateBody(); }
+        showError("#mpxQuickError", "Pick a deck below first - or build and save one in the Deck Builder.");
+        return;
+    }
+    const stats = deckStats(deck);
+    if (stats.blocking) { showError("#mpxQuickError", `${deck.name}: ${stats.problem}. Fix it in the Deck Builder, or pick another deck below.`); return; }
+    const u = await ensureUser();
+    if (!u) { showError("#mpxQuickError", "Couldn't connect. Check your internet connection and try again."); return; }
+
+    button.disabled = true;
+    button.textContent = "Finding a game…";
+    try {
+        const found = await findQuickMatch(u, nickname());
+        quick = { code: found.code, waiting: found.waiting, since: Date.now(), opponent: found.opponent || "" };
+        openRoom(found.code, found.slot);
+    } catch (error) {
+        showError("#mpxQuickError", /permission|denied/i.test(error?.message || "")
+            ? "Quick match isn't available right now - make a room and share the code instead."
+            : (error?.message || "Couldn't find a game right now - try again."));
+        button.disabled = false;
+        button.textContent = "Find a game";
+    }
+}
+
+function stopQuickTimers() {
+    clearInterval(quickTicker);
+    clearInterval(quickHeartbeat);
+    quickTicker = null;
+    quickHeartbeat = null;
+}
+
+// The banner at the top of a Quick match room: "looking for an opponent" with a
+// timer and Cancel, then "paired with …" once someone has joined.
+function renderQuickBanner() {
+    const banner = root && $("#mpxQuickBanner", root);
+    if (!banner) return;
+    if (!quick || !room || quick.code !== room.code) { banner.hidden = true; stopQuickTimers(); return; }
+    banner.hidden = false;
+    const foe = foePlayer();
+    if (quick.waiting && !foe) {
+        const secs = Math.max(0, Math.floor((Date.now() - quick.since) / 1000));
+        const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+        banner.className = "mpx-banner mpx-quickbanner searching";
+        banner.innerHTML = `<div><strong><span class="mpx-spinner" aria-hidden="true"></span> Looking for an opponent… <span class="mpx-quicktime">${clock}</span></strong>
+            <span>You'll be paired with the next player who presses Find a game. Keep this tab open - pick your deck and press Ready while you wait.</span></div>
+            <button type="button" class="mpx-btn" id="mpxQuickCancel">Cancel</button>`;
+        $("#mpxQuickCancel", banner).addEventListener("click", cancelQuick);
+        if (!quickTicker) quickTicker = setInterval(() => {
+            const time = root && $(".mpx-quicktime", root);
+            if (!time || !quick) return;
+            const s2 = Math.max(0, Math.floor((Date.now() - quick.since) / 1000));
+            time.textContent = `${Math.floor(s2 / 60)}:${String(s2 % 60).padStart(2, "0")}`;
+        }, 1000);
+        if (!quickHeartbeat) quickHeartbeat = setInterval(() => {
+            if (quick && quick.waiting && user) keepQuickMatchAlive(user, quick.code).catch(() => {});
+        }, 25000);
+        return;
+    }
+    stopQuickTimers();
+    if (quick.waiting) quick.waiting = false;
+    const name = (foe && foe.name) || quick.opponent || "your opponent";
+    banner.className = "mpx-banner mpx-quickbanner found";
+    banner.innerHTML = `<div><strong>⚡ Quick match — you're playing ${esc(name)}</strong>
+        <span>Pick your deck and press Ready. 18-minute game clock each.</span></div>`;
+}
+
+async function cancelQuick() {
+    const leaving = quick;
+    quick = null;
+    stopQuickTimers();
+    if (leaving && leaving.waiting && user) await cancelQuickMatch(user, leaving.code).catch(() => {});
+    leaveRoomQuietly();
+    room = null;
+    match = null;
+    setRoomUrl(null);
+    renderHome();
+}
+
 async function joinByCode(raw) {
     const code = extractCode(raw);
     if (screen !== "home") renderHome();
@@ -708,6 +839,7 @@ async function checkRejoin() {
 
 // ── Room lobby ───────────────────────────────────────────────────────────────
 function openRoom(code, slot) {
+    if (quick && quick.code !== code) { quick = null; stopQuickTimers(); }
     leaveRoomQuietly();
     room = { code, slot };
     match = null;
@@ -775,6 +907,7 @@ function renderRoom() {
         </div>
       </div>
 
+      <div class="mpx-banner mpx-quickbanner" id="mpxQuickBanner" hidden></div>
       <div class="mpx-banner" id="mpxTourBanner" hidden></div>
       <div class="mpx-starting" id="mpxStarting" role="status" hidden>
         <strong>Both players are ready - starting the game…</strong>
@@ -804,12 +937,19 @@ function renderRoom() {
 
     renderDeckPanel();
     renderVersus();
+    renderQuickBanner();
 }
 
 async function leaveRoom() {
     const leaving = room;
     const wasReady = Boolean(myPlayer()?.ready);
     const toTournament = Boolean(tournamentMeta);
+    // Leaving a Quick match room while still looking gives up the waiting spot.
+    if (quick && quick.waiting && leaving && quick.code === leaving.code && user) {
+        cancelQuickMatch(user, quick.code).catch(() => {});
+    }
+    quick = null;
+    stopQuickTimers();
     leaveRoomQuietly();
     room = null;
     match = null;
@@ -834,6 +974,7 @@ function onMatch(next) {
     renderDeckPanel();
     renderVersus();
     renderReadyState();
+    renderQuickBanner();
     notifyFoeChanges();
     handleStartState();
 }
@@ -843,7 +984,7 @@ function renderRoomHead() {
     if (title && match?.lobbyName) title.textContent = match.lobbyName;
     const chips = $("#mpxRoomChips", root);
     if (!chips) return;
-    const items = [isDraftRoom() ? "Draft Battle" : "Regular match", "Private room"];
+    const items = [isDraftRoom() ? "Draft Battle" : "Regular match", match?.quickMatch ? "Quick match" : "Private room"];
     const clockSeconds = Number(match?.settings?.clockSeconds) || 0;
     if (clockSeconds) items.push(`Game clock: ${Math.round(clockSeconds / 60)} min each`);
     if (tournamentMeta) items.push("Tournament");

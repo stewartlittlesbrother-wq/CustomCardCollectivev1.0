@@ -195,3 +195,24 @@ html.touch-device #multiplayerView.view.active { overflow: visible; }
 .mpx-chatform { display: flex; gap: 8px; }
 .mpx-chatform .mpx-input { flex: 1 1 auto; min-width: 0; }
 .mpx-readyhint { font-size: .78rem; color: var(--mpx-muted); }
+
+/* ── Quick match ─────────────────────────────────────────────────────────── */
+#multiplayerView .mpx-quick { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+#multiplayerView .mpx-quick-text { display: flex; flex-direction: column; gap: 4px; flex: 1 1 380px; min-width: 0; }
+#multiplayerView .mpx-quick-text h2 { margin: 0; }
+#multiplayerView .mpx-quick-text p { margin: 0; color: var(--mpx-soft); font-size: .9rem; line-height: 1.45; }
+#multiplayerView .mpx-quick-text .mpx-quick-live { display: flex; align-items: center; gap: 8px; color: var(--mpx-accent-hi); font-weight: 700; }
+#multiplayerView .mpx-quick-live .mpx-dot { color: var(--mpx-accent-hi); animation: mpx-pulse 1.4s ease-in-out infinite; }
+#multiplayerView .mpx-quick > .mpx-btn { min-width: 200px; }
+#multiplayerView .mpx-quickbanner { flex-direction: row; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+#multiplayerView .mpx-quickbanner > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 320px; }
+#multiplayerView .mpx-quickbanner strong { display: flex; align-items: center; gap: 8px; }
+#multiplayerView .mpx-quickbanner.found { border-color: rgba(77, 255, 158, .45); background: rgba(16, 185, 129, .1); }
+#multiplayerView .mpx-quickbanner.found strong { color: var(--mpx-accent-hi); }
+#multiplayerView .mpx-quicktime { color: var(--mpx-ink); font-variant-numeric: tabular-nums; font-size: inherit; }
+#multiplayerView .mpx-spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(243, 213, 140, .35); border-top-color: #f3d58c; animation: mpx-spin .9s linear infinite; flex: none; }
+@keyframes mpx-spin { to { transform: rotate(360deg); } }
+@keyframes mpx-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  #multiplayerView .mpx-spinner, #multiplayerView .mpx-quick-live .mpx-dot { animation: none; }
+}
