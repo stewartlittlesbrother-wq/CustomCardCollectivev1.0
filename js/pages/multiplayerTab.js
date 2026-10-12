@@ -205,6 +205,10 @@ async function boot() {
     refreshRecord();
     if (!signedIn) return;
 
+    // Housekeeping, off to the side: remove game rooms nobody has been in for a
+    // long time (at most twice a day per browser - see roomCleanup.js).
+    import("../firebase/roomCleanup.js?v=1").then(module => module.sweepStaleRooms()).catch(() => {});
+
     // A room from the URL: a tournament match, a "back to the room" link from the
     // board, or this page reloaded while in a room. An invite link (?join=).
     if (roomCode) await joinByCode(roomCode);

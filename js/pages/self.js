@@ -909,8 +909,26 @@ function announceOnlineTurnOrder() {
 let activeGameRegistered = false;
 let lastActiveGameTouchKey = null;
 
+// Note this room on this device so its data can be cleaned up later (see
+// js/firebase/roomCleanup.js). Nothing else can find a finished or private room:
+// browsers can't list rooms, and a finished game drops off the public list.
+let ownRoomRemembered = false;
+function rememberOwnRoom() {
+    if (ownRoomRemembered || !roomCode) return;
+    ownRoomRemembered = true;
+    try {
+        const key = "cc_mp_rooms_v1";
+        const rooms = JSON.parse(localStorage.getItem(key) || "{}") || {};
+        rooms[String(roomCode).trim().toUpperCase()] = Date.now();
+        const codes = Object.keys(rooms).sort((a, b) => rooms[a] - rooms[b]);
+        codes.slice(0, Math.max(0, codes.length - 300)).forEach(code => delete rooms[code]);
+        localStorage.setItem(key, JSON.stringify(rooms));
+    } catch (_) { /* storage unavailable - the room just won't be cleaned by this device */ }
+}
+
 function syncSpectateRegistry() {
     if (isSpectator || !onlineMultiplayerService || !onlinePublicState) return;
+    rememberOwnRoom();
 
     const phase = onlinePublicState.phase;
 
