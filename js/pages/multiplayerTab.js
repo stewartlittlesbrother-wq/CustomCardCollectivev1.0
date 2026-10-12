@@ -207,13 +207,52 @@ async function boot() {
 
     // Housekeeping, off to the side: remove game rooms nobody has been in for a
     // long time (at most twice a day per browser - see roomCleanup.js).
-    import("../firebase/roomCleanup.js?v=1").then(module => module.sweepStaleRooms()).catch(() => {});
+    import("../firebase/roomCleanup.js?v=2").then(module => module.sweepStaleRooms()).catch(() => {});
+    ownerRoomCleanup();
+    document.addEventListener("cc-account-change", () => ownerRoomCleanup());
 
     // A room from the URL: a tournament match, a "back to the room" link from the
     // board, or this page reloaded while in a room. An invite link (?join=).
     if (roomCode) await joinByCode(roomCode);
     else if (joinCode) await joinByCode(joinCode);
 }
+
+// The site owner's browser also clears the backlog of old rooms that nothing else
+// can find (finished games from before rooms cleaned themselves up). At most once
+// every 12 hours, and it says what it did. window.ccCleanRooms() runs it on demand.
+const OWNER_SWEEP_KEY = "cc_mp_owner_sweep_at";
+let ownerSweepRunning = false;
+async function ownerRoomCleanup(force = false) {
+    const say = (text) => { try { if (typeof window.toast === "function") window.toast(text); } catch (_) {} console.info(text); };
+    if (ownerSweepRunning) return;
+    // The database rule recognises the owner by the username; the app's admin
+    // check goes by email. Try for either, and let the rule have the last word.
+    const username = String(window.ccAccount?.username || "").trim().toLowerCase();
+    const admin = typeof window.isAdminAccount === "function" && window.isAdminAccount();
+    if (!admin && username !== "goldrush717") return;
+    if (!force && Date.now() - Number(lsGet(OWNER_SWEEP_KEY) || 0) < 12 * 60 * 60 * 1000) return;
+    ownerSweepRunning = true;
+    try {
+        const cleanup = await import("../firebase/roomCleanup.js?v=2");
+        let started = false;
+        const result = await cleanup.sweepAllRoomsAsOwner((progress) => {
+            if (!started) { started = true; say(`Cleaning up old game rooms… ${progress.total} to check`); }
+        });
+        if (!result.allowed) {
+            say("Old game rooms can't be cleaned up yet: publish the new database rules in Firebase first, and make sure you're signed in as goldrush717.");
+            return;
+        }
+        try { localStorage.setItem(OWNER_SWEEP_KEY, String(Date.now())); } catch (_) {}
+        say(`Old game rooms: removed ${result.removed}, kept ${result.kept} that were used recently`
+            + (result.failed ? `, ${result.failed} couldn't be checked` : "") + ".");
+        return result;
+    } catch (error) {
+        console.warn("Owner room clean-up failed:", error);
+    } finally {
+        ownerSweepRunning = false;
+    }
+}
+try { window.ccCleanRooms = () => ownerRoomCleanup(true); } catch (_) {}
 
 async function ensureUser() {
     if (user) return user;

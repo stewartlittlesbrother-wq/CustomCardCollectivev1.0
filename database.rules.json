@@ -1,6 +1,7 @@
 {
   "rules": {
     "matches": {
+      ".read": "auth != null && root.child('usernames').child('goldrush717').val() === auth.uid",
       "$roomCode": {
         ".read": "auth != null",
         ".write": "auth != null"

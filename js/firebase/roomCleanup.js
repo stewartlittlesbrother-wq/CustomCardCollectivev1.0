@@ -125,6 +125,47 @@ async function removeRoomIfStale(code, now) {
  */
 export { serverTime as roomServerTime, inspectRoom };
 
+// Every room in the database - for the site owner only. The rules let nobody else
+// list `matches` (see database.rules.json), so this is how the backlog of rooms
+// that no browser remembers gets found. Keys only (shallow), so it is a small
+// read however much the rooms hold. Returns null when it isn't allowed: not the
+// owner, or the rule hasn't been published yet.
+async function listAllRoomCodes() {
+    const user = await waitForUser();
+    if (!user || user.isAnonymous) return null;
+    const token = await user.getIdToken();
+    const base = String(database.app.options.databaseURL || "").replace(/\/$/, "");
+    const response = await fetch(`${base}/matches.json?shallow=true&auth=${token}`);
+    if (!response.ok) return null;
+    return Object.keys((await response.json()) || {});
+}
+
+/**
+ * Owner only: go through EVERY room and remove the old ones (same KEEP_DAYS rule
+ * as everywhere else - a room someone used recently is never touched).
+ * Resolves { allowed, total, checked, removed, kept, missing, failed }.
+ */
+export async function sweepAllRoomsAsOwner(onProgress) {
+    const summary = { allowed: false, total: 0, checked: 0, removed: 0, kept: 0, missing: 0, failed: 0 };
+    const codes = await listAllRoomCodes();
+    if (!codes) return summary;
+    summary.allowed = true;
+    summary.total = codes.length;
+    const now = await serverTime();
+    if (!now) return summary;   // can't be sure what time it is: remove nothing
+    let next = 0;
+    const lane = async () => {
+        while (next < codes.length) {
+            const code = codes[next++];
+            try { summary[await removeRoomIfStale(code, now)] += 1; } catch (_) { summary.failed += 1; }
+            summary.checked += 1;
+            if (onProgress && summary.checked % 25 === 0) { try { onProgress({ ...summary }); } catch (_) {} }
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(6, codes.length) }, lane));
+    return summary;
+}
+
 export async function sweepStaleRooms(options = {}) {
     const { force = false, limit = 30 } = options;
     const summary = { checked: 0, removed: 0, kept: 0, missing: 0 };
