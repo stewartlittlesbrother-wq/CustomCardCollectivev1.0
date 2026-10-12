@@ -1157,7 +1157,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-15")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-16")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -5269,6 +5269,13 @@ async function openCardForEditing(card) {
           : (cached.altArts && typeof cached.altArts === "object") ? Object.values(cached.altArts).filter(Boolean)
           : (cached.altArt ? [cached.altArt] : []);
         full = { ...card, imageUrl: cached.image || card.imageUrl || "", altArts: alts, altArt: alts[0] || "" };
+      } else if (card.__cachedImg || card.__altCount) {
+        // The card's pictures live on the server and couldn't be fetched just now
+        // (offline?). Opening the form without them would save the card back with
+        // its alt arts missing - so don't.
+        state.editingCardId = "";
+        toast("Couldn't load this card's pictures - check your connection and try again.");
+        return;
       }
     } catch (_) { /* fall back to the light card */ }
   }

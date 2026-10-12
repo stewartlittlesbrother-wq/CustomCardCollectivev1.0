@@ -31,7 +31,7 @@ async function loadJson(path) {
 // dynamically. Any failure here is non-fatal: the bundled files still load.
 async function loadSharedCardsForGame(onlyNumbers) {
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-15");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-16");
         // onlyNumbers restricts the download to just the decks' cards - huge speed
         // win on mobile where the full custom library is many MB of base64 art.
         const { cards, deleted } = await library.loadSharedCards(
@@ -50,7 +50,7 @@ async function loadSharedCardsForGame(onlyNumbers) {
 // caller falls back to a blocking network load.
 async function getCachedSharedForGame(onlyNumbers) {
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-15");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-16");
         if (typeof library.getCachedLibrary !== "function") return null;
         const { cards, deleted } = await library.getCachedLibrary(
             onlyNumbers ? { onlyNumbers } : {}
@@ -88,25 +88,32 @@ async function loadCardDatabase(neededNumbers) {
     const loadedCards = await loadPermanentCardFiles();
     const importedCards = loadImportedCardsForGame();
 
-    // Background reconcile: pull the freshest library from the server and rebuild
-    // the DB, then let self.js top up decks + refresh art (onCardDatabaseUpdated).
-    // Runs OFF the critical path so it never blocks the board opening.
-    const reconcileFull = () => loadSharedCardsForGame().then(({ cards, deleted }) => {
-        assembleGameDatabase(loadedCards, cards, importedCards, deleted);
-        try { if (typeof window.onCardDatabaseUpdated === "function") window.onCardDatabaseUpdated(); } catch (e) {}
-    }).catch(() => {});
+    // No list of needed cards (a spectator, an older page): use the cards of this
+    // device's saved decks, and let everything else arrive one card at a time as
+    // the board meets it (requestGameCards). This case used to pull the WHOLE
+    // library - ~500MB of artwork - which is what used up the database's download
+    // allowance.
+    const hasList = neededNumbers && (neededNumbers.size || neededNumbers.length);
+    if (!hasList) {
+        const fromDecks = savedDeckCardNumbers();
+        neededNumbers = fromDecks.size ? fromDecks : null;
+    }
+    if (!neededNumbers) {
+        assembleGameDatabase(loadedCards, [], importedCards, new Set());
+        return;
+    }
 
     // ── INSTANT: build from the on-device cache, no auth, no network ──────────
     // A repeat visitor's cache already holds their cards, so the board opens with
     // zero wait. If the cache is cold (first visit / cleared data) this returns
     // an empty set and we fall through to a blocking network load below.
-    const cachedShared = await getCachedSharedForGame(neededNumbers || null);
+    const cachedShared = await getCachedSharedForGame(neededNumbers);
     const paintedFromCache = !!(cachedShared && cachedShared.cards.length);
     if (cachedShared) {
         assembleGameDatabase(loadedCards, cachedShared.cards, importedCards, cachedShared.deleted);
     }
 
-    if (neededNumbers) {
+    {
         // Practice AND online games: only the two decks' cards are needed up front
         // (online, anything else a player brings in is fetched on demand - see
         // requestGameCards). Loading the WHOLE library with its art - hundreds of
@@ -130,27 +137,6 @@ async function loadCardDatabase(neededNumbers) {
         assembleGameDatabase(loadedCards, cards, importedCards, deleted);
         const missing = missingNow();
         if (missing.length) window.loadGameCards(missing).then(notifyCardDatabaseUpdated).catch(() => {});
-        return;
-    }
-
-    // Online / spectator / lobby: the opponent's cards aren't known up front, so
-    // the whole library is needed eventually.
-    if (paintedFromCache) {
-        // Cache carried the board; just reconcile the full library in the
-        // background so edits and the opponent's custom cards resolve.
-        reconcileFull();
-        return;
-    }
-    // Cold cache: load YOUR saved decks' cards FIRST (fast) so the page opens,
-    // then pull the rest of the library in the background.
-    const priority = savedDeckCardNumbers();
-    if (priority.size) {
-        const { cards, deleted } = await loadSharedCardsForGame(priority);
-        assembleGameDatabase(loadedCards, cards, importedCards, deleted);
-        reconcileFull();
-    } else {
-        const { cards, deleted } = await loadSharedCardsForGame();
-        assembleGameDatabase(loadedCards, cards, importedCards, deleted);
     }
 }
 
@@ -192,7 +178,7 @@ window.loadGameCards = async function loadGameCards(numbers) {
     if (!todo.length) return [];
 
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-15");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-16");
         const listing = await library.loadSharedCards({ light: true });
         const want = new Set(todo);
         const keys = (listing.cards || [])
@@ -240,7 +226,7 @@ window.listAllGameCardsLight = async function listAllGameCardsLight() {
     const importedCards = loadImportedCardsForGame();
     let shared = [];
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-15");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-16");
         shared = (await library.loadSharedCards({ light: true })).cards || [];
     } catch (error) {
         console.warn("Couldn't list the shared card library:", error);
@@ -263,7 +249,7 @@ window.listAllGameCardsLight = async function listAllGameCardsLight() {
 window.getGameCardArt = async function getGameCardArt(storageKey) {
     if (!storageKey) return "";
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-15");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-16");
         return (await library.getCachedArt(storageKey, 0)) || "";
     } catch (error) {
         return "";

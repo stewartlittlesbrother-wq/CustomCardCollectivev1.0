@@ -14,8 +14,19 @@
 //   cards/{cardNumber}      -> { ...card }     heavy, fetched only when changed
 //
 // Full card bodies are cached in IndexedDB (localStorage is ~5MB and would
-// overflow after ~50 cards), so a repeat visitor downloads only the index plus
-// whatever actually changed since last time.
+// overflow after ~50 cards).
+//
+// NOTHING DOWNLOADS THE WHOLE LIBRARY ANY MORE (v270). It had grown to ~500MB of
+// artwork, every first-time visitor pulled all of it, and that alone blew through
+// the database's monthly download allowance. Now:
+//
+//   cards/~cat~{collection}/cards/{key} -> the card WITHOUT its artwork (~1KB).
+//       The "catalog". The deck builder's whole pool comes from this (~4MB).
+//   cards/{key}/image, cards/{key}/altArts -> read one picture at a time, when a
+//       card is actually shown (getCachedArt).
+//   cards/{key} -> the full body, only for cards a game or the edit form needs.
+//   cardIndex/~stamp -> bumped on every write, so a visitor whose copy of the
+//       index is still current does not download it again.
 
 import {
     ref,
@@ -42,7 +53,19 @@ const INDEX_PATH = "cardIndex";
 // constraint - so this works with the rules already published, with no console
 // step required.
 
-const DB_NAME = "custom-cards-library";
+// On localhost, ?coldcache=NAME points the on-device caches at fresh empty
+// databases - a way to see exactly what a first-time visitor downloads without
+// wiping the real cache.
+const COLD_SUFFIX = (() => {
+    try {
+        if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return "";
+        const fromUrl = new URLSearchParams(location.search).get("coldcache");
+        if (fromUrl !== null) sessionStorage.setItem("cc_coldcache", fromUrl);
+        const name = sessionStorage.getItem("cc_coldcache") || "";
+        return name ? `-cold-${name.replace(/[^a-z0-9]/gi, "")}` : "";
+    } catch (_) { return ""; }
+})();
+const DB_NAME = "custom-cards-library" + COLD_SUFFIX;
 // v2: the cache is keyed by the shared-library storage key (number+collection)
 // instead of the bare cardNumber. The old keyPath collapsed two cards that share
 // a number across collections into one, and mis-matched cards stored under a
@@ -161,11 +184,11 @@ function readCachedForLoad(wantNums) {
     });
 }
 
-// Fetch ONE full card (with base64 art + altArts) from the cache by storage key.
+// ONE full card (with base64 art + altArts) by storage key: from the device if
+// it is there and current, otherwise that one card from the server (then kept).
 // Used to recover the heavy fields the light pool dropped - e.g. when EDITING a
 // card, so the form shows the real image + alt arts and saving preserves them.
-export async function getCachedCard(storageKey) {
-    if (!storageKey) return null;
+async function readFullCacheCard(storageKey) {
     try {
         const db = await openCache();
         return await new Promise((resolve) => {
@@ -178,21 +201,74 @@ export async function getCachedCard(storageKey) {
     }
 }
 
-// Fetch ONE art of a cached card: index 0 = the main image, index N = the Nth alt
-// art. Used to lazy-load whichever art a tile is currently showing.
-export async function getCachedArt(storageKey, index = 0) {
-    const card = await getCachedCard(storageKey);
-    if (!card) return "";
+const cardInFlight = new Map();
+export async function getCachedCard(storageKey) {
+    if (!storageKey) return null;
+    const index = await knownIndex();
+    const want = Number(index?.[storageKey]?.updatedAt || 0);
+    const cached = await readFullCacheCard(storageKey);
+    if (cached && (!want || Number(cached.updatedAt || 0) === want)) return cached;
+    if (cardInFlight.has(storageKey)) return cardInFlight.get(storageKey);
+    const job = (async () => {
+        try {
+            const card = sized("bodyReads", (await get(ref(database, `${CARDS_PATH}/${storageKey}`))).val());
+            if (!card) return cached;
+            card.updatedAt = want;
+            card[CACHE_KEY_PATH] = storageKey;
+            await writeCachedCards([card]);
+            return card;
+        } catch (_) {
+            return cached;   // offline: an older copy beats nothing
+        }
+    })();
+    cardInFlight.set(storageKey, job);
+    try { return await job; } finally { cardInFlight.delete(storageKey); }
+}
+
+function artFromCard(card, index) {
     const main = typeof card.image === "string" ? card.image : "";
     if (!index) return main;
     // Alts can be an array, a Firebase object ({0:…,1:…}), or a single legacy
     // `altArt` string. Normalize to a filtered list so index N resolves for every
     // shape - that's why "only some alts came back".
-    const raw = Array.isArray(card.altArts) ? card.altArts
-        : (card.altArts && typeof card.altArts === "object") ? Object.values(card.altArts)
-        : (card.altArt ? [card.altArt] : []);
-    const alts = raw.filter(a => typeof a === "string" && a);
-    return alts[index - 1] || main;
+    return altArtList(card)[index - 1] || main;
+}
+
+// ONE art of a card: index 0 = the main image, index N = the Nth alt art. Used to
+// lazy-load whichever art a tile is currently showing. Comes from the device when
+// it has a current copy; otherwise just that picture is read from the server.
+const artInFlight = new Map();
+export async function getCachedArt(storageKey, index = 0) {
+    if (!storageKey) return "";
+    const known = await knownIndex();
+    const want = Number(known?.[storageKey]?.updatedAt || 0);
+    const current = (record) => record && (!want || Number(record.updatedAt || 0) === want);
+
+    const cached = await readFullCacheCard(storageKey);
+    if (current(cached)) return artFromCard(cached, index);
+    const artKey = `${storageKey}#${index || 0}`;
+    const saved = await catalogGet(ART_STORE, artKey);
+    if (current(saved) && saved.url) return saved.url;
+
+    if (artInFlight.has(artKey)) return artInFlight.get(artKey);
+    const job = (async () => {
+        try {
+            let url = "";
+            if (index) {
+                const alts = altArtList({ altArts: sized("artReads", (await get(ref(database, `${CARDS_PATH}/${storageKey}/altArts`))).val()) });
+                url = alts[index - 1] || "";
+            }
+            if (!url) url = sized("artReads", (await get(ref(database, `${CARDS_PATH}/${storageKey}/image`))).val()) || "";
+            if (typeof url !== "string") url = "";
+            if (url) await catalogWrite(ART_STORE, [{ k: artKey, url, updatedAt: want }]);
+            return url || (saved && saved.url) || (cached ? artFromCard(cached, index) : "");
+        } catch (_) {
+            // Offline: an older picture beats a blank card.
+            return (saved && saved.url) || (cached ? artFromCard(cached, index) : "");
+        }
+    })();
+    artInFlight.set(artKey, job);
+    try { return await job; } finally { artInFlight.delete(artKey); }
 }
 
 // Fetch ONE card's MAIN artwork by storage key (lazy-load a tile's image).
@@ -219,6 +295,312 @@ function writeCachedDeletedSet(deleted) {
     try {
         localStorage.setItem(LS_DELETED_KEYS, JSON.stringify([...deleted]));
     } catch (_) { /* private mode / quota - the paint just falls back to none */ }
+}
+
+// ── Catalog, index cache and on-demand artwork ───────────────────────────────
+
+// Keys starting with "~" are bookkeeping, never cards. Clients from before v270
+// skip them too: the stamp is written as a tombstone, and the catalog lives under
+// keys the index never lists.
+const CATALOG_PREFIX = "~cat~";
+const STAMP_KEY = "~stamp";
+const isSpecialKey = (key) => String(key).startsWith("~");
+
+// Which catalog chunk a card's light copy lives in: one per collection, so a
+// first-time visitor reads ~30 chunks instead of thousands of cards.
+function catalogChunkOf(key) {
+    const text = String(key);
+    const at = text.indexOf("__");
+    return CATALOG_PREFIX + (at >= 0 ? text.slice(at + 2) : "_none");
+}
+
+const isDataUrl = (value) => typeof value === "string" && value.startsWith("data:");
+
+function altArtList(card) {
+    const raw = Array.isArray(card?.altArts) ? card.altArts
+        : (card?.altArts && typeof card.altArts === "object") ? Object.values(card.altArts)
+        : (card?.altArt ? [card.altArt] : []);
+    return raw.filter(art => typeof art === "string" && art);
+}
+
+// The catalog copy of a card: everything except its artwork and the preserved
+// import source (the two heavy parts). `updatedAt` must equal the card's index
+// entry - that is how a reader knows the copy is current.
+function catalogEntry(card, updatedAt) {
+    const { image, altArts, altArt, importSource, updatedAt: _old, __storageKey, __cachedImg, __altCount, typeGuess, ...rest } = card || {};
+    const entry = { ...rest, updatedAt };
+    if (isDataUrl(image)) entry.__img = 1;
+    else if (image) entry.image = image;            // a plain link is tiny
+    const alts = altArtList(card).length;
+    if (alts) entry.__alts = alts;
+    Object.keys(entry).forEach(key => { if (entry[key] === undefined) delete entry[key]; });
+    return entry;
+}
+
+// A catalog entry in the shape the deck builder's pool expects (the same shape
+// lightCachedCard gives a cached card).
+function lightFromCatalog(entry, key) {
+    const { __img, __alts, ...rest } = entry;
+    return {
+        ...rest,
+        __storageKey: key,
+        image: rest.image || "",
+        altArt: "",
+        altArts: [],
+        __cachedImg: Boolean(__img),
+        __altCount: Number(__alts) || 0
+    };
+}
+
+// What every write adds so readers can tell the index changed.
+function stampUpdate(updates) {
+    updates[`${INDEX_PATH}/${STAMP_KEY}`] = { deleted: true, updatedAt: serverTimestamp() };
+}
+
+// Add (or with a null card, remove) one card's catalog copy in a multi-path write.
+function catalogUpdate(updates, key, card, updatedAt) {
+    const chunk = catalogChunkOf(key);
+    if (card) {
+        // The chunk is stored under `cards`, whose rule wants these two fields.
+        updates[`${CARDS_PATH}/${chunk}/cardNumber`] = "~cat";
+        updates[`${CARDS_PATH}/${chunk}/name`] = "~cat";
+        updates[`${CARDS_PATH}/${chunk}/cards/${key}`] = catalogEntry(card, updatedAt);
+    } else {
+        updates[`${CARDS_PATH}/${chunk}/cards/${key}`] = null;
+    }
+}
+
+// Rough counts of what this page has downloaded, for checking the numbers
+// (window.ccLibraryStats in the console).
+const stats = { indexReads: 0, stampReads: 0, chunkReads: 0, entryReads: 0, bodyReads: 0, artReads: 0, bytes: 0 };
+const sized = (kind, value) => {
+    stats[kind] += 1;
+    try { stats.bytes += value == null ? 0 : JSON.stringify(value).length; } catch (_) {}
+    return value;
+};
+try { if (typeof window !== "undefined") window.ccLibraryStats = stats; } catch (_) {}
+export function libraryStats() { return { ...stats }; }
+
+// A second small database for the catalog, single pictures and the index copy.
+// Separate from the card cache above so adding it can never disturb that one.
+const CATALOG_DB = "custom-cards-catalog" + COLD_SUFFIX;
+const LIGHT_STORE = "light";   // key -> light card (keyPath __storageKey)
+const ART_STORE = "art";       // "<key>#<n>" -> { k, url, updatedAt }
+const META_STORE = "meta";     // "index" -> { k, stamp, fetchedAt, index }
+
+function openCatalog() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(CATALOG_DB, 1);
+        request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains(LIGHT_STORE)) db.createObjectStore(LIGHT_STORE, { keyPath: CACHE_KEY_PATH });
+            if (!db.objectStoreNames.contains(ART_STORE)) db.createObjectStore(ART_STORE, { keyPath: "k" });
+            if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE, { keyPath: "k" });
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+async function catalogGet(store, key) {
+    try {
+        const db = await openCatalog();
+        return await new Promise((resolve) => {
+            const request = db.transaction(store, "readonly").objectStore(store).get(key);
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => resolve(null);
+        });
+    } catch (_) { return null; }
+}
+
+async function catalogGetAll(store) {
+    try {
+        const db = await openCatalog();
+        return await new Promise((resolve) => {
+            const request = db.transaction(store, "readonly").objectStore(store).getAll();
+            request.onsuccess = () => resolve(request.result || []);
+            request.onerror = () => resolve([]);
+        });
+    } catch (_) { return []; }
+}
+
+async function catalogWrite(store, records = [], removedKeys = []) {
+    if (!records.length && !removedKeys.length) return;
+    try {
+        const db = await openCatalog();
+        await new Promise((resolve, reject) => {
+            const os = db.transaction(store, "readwrite").objectStore(store);
+            records.forEach(record => os.put(record));
+            removedKeys.forEach(key => os.delete(key));
+            os.transaction.oncomplete = () => resolve();
+            os.transaction.onerror = () => reject(os.transaction.error);
+        });
+    } catch (error) {
+        console.warn("Could not write the card catalog cache:", error);
+    }
+}
+
+// ── The index, without re-downloading it on every page ──
+// It is ~0.5MB and every page used to fetch it. Now a copy is kept on the device
+// and reused while the server's stamp still matches (one tiny read). The copy is
+// also refreshed after INDEX_MAX_AGE regardless, which covers a write made by a
+// browser still running pre-v270 code (it does not bump the stamp).
+const INDEX_MAX_AGE = 2 * 60 * 60 * 1000;
+let latestIndex = null;
+let indexInFlight = null;
+
+async function fetchIndex() {
+    const index = sized("indexReads", (await get(ref(database, INDEX_PATH))).val()) || {};
+    latestIndex = index;
+    await catalogWrite(META_STORE, [{ k: "index", stamp: Number(index[STAMP_KEY]?.updatedAt || 0), fetchedAt: Date.now(), index }]);
+    return index;
+}
+
+// options.force: always read the server (anything that DECIDES what to write).
+async function getIndex(options = {}) {
+    if (options.force) return fetchIndex();
+    if (indexInFlight) return indexInFlight;
+    indexInFlight = (async () => {
+        const saved = await catalogGet(META_STORE, "index");
+        if (saved && saved.index && saved.stamp && Date.now() - Number(saved.fetchedAt || 0) < INDEX_MAX_AGE) {
+            try {
+                const stamp = Number(sized("stampReads", (await get(ref(database, `${INDEX_PATH}/${STAMP_KEY}/updatedAt`))).val()) || 0);
+                if (stamp && stamp === saved.stamp) { latestIndex = saved.index; return saved.index; }
+            } catch (_) { /* fall through to a full read */ }
+        }
+        return fetchIndex();
+    })();
+    try { return await indexInFlight; } finally { indexInFlight = null; }
+}
+
+// After this browser writes, its saved copy of the index is out of date.
+async function forgetIndex() {
+    latestIndex = null;
+    await catalogWrite(META_STORE, [], ["index"]);
+}
+
+// The index as last seen on this page (no network if we already have it).
+async function knownIndex() {
+    if (latestIndex) return latestIndex;
+    try { return await getIndex(); } catch (_) { return null; }
+}
+
+// ── The deck builder's pool: catalog only, never card bodies ──
+async function loadLightLibrary({ getPriority, onProgress }) {
+    const report = (cards, deleted) => { if (onProgress) { try { onProgress({ cards, deleted }); } catch (_) {} } };
+
+    // Instant paint from the device. A visitor from before v270 has the old full
+    // cache but no catalog yet: build it from that once (no network).
+    const local = new Map((await catalogGetAll(LIGHT_STORE)).map(card => [card[CACHE_KEY_PATH], card]));
+    if (!local.size) {
+        const seeded = (await readCachedForLoad(null)).map(card => { const { importSource, ...rest } = card; return rest; });
+        seeded.forEach(card => local.set(card[CACHE_KEY_PATH], card));
+        await catalogWrite(LIGHT_STORE, seeded);
+    }
+    const knownDeleted = readCachedDeletedSet();
+    if (local.size) report([...local.values()].filter(card => !knownDeleted.has(card[CACHE_KEY_PATH])), knownDeleted);
+
+    await waitForUser();
+    const index = await getIndex();
+    const keys = Object.keys(index).filter(key => !isSpecialKey(key));
+    const deleted = new Set(keys.filter(key => index[key]?.deleted === true));
+    writeCachedDeletedSet(deleted);
+    const liveKeys = keys.filter(key => !deleted.has(key));
+    const stampOf = (key) => Number(index[key]?.updatedAt || 0);
+    const isFresh = (key) => { const mine = local.get(key); return Boolean(mine) && Number(mine.updatedAt || 0) === stampOf(key); };
+    const snapshot = () => liveKeys.map(key => {
+        const card = local.get(key);
+        if (card) stampFromIndex(card, key, index);
+        return card;
+    }).filter(Boolean);
+    if (local.size) report(snapshot(), deleted);
+
+    // What changed since last visit (everything, on a first visit), by chunk.
+    const stale = liveKeys.filter(key => !isFresh(key));
+    const byChunk = new Map();
+    stale.forEach(key => { const chunk = catalogChunkOf(key); (byChunk.get(chunk) || byChunk.set(chunk, []).get(chunk)).push(key); });
+    const priority = getPriority ? CATALOG_PREFIX + sanitizeKeyPart(getPriority() || "") : "";
+    const chunks = [...byChunk.keys()].sort((a, b) => (a === priority ? 0 : 1) - (b === priority ? 0 : 1));
+
+    let fetched = 0;
+    const uncovered = [];   // keys the catalog has no current copy of
+    const takeEntries = async (chunk, wanted, entries) => {
+        const records = [];
+        wanted.forEach(key => {
+            const entry = entries[key];
+            if (entry && Number(entry.updatedAt || 0) === stampOf(key)) {
+                const card = lightFromCatalog(entry, key);
+                local.set(key, card);
+                records.push(card);
+            } else uncovered.push(key);
+        });
+        fetched += records.length;
+        await catalogWrite(LIGHT_STORE, records);
+    };
+    const readChunk = async (chunk) => {
+        const wanted = byChunk.get(chunk);
+        const entries = {};
+        try {
+            if (wanted.length > 12) {
+                // Many changed: one read of the whole collection's catalog.
+                Object.assign(entries, sized("chunkReads", (await get(ref(database, `${CARDS_PATH}/${chunk}/cards`))).val()) || {});
+            } else {
+                // A few changed: read just those entries.
+                await Promise.all(wanted.map(key => get(ref(database, `${CARDS_PATH}/${chunk}/cards/${key}`))
+                    .then(snapshot => { const value = sized("entryReads", snapshot.val()); if (value) entries[key] = value; })
+                    .catch(() => {})));
+            }
+        } catch (error) {
+            console.warn("Catalog read failed for", chunk, error);
+        }
+        await takeEntries(chunk, wanted, entries);
+    };
+    for (let i = 0; i < chunks.length; i += 6) {
+        await Promise.all(chunks.slice(i, i + 6).map(readChunk));
+        report(snapshot(), deleted);
+    }
+
+    // Cards saved by a browser still on pre-v270 code have no current catalog
+    // copy. Read those few in full, and write the missing copy so the next visitor
+    // doesn't have to. Capped: this path must never turn back into "download
+    // everything" (if the catalog were ever lost, backfillCatalog rebuilds it).
+    const BODY_FALLBACK_LIMIT = 150;
+    const todo = uncovered.slice(0, BODY_FALLBACK_LIMIT);
+    for (let i = 0; i < todo.length; i += 8) {
+        const batch = todo.slice(i, i + 8);
+        const bodies = await Promise.all(batch.map(key => get(ref(database, `${CARDS_PATH}/${key}`))
+            .then(snapshot => [key, sized("bodyReads", snapshot.val())]).catch(() => [key, null])));
+        const full = [], light = [], heal = {};
+        bodies.forEach(([key, card]) => {
+            if (!card) return;
+            card.updatedAt = stampOf(key);
+            card[CACHE_KEY_PATH] = key;
+            full.push(card);
+            const lightCard = lightFromCatalog(catalogEntry(card, stampOf(key)), key);
+            local.set(key, lightCard);
+            light.push(lightCard);
+            catalogUpdate(heal, key, card, stampOf(key));
+        });
+        fetched += light.length;
+        await writeCachedCards(full);
+        await catalogWrite(LIGHT_STORE, light);
+        if (Object.keys(heal).length) update(ref(database), heal).catch(() => {});
+        report(snapshot(), deleted);
+    }
+    if (uncovered.length > todo.length) {
+        console.warn(`Card catalog is missing ${uncovered.length - todo.length} more cards than one visit will repair.`);
+    }
+
+    // Drop what was deleted (explicit tombstones only, as before).
+    const removed = [...local.keys()].filter(key => deleted.has(key));
+    if (removed.length) {
+        removed.forEach(key => local.delete(key));
+        await catalogWrite(LIGHT_STORE, [], removed);
+        await writeCachedCards([], removed);
+    }
+
+    const cards = snapshot();
+    return { cards, deleted, fetched, cached: cards.length - fetched };
 }
 
 // ── Public API ───────────────────────────────────────────
@@ -326,6 +708,9 @@ export async function loadSharedCards(options = {}) {
     const wantedById = new Set();
     const keyWanted = key => !wantNums || wantNums.has(keyNumber(key)) || wantedById.has(key);
 
+    // The deck builder's pool (and any other listing): the catalog, never bodies.
+    if (light && !wantNums) return loadLightLibrary({ getPriority, onProgress });
+
     // `light` (the deck builder): keep only metadata in memory, not the base64
     // artwork - the whole library's art is hundreds of MB and loading it all via
     // getAll() crashed phones on open. Each tile lazy-loads its own image later
@@ -370,9 +755,8 @@ export async function loadSharedCards(options = {}) {
     // ── Reconcile with the server (now we need auth + the tiny index) ─────────
     await waitForUser();
 
-    const indexSnapshot = await get(ref(database, INDEX_PATH));
-    const index = indexSnapshot.val() || {};
-    const wantedKeys = Object.keys(index);
+    const index = await getIndex();
+    const wantedKeys = Object.keys(index).filter(key => !isSpecialKey(key));
 
     // Tombstoned entries carry `deleted: true` in the index itself, so they cost
     // no extra request and can't fail independently of the index read.
@@ -386,7 +770,10 @@ export async function loadSharedCards(options = {}) {
     const stale = liveKeys.filter(key => {
         if (!keyWanted(key)) return false;   // not one of the decks' cards - skip it
         const mine = cachedByKey.get(key);
-        if (!mine) return true;
+        // Asked for specific cards (a game's decks): fetch the ones we lack. With
+        // no list, only keep what is already on this device current - never pull
+        // the rest of the library (one failed save used to trigger that, ~500MB).
+        if (!mine) return Boolean(wantNums);
         return Number(mine.updatedAt || 0) !== Number(index[key]?.updatedAt || 0);
     });
 
@@ -440,7 +827,7 @@ export async function loadSharedCards(options = {}) {
         const batch = remaining.splice(0, CONCURRENCY);
         const results = await Promise.all(batch.map(key =>
             get(ref(database, `${CARDS_PATH}/${key}`))
-                .then(snapshot => [key, snapshot.val()])
+                .then(snapshot => [key, sized("bodyReads", snapshot.val())])
                 .catch(() => [key, null])
         ));
         const batchFull = [];   // this batch's heavy cards, flushed below then GC'd
@@ -507,12 +894,17 @@ function stampFromIndex(card, key, index) {
 export async function saveTypeGuesses(guesses) {
     await waitForUser();
     const updates = {};
+    // (No stamp bump: a guess reaching other players a couple of hours later is
+    // fine, and bumping would make everyone re-read the index for each batch.)
     Object.entries(guesses || {}).forEach(([key, value]) => {
         const clean = sanitizeKeyPart(key) === key ? key : "";
         if (!clean) return;
         updates[`${INDEX_PATH}/${clean}/tg`] = value ? String(value).replace(/s+/g, " ").trim().slice(0, 160) : null;
     });
-    if (Object.keys(updates).length) await update(ref(database), updates);
+    if (Object.keys(updates).length) {
+        await update(ref(database), updates);
+        await forgetIndex();
+    }
     return Object.keys(updates).length;
 }
 
@@ -533,8 +925,7 @@ function sameCard(a, b) {
 export async function syncSharedCards(cards) {
     await waitForUser();
 
-    const indexSnapshot = await get(ref(database, INDEX_PATH));
-    const index = indexSnapshot.val() || {};
+    const index = await getIndex({ force: true });
 
     const cached = await readCachedCards();
     const cachedByKey = new Map(cached.map(card => [cardLibraryKey(card), card]));
@@ -563,6 +954,7 @@ export async function syncSharedCards(cards) {
             // Replace the entry outright rather than only setting updatedAt, so
             // a lingering `deleted: true` is cleared.
             updates[`${INDEX_PATH}/${key}`] = { updatedAt: serverTimestamp() };
+            catalogUpdate(updates, key, payload, serverTimestamp());
             changedKeys.push(key);
             uploaded++;
         }
@@ -579,12 +971,14 @@ export async function syncSharedCards(cards) {
 
     if (!Object.keys(updates).length) return { uploaded: 0, deleted: 0 };
 
+    stampUpdate(updates);
     await update(ref(database), updates);
+    await forgetIndex();
 
     // Refresh the cache with the server-resolved timestamps so none of these
     // cards look stale on the next load.
     if (changedKeys.length) {
-        const freshIndex = (await get(ref(database, INDEX_PATH))).val() || {};
+        const freshIndex = await getIndex({ force: true });
         const byKey = new Map(cards.map(card => [cardLibraryKey(card), card]));
         await writeCachedCards(
             changedKeys.map(key => {
@@ -617,7 +1011,11 @@ export async function saveSharedCard(card) {
     const { __storageKey, typeGuess, ...clean } = card;
     const payload = { ...clean, cardNumber: clean.cardNumber || key, id: clean.id || key };
 
+    const updates = {};
+    catalogUpdate(updates, key, payload, serverTimestamp());
+    stampUpdate(updates);
     await update(ref(database), {
+        ...updates,
         [`${CARDS_PATH}/${key}`]: payload,
         // Replace the WHOLE index entry, don't just set updatedAt underneath it.
         // A deleted card keeps a `deleted: true` tombstone here; writing only the
@@ -630,7 +1028,11 @@ export async function saveSharedCard(card) {
     // Re-read the resolved server timestamp so the local cache matches the index
     // and this card isn't re-downloaded on the next load.
     const stamp = await get(ref(database, `${INDEX_PATH}/${key}/updatedAt`));
-    await writeCachedCards([{ ...payload, [CACHE_KEY_PATH]: key, updatedAt: Number(stamp.val() || 0) }]);
+    const savedAt = Number(stamp.val() || 0);
+    await writeCachedCards([{ ...payload, [CACHE_KEY_PATH]: key, updatedAt: savedAt }]);
+    await catalogWrite(LIGHT_STORE, [lightFromCatalog(catalogEntry(payload, savedAt), key)]);
+    await catalogWrite(ART_STORE, [], [0, 1, 2, 3, 4, 5, 6, 7, 8].map(n => `${key}#${n}`));
+    await forgetIndex();
 
     return payload;
 }
@@ -652,12 +1054,18 @@ export async function deleteSharedCard(target) {
     // Drop the card body, and mark the index entry as a tombstone so the card
     // can't come back from the bundled JSON file. Bumping updatedAt makes other
     // clients notice the change on their next load.
+    const updates = {};
+    catalogUpdate(updates, key, null);
+    stampUpdate(updates);
     await update(ref(database), {
+        ...updates,
         [`${CARDS_PATH}/${key}`]: null,
         [`${INDEX_PATH}/${key}`]: { deleted: true, updatedAt: serverTimestamp() }
     });
 
     await writeCachedCards([], [key]);
+    await catalogWrite(LIGHT_STORE, [], [key]);
+    await forgetIndex();
     return { tombstoned: true };
 }
 
@@ -768,6 +1176,8 @@ export async function clearSharedCards() {
     const cached = await readCachedCards();
     // Delete by the cache keyPath (the exact stored key), not a recomputed one.
     await writeCachedCards([], cached.map(card => card[CACHE_KEY_PATH] || cardLibraryKey(card)).filter(Boolean));
+    await catalogWrite(LIGHT_STORE, [], (await catalogGetAll(LIGHT_STORE)).map(card => card[CACHE_KEY_PATH]));
+    await forgetIndex();
 }
 
 // Cards this browser has cached that the shared library no longer contains.
@@ -779,7 +1189,7 @@ export async function findRecoverableCards() {
 
     let index = {};
     try {
-        index = (await get(ref(database, INDEX_PATH))).val() || {};
+        index = await getIndex({ force: true });
     } catch {
         return [];   // can't tell what's missing; don't guess
     }
@@ -811,9 +1221,12 @@ export async function restoreCardsFromCache() {
         // Replacing the whole entry clears any `deleted: true` marker, so a
         // restored card isn't still treated as tombstoned.
         updates[`${INDEX_PATH}/${key}`] = { updatedAt: serverTimestamp() };
+        catalogUpdate(updates, key, payload, serverTimestamp());
     });
 
+    stampUpdate(updates);
     await update(ref(database), updates);
+    await forgetIndex();
 
     return { restored: missing.length, cards: missing.map(c => `${c[CACHE_KEY_PATH] || cardLibraryKey(c)} ${c.name || ""}`.trim()) };
 }
@@ -823,8 +1236,7 @@ export async function restoreCardsFromCache() {
 export async function seedSharedCardsFrom(cards) {
     await waitForUser();
 
-    const indexSnapshot = await get(ref(database, INDEX_PATH));
-    const existing = indexSnapshot.val() || {};
+    const existing = await getIndex({ force: true });
 
     const updates = {};
     let seeded = 0;
@@ -844,9 +1256,46 @@ export async function seedSharedCardsFrom(cards) {
         const { __storageKey, typeGuess, ...clean } = card;
         updates[`${CARDS_PATH}/${key}`] = { ...clean, cardNumber: clean.cardNumber || key, id: clean.id || key };
         updates[`${INDEX_PATH}/${key}/updatedAt`] = serverTimestamp();
+        catalogUpdate(updates, key, clean, serverTimestamp());
         seeded++;
     });
 
-    if (seeded) await update(ref(database), updates);
+    if (seeded) {
+        stampUpdate(updates);
+        await update(ref(database), updates);
+        await forgetIndex();
+    }
     return seeded;
+}
+
+// (Re)build the catalog for every card in the library. Uses the copies already on
+// this device and only downloads a card it doesn't have. Safe to run again: it
+// writes the same thing. Run from the console of a browser that has the library
+// cached:  (await import("./js/firebase/cardLibraryService.js?v=collections-16")).backfillCatalog(console.log)
+export async function backfillCatalog(onProgress) {
+    await waitForUser();
+    const index = await getIndex({ force: true });
+    const liveKeys = Object.keys(index).filter(key => !isSpecialKey(key) && index[key]?.deleted !== true);
+    const stampOf = (key) => Number(index[key]?.updatedAt || 0);
+    let written = 0, downloaded = 0, missing = 0;
+    for (let i = 0; i < liveKeys.length; i += 60) {
+        const updates = {};
+        for (const key of liveKeys.slice(i, i + 60)) {
+            let card = await readFullCacheCard(key);
+            if (!card || Number(card.updatedAt || 0) !== stampOf(key)) {
+                card = sized("bodyReads", (await get(ref(database, `${CARDS_PATH}/${key}`))).val());
+                if (card) downloaded++;
+            }
+            if (!card) { missing++; continue; }
+            catalogUpdate(updates, key, card, stampOf(key));
+            written++;
+        }
+        if (Object.keys(updates).length) await update(ref(database), updates);
+        if (onProgress) { try { onProgress({ done: Math.min(i + 60, liveKeys.length), total: liveKeys.length, written, downloaded, missing }); } catch (_) {} }
+    }
+    const stamp = {};
+    stampUpdate(stamp);
+    await update(ref(database), stamp);
+    await forgetIndex();
+    return { total: liveKeys.length, written, downloaded, missing };
 }
