@@ -250,9 +250,10 @@ function cardArtList(card) {
 // cycle button still appears and cycles the right number of arts.
 function cardArtCount(card) {
   const listLen = cardArtList(card).length;
-  if (listLen > 0) return listLen;
   const hasMain = card && (card.imageUrl || card.image || card.__cachedImg);
-  return (hasMain ? 1 : 0) + (Number(card && card.__altCount) || 0);
+  // The list can hold just the main picture (a link) while the alts are still
+  // fetched on demand (__altCount) - count both, or the alt-art button vanishes.
+  return Math.max(listLen, (hasMain ? 1 : 0) + (Number(card && card.__altCount) || 0));
 }
 // The art index this player has selected for a card, clamped to what exists.
 function altArtIndexFor(card) {
@@ -1157,7 +1158,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-16")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-17")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -2329,6 +2330,13 @@ async function compressImportedCardImages(cards) {
 // then keeps the original URL as a best-effort fallback).
 const IMAGE_PROXY = "https://wsrv.nl/";
 
+// Card pictures are published as files with the site (the /art folder) instead of
+// being stored inside the database, which they had filled.
+const OWN_ART_PREFIX = "https://stewartlittlesbrother-wq.github.io/CustomCardCollectivev1.0/art/";
+function isOwnArtUrl(url) {
+  return typeof url === "string" && url.startsWith(OWN_ART_PREFIX);
+}
+
 // Image links that STOP WORKING on their own: Ultimate TCG Card Maker signs its
 // picture URLs with a one-day token (utcgcm_media_token), Discord attachment links
 // carry an expiry, and cloud-storage signed URLs (S3/GCS) are time-limited too.
@@ -2352,6 +2360,9 @@ async function fetchRemoteImageAsDataUrl(url, attempts = 3) {
   if (!url || !/^https?:\/\//i.test(url)) return null;
   // Data URLs and already-permanent hosts don't need proxying.
   if (url.startsWith("data:")) return url;
+  // Our own picture files are already permanent - keep the link (copying one back
+  // into the database is exactly what moving the pictures out was meant to stop).
+  if (isOwnArtUrl(url)) return url;
 
   const proxied = `${IMAGE_PROXY}?url=${encodeURIComponent(url)}` +
     `&w=${IMPORT_IMAGE_MAX_WIDTH}&we&output=webp&q=82`;
@@ -7931,10 +7942,13 @@ function cardVisual(card) {
   const list = cardArtList(card);
   const direct = list[idx] || (idx === 0 ? (card && card.imageUrl) || "" : "");
   if (direct) {
+    // Linked pictures (most cards now) only load when the tile is near the screen.
     return `
       <img
         alt="${escapeAttr(card.name)}"
         src="${escapeAttr(direct)}"
+        loading="lazy"
+        decoding="async"
         data-fallback-name="${escapeAttr(card.name)}"
         data-fallback-number="${escapeAttr(card.cardNumber)}"
         data-fallback-color="${escapeAttr(colorValue(card))}"

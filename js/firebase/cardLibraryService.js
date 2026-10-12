@@ -331,8 +331,9 @@ function catalogEntry(card, updatedAt) {
     const entry = { ...rest, updatedAt };
     if (isDataUrl(image)) entry.__img = 1;
     else if (image) entry.image = image;            // a plain link is tiny
-    const alts = altArtList(card).length;
-    if (alts) entry.__alts = alts;
+    const alts = altArtList(card);
+    if (alts.length && !alts.some(isDataUrl)) entry.altArts = alts;   // plain links: tiny, keep
+    else if (alts.length) entry.__alts = alts.length;                 // embedded: fetched when shown
     Object.keys(entry).forEach(key => { if (entry[key] === undefined) delete entry[key]; });
     return entry;
 }
@@ -341,12 +342,13 @@ function catalogEntry(card, updatedAt) {
 // lightCachedCard gives a cached card).
 function lightFromCatalog(entry, key) {
     const { __img, __alts, ...rest } = entry;
+    const alts = altArtList(rest);
     return {
         ...rest,
         __storageKey: key,
         image: rest.image || "",
-        altArt: "",
-        altArts: [],
+        altArt: alts[0] || "",
+        altArts: alts,
         __cachedImg: Boolean(__img),
         __altCount: Number(__alts) || 0
     };
@@ -1268,10 +1270,77 @@ export async function seedSharedCardsFrom(cards) {
     return seeded;
 }
 
+// Point cards at picture FILES instead of pictures embedded in the database.
+// entries: { storageKey: { image?: url, alts?: [url, ...] } } for pictures that
+// have been published as files (see scripts/art in the repo history / the art
+// folder). Only cards that are unchanged since `unchangedSince[key]` (the index
+// time when the files were made) are touched, each link is checked to be live
+// first, and the card's type guess and everything else is left alone. The card
+// body keeps its shape - `image` simply becomes a link, which every part of the
+// app already supports. Returns counts.
+export async function applyArtUrls(entries, unchangedSince, onProgress) {
+    await waitForUser();
+    const index = await getIndex({ force: true });
+    const keys = Object.keys(entries || {});
+    const summary = { total: keys.length, moved: 0, changedSince: 0, gone: 0, deadLink: 0, alreadyDone: 0, failed: 0 };
+    const live = async (url) => {
+        try { return (await fetch(url, { method: "HEAD", cache: "no-store" })).ok; } catch (_) { return false; }
+    };
+    for (let i = 0; i < keys.length; i += 25) {
+        const updates = {};
+        const local = [];
+        await Promise.all(keys.slice(i, i + 25).map(async (key) => {
+            const entry = entries[key];
+            const at = Number(index[key]?.updatedAt || 0);
+            if (!index[key] || index[key].deleted === true) { summary.gone++; return; }
+            if (unchangedSince && Number(unchangedSince[key] || 0) !== at) { summary.changedSince++; return; }
+            const card = await getCachedCard(key);
+            if (!card) { summary.gone++; return; }
+            const wantsImage = entry.image && isDataUrl(card.image);
+            const wantsAlts = Array.isArray(entry.alts) && altArtList(card).some(isDataUrl);
+            if (!wantsImage && !wantsAlts) { summary.alreadyDone++; return; }
+            const links = [wantsImage ? entry.image : null, ...(wantsAlts ? entry.alts : [])].filter(Boolean);
+            if (!(await Promise.all(links.map(live))).every(Boolean)) { summary.deadLink++; return; }
+
+            const next = { ...card };
+            delete next[CACHE_KEY_PATH];
+            delete next.updatedAt;
+            if (wantsImage) { next.image = entry.image; updates[`${CARDS_PATH}/${key}/image`] = entry.image; }
+            if (wantsAlts) {
+                next.altArts = entry.alts;
+                delete next.altArt;
+                updates[`${CARDS_PATH}/${key}/altArts`] = entry.alts;
+                updates[`${CARDS_PATH}/${key}/altArt`] = null;
+            }
+            // Only the time changes on the index entry, so its type guess stays.
+            updates[`${INDEX_PATH}/${key}/updatedAt`] = serverTimestamp();
+            catalogUpdate(updates, key, next, serverTimestamp());
+            local.push([key, next]);
+        }));
+        if (Object.keys(updates).length) {
+            try {
+                stampUpdate(updates);
+                await update(ref(database), updates);
+                summary.moved += local.length;
+                // This device's copies are now out of date; drop them so they are
+                // read again (small now) instead of trusted.
+                await writeCachedCards([], local.map(([key]) => key));
+                await catalogWrite(LIGHT_STORE, [], local.map(([key]) => key));
+            } catch (error) {
+                console.warn("Could not update a batch of cards:", error);
+                summary.failed += local.length;
+            }
+        }
+        if (onProgress) { try { onProgress({ done: Math.min(i + 25, keys.length), ...summary }); } catch (_) {} }
+    }
+    await forgetIndex();
+    return summary;
+}
+
 // (Re)build the catalog for every card in the library. Uses the copies already on
 // this device and only downloads a card it doesn't have. Safe to run again: it
 // writes the same thing. Run from the console of a browser that has the library
-// cached:  (await import("./js/firebase/cardLibraryService.js?v=collections-16")).backfillCatalog(console.log)
+// cached:  (await import("./js/firebase/cardLibraryService.js?v=collections-17")).backfillCatalog(console.log)
 export async function backfillCatalog(onProgress) {
     await waitForUser();
     const index = await getIndex({ force: true });
