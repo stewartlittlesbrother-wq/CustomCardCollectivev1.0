@@ -390,6 +390,7 @@ const el = {
   collectionPicker: document.querySelector("#collectionPicker"),
   collectionBack: document.querySelector("#collectionBack"),
   collectionEdit: document.querySelector("#collectionEdit"),
+  collectionGuessTypes: document.querySelector("#collectionGuessTypes"),
   viewAllToggle: document.querySelector("#viewAllToggle"),
   collectionHeading: document.querySelector("#collectionHeading"),
   collectionCountPill: document.querySelector("#collectionCountPill"),
@@ -662,6 +663,9 @@ function normalizeCard(raw, category) {
     // Kept so edit/delete can target the real entry even if it lives under a
     // legacy number-only key. Client-only: stripped before any Firebase write.
     __storageKey: raw.__storageKey || "",
+    // Types read off the card picture for a card that has none (shared-library
+    // index field, see saveTypeGuesses). Search only - never shown as its types.
+    typeGuess: raw.type ? "" : (raw.typeGuess || ""),
     // Set when the card's base64 art was left in the cache (not loaded into
     // memory) - the tile lazy-loads it from IndexedDB by __storageKey.
     __cachedImg: Boolean(raw.__cachedImg),
@@ -1147,7 +1151,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-14")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-15")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -7033,6 +7037,7 @@ function searchableText(card) {
     card.block,
     card.category,
     card.type,
+    card.typeGuess,
     card.attribute,
     card.colors.join(" "),
     card.rarity,
@@ -7593,6 +7598,7 @@ function renderCardGrid() {
   if (state.cardsLoading) {
     if (el.collectionBack) el.collectionBack.hidden = true;
     if (el.collectionEdit) el.collectionEdit.hidden = true;
+    if (el.collectionGuessTypes) el.collectionGuessTypes.hidden = true;
     if (el.collectionCountPill) el.collectionCountPill.hidden = true;
     if (el.collectionHeading) el.collectionHeading.textContent = "Collections";
     if (el.cardGrid) el.cardGrid.style.display = "none";
@@ -7616,6 +7622,14 @@ function renderCardGrid() {
   if (el.collectionEdit) {
     el.collectionEdit.hidden = !browsing
       || !(isAdminAccount() || isCollectionOwner(state.activeCollection));
+  }
+  // "Guess types": the admin and the collection's owner/editors can have the
+  // types line read off the pictures of cards that have none (search only).
+  if (el.collectionGuessTypes) {
+    const slug = state.activeCollection;
+    el.collectionGuessTypes.hidden = !browsing
+      || !(isAdminAccount() || isCollectionEditor(slug))
+      || !state.cards.some(card => card.collection === slug && !card.type && card.__storageKey);
   }
   if (el.viewAllToggle) {
     el.viewAllToggle.hidden = !browsing;
@@ -7843,6 +7857,51 @@ async function resolveCardImageUrl(card) {
     } catch (_) {}
   }
   return "";
+}
+
+// A CORS-clean picture of a card's MAIN art, for reading text off it (the types
+// scanner draws it on a canvas). Hosts that send no CORS headers go through the
+// image proxy.
+async function cardScanImage(card) {
+  let url = cardArtList(card)[0] || "";
+  if (!url && card.__storageKey) {
+    try {
+      const library = await getCardLibrary();
+      url = (library && library.getCachedArt ? await library.getCachedArt(card.__storageKey, 0) : "") || "";
+    } catch (_) {}
+  }
+  if (!url) return null;
+  const load = (src) => new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+  return (await load(url))
+    || (/^https?:/i.test(url) ? await load(`${IMAGE_PROXY}?url=${encodeURIComponent(url)}&w=760&output=jpg`) : null);
+}
+
+// "Guess types" tool (js/typeGuessTool.js): reads the types line off the cards in
+// a collection that have none and saves it as a search-only guess.
+async function openTypeGuesser(slug) {
+  if (!slug) return;
+  let tool, library;
+  try {
+    [tool, library] = await Promise.all([import("./js/typeGuessTool.js?v=1"), getCardLibrary()]);
+  } catch (error) {
+    toast("The types scanner couldn't load. Check your connection and try again.");
+    return;
+  }
+  if (!library || !library.saveTypeGuesses) { toast("The shared card library isn't available right now."); return; }
+  tool.openTypeGuessTool({
+    title: collectionName(slug),
+    cards: state.cards.filter(card => card.collection === slug),
+    vocabCards: (collection) => state.cards.filter(card => card.collection === collection),
+    getImage: cardScanImage,
+    save: (guesses) => library.saveTypeGuesses(guesses),
+    onChange: () => renderCardGrid()
+  });
 }
 
 async function loadLazyCardImage(img) {
@@ -10016,6 +10075,7 @@ function bindEvents() {
   el.closeDeckShare?.addEventListener("click", closeDeckSharePanels);
   el.collectionBack?.addEventListener("click", closeCollection);
   el.collectionEdit?.addEventListener("click", () => openCollectionEditor(state.activeCollection));
+  el.collectionGuessTypes?.addEventListener("click", () => openTypeGuesser(state.activeCollection));
   // "View All" lifts the leader-first / leader-colour restriction so every card
   // in the collection shows, even before (or regardless of) a chosen leader.
   el.viewAllToggle?.addEventListener("click", () => {

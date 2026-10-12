@@ -31,7 +31,7 @@ async function loadJson(path) {
 // dynamically. Any failure here is non-fatal: the bundled files still load.
 async function loadSharedCardsForGame(onlyNumbers) {
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-14");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-15");
         // onlyNumbers restricts the download to just the decks' cards - huge speed
         // win on mobile where the full custom library is many MB of base64 art.
         const { cards, deleted } = await library.loadSharedCards(
@@ -50,7 +50,7 @@ async function loadSharedCardsForGame(onlyNumbers) {
 // caller falls back to a blocking network load.
 async function getCachedSharedForGame(onlyNumbers) {
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-14");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-15");
         if (typeof library.getCachedLibrary !== "function") return null;
         const { cards, deleted } = await library.getCachedLibrary(
             onlyNumbers ? { onlyNumbers } : {}
@@ -192,7 +192,7 @@ window.loadGameCards = async function loadGameCards(numbers) {
     if (!todo.length) return [];
 
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-14");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-15");
         const listing = await library.loadSharedCards({ light: true });
         const want = new Set(todo);
         const keys = (listing.cards || [])
@@ -240,7 +240,7 @@ window.listAllGameCardsLight = async function listAllGameCardsLight() {
     const importedCards = loadImportedCardsForGame();
     let shared = [];
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-14");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-15");
         shared = (await library.loadSharedCards({ light: true })).cards || [];
     } catch (error) {
         console.warn("Couldn't list the shared card library:", error);
@@ -263,7 +263,7 @@ window.listAllGameCardsLight = async function listAllGameCardsLight() {
 window.getGameCardArt = async function getGameCardArt(storageKey) {
     if (!storageKey) return "";
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-14");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-15");
         return (await library.getCachedArt(storageKey, 0)) || "";
     } catch (error) {
         return "";

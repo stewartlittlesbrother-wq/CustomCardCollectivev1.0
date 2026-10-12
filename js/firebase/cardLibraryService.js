@@ -408,7 +408,7 @@ export async function loadSharedCards(options = {}) {
     // cachedByKey, for streaming to the caller between batches.
     const snapshotCardsSoFar = () => liveKeys.map(key => {
         const card = cachedByKey.get(key);
-        if (card) card.__storageKey = key;
+        if (card) stampFromIndex(card, key, index);
         return card;
     }).filter(Boolean);
 
@@ -472,7 +472,7 @@ export async function loadSharedCards(options = {}) {
         // this to remove the real entry instead of orphaning it.
         cards: liveKeys.filter(keyWanted).map(key => {
             const card = cachedByKey.get(key);
-            if (card) card.__storageKey = key;
+            if (card) stampFromIndex(card, key, index);
             return card;
         }).filter(Boolean),
         // Callers merge the repo's bundled JSON with this library; they need the
@@ -481,6 +481,39 @@ export async function loadSharedCards(options = {}) {
         fetched: fetchedCount,
         cached: liveKeys.filter(keyWanted).length - fetchedCount
     };
+}
+
+// Stamp a loaded card with the EXACT index key it came from, and the guessed
+// types stored on that index entry (see saveTypeGuesses).
+function stampFromIndex(card, key, index) {
+    card.__storageKey = key;
+    const guess = index[key]?.tg;
+    if (guess) card.typeGuess = String(guess);
+    else delete card.typeGuess;
+}
+
+// Guessed types for cards that have none, read off the card picture by
+// js/cardTypeScanner.js. Used for SEARCH only, never shown as the card's types.
+//
+// They sit on the card's INDEX entry (`cardIndex/{key}/tg`) rather than in the card
+// body: the index is already fetched on every load and has no .validate rule, so
+// this needs no rules change, and adding a guess doesn't make every visitor
+// re-download the heavy card (updatedAt is left alone). Re-saving a card replaces
+// its index entry, which drops the guess - fine, the card was just edited.
+//
+// guesses: { storageKey: "Type A/Type B" | null }. Only pass keys of cards that
+// loaded from the shared library (card.__storageKey) - writing under a key with
+// no index entry would create a phantom entry.
+export async function saveTypeGuesses(guesses) {
+    await waitForUser();
+    const updates = {};
+    Object.entries(guesses || {}).forEach(([key, value]) => {
+        const clean = sanitizeKeyPart(key) === key ? key : "";
+        if (!clean) return;
+        updates[`${INDEX_PATH}/${clean}/tg`] = value ? String(value).replace(/s+/g, " ").trim().slice(0, 160) : null;
+    });
+    if (Object.keys(updates).length) await update(ref(database), updates);
+    return Object.keys(updates).length;
 }
 
 // Compare two cards ignoring bookkeeping fields, so re-saving an unchanged card
@@ -517,7 +550,7 @@ export async function syncSharedCards(cards) {
         if (!key) return;
         desired.add(key);
 
-        const { __storageKey, ...clean } = card;
+        const { __storageKey, typeGuess, ...clean } = card;
         const payload = { ...clean, cardNumber: clean.cardNumber || key, id: clean.id || key };
         const mine = cachedByKey.get(key);
 
@@ -555,7 +588,7 @@ export async function syncSharedCards(cards) {
         const byKey = new Map(cards.map(card => [cardLibraryKey(card), card]));
         await writeCachedCards(
             changedKeys.map(key => {
-                const { __storageKey, ...card } = byKey.get(key);
+                const { __storageKey, typeGuess, ...card } = byKey.get(key);
                 return { ...card, cardNumber: card.cardNumber || key, id: card.id || key,
                          [CACHE_KEY_PATH]: key,
                          updatedAt: Number(freshIndex[key]?.updatedAt || 0) };
@@ -581,7 +614,7 @@ export async function saveSharedCard(card) {
     // The key is number+collection now, but cardNumber must stay the human number
     // (never the compound key), or the card would display "JJK1__collection".
     // __storageKey is a client-only load hint - never write it to the database.
-    const { __storageKey, ...clean } = card;
+    const { __storageKey, typeGuess, ...clean } = card;
     const payload = { ...clean, cardNumber: clean.cardNumber || key, id: clean.id || key };
 
     await update(ref(database), {
@@ -808,7 +841,7 @@ export async function seedSharedCardsFrom(cards) {
         // key would just duplicate every shipped card in the database.
         const legacyKey = sanitizeKeyPart(card?.cardNumber || card?.id || "");
         if (!key || existing[key] || existing[legacyKey]) return;
-        const { __storageKey, ...clean } = card;
+        const { __storageKey, typeGuess, ...clean } = card;
         updates[`${CARDS_PATH}/${key}`] = { ...clean, cardNumber: clean.cardNumber || key, id: clean.id || key };
         updates[`${INDEX_PATH}/${key}/updatedAt`] = serverTimestamp();
         seeded++;
