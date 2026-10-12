@@ -1,0 +1,110 @@
+# Moves newly uploaded card pictures out of the database into art/ files.
+#
+# A card that is added or edited arrives with its picture embedded in the Realtime
+# Database. Every half hour this looks for such cards (scripts/move-card-art.mjs),
+# writes their pictures into art/, publishes the site so the files are live, and
+# then points the cards at the files. See the script for why.
+#
+# It deploys Pages itself: a commit pushed by a workflow does not start
+# static.yml. The publish job shares static.yml's "pages" concurrency group so the
+# two never deploy at the same time. Only the publish job is in that group - the
+# half-hourly check must never queue behind (or displace) a real deploy.
+name: Move new card pictures to files
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+  # Changing the mover runs it once straight away.
+  push:
+    branches: ["main"]
+    paths:
+      - "scripts/move-card-art.mjs"
+      - ".github/workflows/card-art.yml"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.collect.outputs.deploy }}
+      apply: ${{ steps.collect.outputs.apply }}
+    env:
+      ART_PLAN: /tmp/card-art-plan.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Find embedded pictures
+        id: collect
+        run: node scripts/move-card-art.mjs collect
+      - name: Commit the new picture files
+        if: steps.collect.outputs.deploy == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add art
+          if git diff --cached --quiet; then
+            echo "The files are already in the repository; they only need publishing."
+          else
+            git commit -m "Card pictures: ${{ steps.collect.outputs.count }} new file(s)"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+      - name: Keep the plan for the publish job
+        if: steps.collect.outputs.deploy == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: card-art-plan
+          path: /tmp/card-art-plan.json
+          retention-days: 1
+      # The files were already live (e.g. the same picture used on another card):
+      # nothing to publish, update the cards now.
+      - name: Point the cards at their files
+        if: steps.collect.outputs.apply == 'true' && steps.collect.outputs.deploy != 'true'
+        run: node scripts/move-card-art.mjs apply
+
+  publish:
+    needs: collect
+    if: needs.collect.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: "pages"
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      ART_PLAN: /tmp/card-art-plan.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+      - name: Get the plan
+        uses: actions/download-artifact@v4
+        with:
+          name: card-art-plan
+          path: /tmp
+      - name: Point the cards at their files
+        run: node scripts/move-card-art.mjs apply
