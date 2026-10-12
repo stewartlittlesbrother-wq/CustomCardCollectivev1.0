@@ -808,7 +808,7 @@ async function ensureSearchLibrary() {
     searchLoading = true;
     $("tnBanResults").innerHTML = `<div class="tn-hint">Loading the card library…</div>`;
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-17");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-18");
         const result = await library.loadSharedCards({
             light: true,
             onProgress: ({ cards }) => { searchCards = cards; renderBanResults(); }
@@ -1140,7 +1140,7 @@ async function loadCollectionChoices() {
     const names = {};
     (window.BUILTIN_COLLECTIONS || []).forEach(c => { if (c && c.slug) names[c.slug] = c.name || c.slug; });
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-17");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-18");
         const registry = library.loadSharedCollections ? await library.loadSharedCollections() : [];
         (registry || []).forEach(c => { if (c && c.slug) names[c.slug] = c.name || names[c.slug] || c.slug; });
     } catch { /* the built-in list is enough */ }

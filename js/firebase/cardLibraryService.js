@@ -601,8 +601,37 @@ async function loadLightLibrary({ getPriority, onProgress }) {
         await writeCachedCards([], removed);
     }
 
+    clearOldPictureCache();
+
     const cards = snapshot();
     return { cards, deleted, fetched, cached: cards.length - fetched };
+}
+
+// Until v272 every card's picture lived in the card, and this device kept a copy
+// of each card it had seen - around half a gigabyte for a regular visitor. The
+// pictures are files now and none of those copies is current any more, so clear
+// them out once (cards a game or the edit form needs are simply read again; they
+// are about 1 KB each now). Also drops the single pictures cached during v270-271.
+const OLD_CACHE_CLEARED_KEY = "cc-old-picture-cache-cleared-v1";
+async function clearOldPictureCache() {
+    try {
+        if (localStorage.getItem(OLD_CACHE_CLEARED_KEY)) return;
+        const db = await openCache();
+        await new Promise((resolve, reject) => {
+            const request = cacheTransaction(db, "readwrite").clear();
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+        const catalog = await openCatalog();
+        await new Promise((resolve) => {
+            const request = catalog.transaction(ART_STORE, "readwrite").objectStore(ART_STORE).clear();
+            request.onsuccess = () => resolve();
+            request.onerror = () => resolve();
+        });
+        localStorage.setItem(OLD_CACHE_CLEARED_KEY, String(Date.now()));
+    } catch (error) {
+        console.warn("Could not clear the old picture cache:", error);
+    }
 }
 
 // ── Public API ───────────────────────────────────────────
@@ -1103,6 +1132,19 @@ export async function loadSharedCollections() {
     }
 }
 
+// The accounts behind a list of usernames, as { uid: true }. The app lists a
+// collection's editors and co-owners by username, but the database rules can only
+// check an account id - and can't search a list - so both are stored.
+export async function editorUidsFor(usernames) {
+    const wanted = [...new Set((usernames || []).map(name => String(name).trim().toLowerCase()).filter(Boolean))];
+    if (!wanted.length) return {};
+    const registry = (await get(ref(database, "usernames"))).val() || {};
+    const byName = new Map(Object.entries(registry).map(([name, uid]) => [String(name).toLowerCase(), String(uid || "")]));
+    const uids = {};
+    wanted.forEach(name => { const uid = byName.get(name); if (uid) uids[uid] = true; });
+    return uids;
+}
+
 export async function saveSharedCollection(collection) {
     await waitForUser();
     const slug = String(collection?.slug || "").trim();
@@ -1121,6 +1163,7 @@ export async function saveSharedCollection(collection) {
             ownerUid: String(collection.ownerUid || ""),
             editors,
             coOwners,
+            editorUids: await editorUidsFor([...editors, ...coOwners]),
             updatedAt: serverTimestamp()
         }
     });
@@ -1270,77 +1313,65 @@ export async function seedSharedCardsFrom(cards) {
     return seeded;
 }
 
-// Point cards at picture FILES instead of pictures embedded in the database.
-// entries: { storageKey: { image?: url, alts?: [url, ...] } } for pictures that
-// have been published as files (see scripts/art in the repo history / the art
-// folder). Only cards that are unchanged since `unchangedSince[key]` (the index
-// time when the files were made) are touched, each link is checked to be live
-// first, and the card's type guess and everything else is left alone. The card
-// body keeps its shape - `image` simply becomes a link, which every part of the
-// app already supports. Returns counts.
-export async function applyArtUrls(entries, unchangedSince, onProgress) {
+// Make guessed types the cards' REAL types: { storageKey: "Type A/Type B" }.
+// Writes just the `type` field of each card (no card is downloaded), bumps its
+// index time, drops the guess, and patches the catalog copy where this device
+// knows it is current. Whoever calls this needs the right to change the cards
+// (the collection's owner / editors, or the site owner). A card that is refused
+// doesn't stop the others. Returns { accepted: [keys], refused: [keys] }.
+export async function acceptTypeGuesses(types) {
     await waitForUser();
     const index = await getIndex({ force: true });
-    const keys = Object.keys(entries || {});
-    const summary = { total: keys.length, moved: 0, changedSince: 0, gone: 0, deadLink: 0, alreadyDone: 0, failed: 0 };
-    const live = async (url) => {
-        try { return (await fetch(url, { method: "HEAD", cache: "no-store" })).ok; } catch (_) { return false; }
+    const keys = Object.keys(types || {}).filter(key => !isSpecialKey(key) && types[key] && index[key] && index[key].deleted !== true);
+    const updatesFor = async (key) => {
+        const type = String(types[key]).replace(/\s+/g, " ").trim().slice(0, 160);
+        const updates = {
+            [`${CARDS_PATH}/${key}/type`]: type,
+            [`${INDEX_PATH}/${key}/updatedAt`]: serverTimestamp(),
+            [`${INDEX_PATH}/${key}/tg`]: null
+        };
+        const mine = await catalogGet(LIGHT_STORE, key);
+        if (mine && Number(mine.updatedAt || 0) === Number(index[key].updatedAt || 0)) {
+            const entry = `${CARDS_PATH}/${catalogChunkOf(key)}/cards/${key}`;
+            updates[`${entry}/type`] = type;
+            updates[`${entry}/updatedAt`] = serverTimestamp();
+        }
+        return updates;
     };
-    for (let i = 0; i < keys.length; i += 25) {
-        const updates = {};
-        const local = [];
-        await Promise.all(keys.slice(i, i + 25).map(async (key) => {
-            const entry = entries[key];
-            const at = Number(index[key]?.updatedAt || 0);
-            if (!index[key] || index[key].deleted === true) { summary.gone++; return; }
-            if (unchangedSince && Number(unchangedSince[key] || 0) !== at) { summary.changedSince++; return; }
-            const card = await getCachedCard(key);
-            if (!card) { summary.gone++; return; }
-            const wantsImage = entry.image && isDataUrl(card.image);
-            const wantsAlts = Array.isArray(entry.alts) && altArtList(card).some(isDataUrl);
-            if (!wantsImage && !wantsAlts) { summary.alreadyDone++; return; }
-            const links = [wantsImage ? entry.image : null, ...(wantsAlts ? entry.alts : [])].filter(Boolean);
-            if (!(await Promise.all(links.map(live))).every(Boolean)) { summary.deadLink++; return; }
-
-            const next = { ...card };
-            delete next[CACHE_KEY_PATH];
-            delete next.updatedAt;
-            if (wantsImage) { next.image = entry.image; updates[`${CARDS_PATH}/${key}/image`] = entry.image; }
-            if (wantsAlts) {
-                next.altArts = entry.alts;
-                delete next.altArt;
-                updates[`${CARDS_PATH}/${key}/altArts`] = entry.alts;
-                updates[`${CARDS_PATH}/${key}/altArt`] = null;
-            }
-            // Only the time changes on the index entry, so its type guess stays.
-            updates[`${INDEX_PATH}/${key}/updatedAt`] = serverTimestamp();
-            catalogUpdate(updates, key, next, serverTimestamp());
-            local.push([key, next]);
-        }));
-        if (Object.keys(updates).length) {
-            try {
-                stampUpdate(updates);
-                await update(ref(database), updates);
-                summary.moved += local.length;
-                // This device's copies are now out of date; drop them so they are
-                // read again (small now) instead of trusted.
-                await writeCachedCards([], local.map(([key]) => key));
-                await catalogWrite(LIGHT_STORE, [], local.map(([key]) => key));
-            } catch (error) {
-                console.warn("Could not update a batch of cards:", error);
-                summary.failed += local.length;
+    const accepted = [], refused = [];
+    for (let i = 0; i < keys.length; i += 40) {
+        const batch = keys.slice(i, i + 40);
+        const perCard = await Promise.all(batch.map(updatesFor));
+        const done = [];
+        try {
+            const all = Object.assign({}, ...perCard);
+            stampUpdate(all);
+            await update(ref(database), all);
+            done.push(...batch);
+        } catch (_) {
+            // One refused card fails the whole write: go card by card instead.
+            for (let n = 0; n < batch.length; n++) {
+                try {
+                    const one = { ...perCard[n] };
+                    stampUpdate(one);
+                    await update(ref(database), one);
+                    done.push(batch[n]);
+                } catch (__) { refused.push(batch[n]); }
             }
         }
-        if (onProgress) { try { onProgress({ done: Math.min(i + 25, keys.length), ...summary }); } catch (_) {} }
+        accepted.push(...done);
+        // This device's copies are out of date now.
+        await writeCachedCards([], done);
+        await catalogWrite(LIGHT_STORE, [], done);
     }
     await forgetIndex();
-    return summary;
+    return { accepted, refused };
 }
 
 // (Re)build the catalog for every card in the library. Uses the copies already on
 // this device and only downloads a card it doesn't have. Safe to run again: it
 // writes the same thing. Run from the console of a browser that has the library
-// cached:  (await import("./js/firebase/cardLibraryService.js?v=collections-17")).backfillCatalog(console.log)
+// cached:  (await import("./js/firebase/cardLibraryService.js?v=collections-18")).backfillCatalog(console.log)
 export async function backfillCatalog(onProgress) {
     await waitForUser();
     const index = await getIndex({ force: true });

@@ -188,7 +188,9 @@ async function saveCollection({ slug, name, image, editors, ownerUid, coOwners }
     if (library?.saveSharedCollection) await library.saveSharedCollection(entry);
   } catch (error) {
     console.warn("Collection not saved to shared library:", error);
-    toast("Saved on this device only — shared library unreachable");
+    toast(isPermissionDenied(error)
+      ? "Only this collection's owner can change it."
+      : "Saved on this device only — shared library unreachable");
   }
 
   populateCollectionSelects();
@@ -1158,7 +1160,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-17")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-18")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -1520,6 +1522,11 @@ function projectCardsToObject(cards) {
 // card seemed not to appear until later, and it re-uploaded deleted cards that
 // were still in the list (clearing their tombstones). Writing just the card
 // being saved is instant and can't disturb anything else.
+// The database refused a write (its rules, not the network).
+function isPermissionDenied(error) {
+  return /permission[_ ]denied/i.test(String((error && (error.code || error.message)) || error || ""));
+}
+
 async function publishSingleCard(card) {
   const library = await getCardLibrary();
 
@@ -1530,6 +1537,12 @@ async function publishSingleCard(card) {
       localStorage.removeItem(LOCAL_PROJECT_DELETIONS_KEY);
       return "shared";
     } catch (error) {
+      // The database said no (not your card / not your collection). Saving a
+      // private copy on this device instead would only look like it worked.
+      if (isPermissionDenied(error)) {
+        toast("You don't have permission to change this card. Ask the collection's owner to add you as an editor.");
+        return false;
+      }
       console.warn("Shared card save failed, falling back:", error);
       if (!sharedLibraryWarned) {
         sharedLibraryWarned = true;
@@ -4238,6 +4251,29 @@ function keepCardIdentity(card, prior) {
   if (former.size) card.formerIds = [...former].slice(-8);
 }
 
+// Details the card form doesn't show. Saving used to rebuild the card from the
+// form alone, so editing an imported card - even just to swap its picture -
+// silently dropped its trigger text, DON!! effect, artist and the rest.
+const KEPT_ON_EDIT = ["trigger", "donEffect", "artist", "creator", "setName", "printType", "setCodeHint", "importSource", "donCard", "omniLeader", "addedAt"];
+// Automation written for the card's effect: still right only if the text is.
+const KEPT_WITH_SAME_TEXT = ["effects", "customEffectV2", "effectBlocks", "effectScript", "script", "needsCoding", "effectStatus"];
+function keepUnshownFields(card, stored, priorText) {
+  if (!stored) return;
+  const has = (value) => value !== undefined && value !== null && value !== "" && value !== false
+    && !(Array.isArray(value) && !value.length);
+  KEPT_ON_EDIT.forEach(field => { if (!has(card[field]) && has(stored[field])) card[field] = stored[field]; });
+  if (String(card.effect || "").trim() === String(priorText || "").trim()) {
+    KEPT_WITH_SAME_TEXT.forEach(field => {
+      // `effects` only when it is the stored LIST (the pool copy holds plain text there).
+      if (field === "effects" && !Array.isArray(stored.effects)) return;
+      if (!has(card[field]) && has(stored[field])) card[field] = stored[field];
+    });
+  }
+  // It was added when it first arrived, not when it was last touched.
+  if (has(stored.importedAt)) card.importedAt = stored.importedAt;
+  card.lastEditedAt = new Date().toISOString();
+}
+
 let creationSaving = false;
 
 function setCreationSaving(saving) {
@@ -4359,6 +4395,15 @@ async function saveCreatedCardInner(mode) {
     // Untap uuid as its id: re-saving it (just to swap the picture, say) gave it a
     // new id and every deck using it said "N cards not found".
     if (prior) keepCardIdentity(card, prior);
+    if (prior) {
+      // The stored card, not the trimmed copy in the pool (1 KB read at most).
+      let stored = null;
+      try {
+        const library = await getCardLibrary();
+        stored = prior.__storageKey && library && library.getCachedCard ? await library.getCachedCard(prior.__storageKey) : null;
+      } catch (_) { stored = null; }
+      keepUnshownFields(card, stored || prior, prior.effect || prior.effects || "");
+    }
   }
 
   if (!await publishSingleCard(card)) return;
@@ -4405,6 +4450,7 @@ async function saveCreatedCardInner(mode) {
   // overwrite this card. (That's the "new card replaces the last one" bug.)
   toast(`${card.name} saved`);
   await loadCardPool();
+  if (!card.type) autoGuessTypesFor([projectCardKey(card)]);   // in the background
   clearCreationDraft();
   clearCreationForm(true);
   if (mode === "close") {
@@ -8059,7 +8105,7 @@ async function openTypeGuesser(slug) {
   if (!slug) return;
   let tool, library;
   try {
-    [tool, library] = await Promise.all([import("./js/typeGuessTool.js?v=1"), getCardLibrary()]);
+    [tool, library] = await Promise.all([import("./js/typeGuessTool.js?v=2"), getCardLibrary()]);
   } catch (error) {
     toast("The types scanner couldn't load. Check your connection and try again.");
     return;
@@ -8071,8 +8117,44 @@ async function openTypeGuesser(slug) {
     vocabCards: (collection) => state.cards.filter(card => card.collection === collection),
     getImage: cardScanImage,
     save: (guesses) => library.saveTypeGuesses(guesses),
+    // Guesses become the cards' real types (they then show on the card and work
+    // in the type filters, not just in search).
+    accept: async (types) => {
+      const result = await library.acceptTypeGuesses(types);
+      populateFilterOptions();
+      return result;
+    },
     onChange: () => renderCardGrid()
   });
+}
+
+// Cards that just arrived without types: read the types line off their pictures in
+// the background and keep it as a search-only guess, so nobody has to remember to
+// press "Guess types". Quiet unless it found something.
+async function autoGuessTypesFor(storageKeys) {
+  try {
+    const wanted = new Set((storageKeys || []).filter(Boolean));
+    const cards = state.cards.filter(card => wanted.has(card.__storageKey) && !card.type && !card.typeGuess && !card.donCard);
+    if (!cards.length) return;
+    const [tool, library] = await Promise.all([import("./js/typeGuessTool.js?v=2"), getCardLibrary()]);
+    if (!library || !library.saveTypeGuesses) return;
+    const results = await tool.scanCards({
+      cards,
+      vocabCards: (collection) => state.cards.filter(card => card.collection === collection),
+      getImage: cardScanImage
+    });
+    const guesses = {};
+    results.forEach((result, card) => {
+      if (result.found && result.confidence >= tool.CONFIDENT) guesses[card.__storageKey] = result.types;
+    });
+    const count = Object.keys(guesses).length;
+    if (!count) return;
+    await library.saveTypeGuesses(guesses);
+    state.cards.forEach(card => { if (guesses[card.__storageKey]) card.typeGuess = guesses[card.__storageKey]; });
+    toast(`Read the types of ${count} new card${count === 1 ? "" : "s"} from ${count === 1 ? "its picture" : "their pictures"} (used for search)`);
+  } catch (error) {
+    console.warn("Could not guess types for the new cards:", error);
+  }
 }
 
 async function loadLazyCardImage(img) {
@@ -10970,6 +11052,7 @@ async function runUntapImport() {
   needCopy.forEach((entry, index) => { entry.storedImage = copies[index]; });
 
   let done = 0;
+  const savedKeys = [];   // storage keys of the cards that reached the shared library
   for (const entry of toImport) {
     done++;
     if (untapEl.untapDoImport) {
@@ -11006,6 +11089,7 @@ async function runUntapImport() {
     if (ok === "local") summary.deviceOnly++;
     if (entry.dup && entry.action === "replace") summary.replaced++;
     else summary.imported++;
+    if (ok !== "local") savedKeys.push(projectCardKey(card));
   }
 
   if (untapEl.untapDoImport) {
@@ -11015,6 +11099,7 @@ async function runUntapImport() {
 
   await loadCardPool();
   showUntapSummary(summary);
+  autoGuessTypesFor(savedKeys);   // in the background
 }
 
 function showUntapSummary(summary) {

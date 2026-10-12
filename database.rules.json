@@ -22,20 +22,31 @@
     "cards": {
       ".read": true,
       "$cardNumber": {
-        ".write": "auth != null",
-        ".validate": "newData.hasChildren(['cardNumber', 'name'])"
+        ".write": "auth != null && ($cardNumber.beginsWith('~cat~') || (auth.token.firebase.sign_in_provider !== 'anonymous' && (!data.exists() || (auth.uid === '719wRa3WF7auSAQ8eUNy44kK2BK2' || (((root.child('collections').child((data.child('collection').isString() && data.child('collection').val().length > 0 ? data.child('collection').val() : 'golds-bleach')).child('ownerUid').isString() && root.child('collections').child((data.child('collection').isString() && data.child('collection').val().length > 0 ? data.child('collection').val() : 'golds-bleach')).child('ownerUid').val().length > 0) || root.child('collections').child((data.child('collection').isString() && data.child('collection').val().length > 0 ? data.child('collection').val() : 'golds-bleach')).child('editors').exists() || root.child('collections').child((data.child('collection').isString() && data.child('collection').val().length > 0 ? data.child('collection').val() : 'golds-bleach')).child('coOwners').exists()) ? (root.child('collections').child((data.child('collection').isString() && data.child('collection').val().length > 0 ? data.child('collection').val() : 'golds-bleach')).child('ownerUid').val() === auth.uid || root.child('collections').child((data.child('collection').isString() && data.child('collection').val().length > 0 ? data.child('collection').val() : 'golds-bleach')).child('editorUids').child(auth.uid).val() === true) : (!data.child('ownerUid').isString() || data.child('ownerUid').val().length === 0 || data.child('ownerUid').val() === auth.uid))))))",
+        ".validate": "newData.hasChildren(['cardNumber', 'name'])",
+        "image": {
+          ".write": "auth != null && data.isString() && data.val().beginsWith('data:') && newData.isString() && newData.val().beginsWith('https://stewartlittlesbrother-wq.github.io/CustomCardCollectivev1.0/art/')"
+        },
+        "altArt": {
+          ".write": "auth != null && data.isString() && data.val().beginsWith('data:') && newData.isString() && newData.val().beginsWith('https://stewartlittlesbrother-wq.github.io/CustomCardCollectivev1.0/art/')"
+        },
+        "altArts": {
+          "$n": {
+            ".write": "auth != null && data.isString() && data.val().beginsWith('data:') && newData.isString() && newData.val().beginsWith('https://stewartlittlesbrother-wq.github.io/CustomCardCollectivev1.0/art/')"
+          }
+        }
       }
     },
     "cardIndex": {
       ".read": true,
       "$cardNumber": {
-        ".write": "auth != null"
+        ".write": "auth != null && ($cardNumber.beginsWith('~') || (auth.token.firebase.sign_in_provider !== 'anonymous' && (!root.child('cards').child($cardNumber).exists() || (auth.uid === '719wRa3WF7auSAQ8eUNy44kK2BK2' || (((root.child('collections').child((root.child('cards').child($cardNumber).child('collection').isString() && root.child('cards').child($cardNumber).child('collection').val().length > 0 ? root.child('cards').child($cardNumber).child('collection').val() : 'golds-bleach')).child('ownerUid').isString() && root.child('collections').child((root.child('cards').child($cardNumber).child('collection').isString() && root.child('cards').child($cardNumber).child('collection').val().length > 0 ? root.child('cards').child($cardNumber).child('collection').val() : 'golds-bleach')).child('ownerUid').val().length > 0) || root.child('collections').child((root.child('cards').child($cardNumber).child('collection').isString() && root.child('cards').child($cardNumber).child('collection').val().length > 0 ? root.child('cards').child($cardNumber).child('collection').val() : 'golds-bleach')).child('editors').exists() || root.child('collections').child((root.child('cards').child($cardNumber).child('collection').isString() && root.child('cards').child($cardNumber).child('collection').val().length > 0 ? root.child('cards').child($cardNumber).child('collection').val() : 'golds-bleach')).child('coOwners').exists()) ? (root.child('collections').child((root.child('cards').child($cardNumber).child('collection').isString() && root.child('cards').child($cardNumber).child('collection').val().length > 0 ? root.child('cards').child($cardNumber).child('collection').val() : 'golds-bleach')).child('ownerUid').val() === auth.uid || root.child('collections').child((root.child('cards').child($cardNumber).child('collection').isString() && root.child('cards').child($cardNumber).child('collection').val().length > 0 ? root.child('cards').child($cardNumber).child('collection').val() : 'golds-bleach')).child('editorUids').child(auth.uid).val() === true) : (!root.child('cards').child($cardNumber).child('ownerUid').isString() || root.child('cards').child($cardNumber).child('ownerUid').val().length === 0 || root.child('cards').child($cardNumber).child('ownerUid').val() === auth.uid))))) || (data.exists() && data.child('deleted').val() !== true && newData.exists() && newData.child('deleted').val() !== true))"
       }
     },
     "collections": {
       ".read": true,
       "$slug": {
-        ".write": "auth != null"
+        ".write": "auth != null && auth.token.firebase.sign_in_provider !== 'anonymous' && (auth.uid === '719wRa3WF7auSAQ8eUNy44kK2BK2' || (!data.exists() && newData.child('ownerUid').val() === auth.uid) || (data.exists() && data.child('ownerUid').val() === auth.uid))"
       }
     },
     "users": {

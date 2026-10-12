@@ -82,10 +82,41 @@ export function changedKeys(index, done) {
 }
 
 /**
+ * Which of a card's alt arts are embedded, and what they become.
+ * `store(dataUrl)` returns the link for a picture (or null if it can't be a file).
+ * Returns null when nothing is embedded or one can't be moved, else
+ * { altWrites: { "<place in the stored list>": link }, altArt?: link, alts: [every alt as a link] }.
+ * Each embedded alt is written at its OWN place: the database rules let the mover
+ * turn one embedded picture into a link, never replace a whole list.
+ */
+export function planAlts(card, store) {
+    const stored = card?.altArts;
+    if (stored && typeof stored === "object") {
+        const altWrites = {};
+        const after = Array.isArray(stored) ? [...stored] : { ...stored };
+        for (const [place, art] of Object.entries(stored)) {
+            if (!isDataUrl(art)) continue;
+            const link = store(art);
+            if (!link) return null;
+            altWrites[place] = link;
+            after[place] = link;
+        }
+        if (!Object.keys(altWrites).length) return null;
+        return { altWrites, alts: altArtList({ altArts: after }) };
+    }
+    // Older cards kept a single alt in `altArt`.
+    if (isDataUrl(card?.altArt)) {
+        const link = store(card.altArt);
+        return link ? { altWrites: {}, altArt: link, alts: [link] } : null;
+    }
+    return null;
+}
+
+/**
  * The database writes that point one card at its files. `item` is a plan entry:
- * { key, image?, alts?, catalog } - catalog says the card's catalog copy was
- * current, in which case it is patched too (otherwise a visitor's browser
- * rebuilds it from the card, which is tiny now).
+ * { key, image?, altWrites?, altArt?, alts?, catalog } - catalog says the card's
+ * catalog copy was current, in which case it is patched too (otherwise a visitor's
+ * browser rebuilds it from the card, which is tiny now).
  */
 export function cardUpdates(item) {
     const updates = {};
@@ -96,9 +127,10 @@ export function cardUpdates(item) {
         if (item.catalog) { updates[`${entry}/image`] = item.image; updates[`${entry}/__img`] = null; }
     }
     if (Array.isArray(item.alts)) {
-        updates[`${CARDS}/${key}/altArts`] = item.alts;
-        updates[`${CARDS}/${key}/altArt`] = null;
-        if (item.catalog) { updates[`${entry}/altArts`] = item.alts; updates[`${entry}/__alts`] = null; }
+        Object.entries(item.altWrites || {}).forEach(([place, link]) => { updates[`${CARDS}/${key}/altArts/${place}`] = link; });
+        if (item.altArt) updates[`${CARDS}/${key}/altArt`] = item.altArt;
+        // Every alt is a link now, so the catalog can carry the list itself.
+        if (item.catalog && item.alts.every(art => !isDataUrl(art))) { updates[`${entry}/altArts`] = item.alts; updates[`${entry}/__alts`] = null; }
     }
     // Only the time on the index entry changes, so a type guess stored there stays.
     updates[`${INDEX}/${key}/updatedAt`] = SERVER_TIME;
@@ -228,10 +260,9 @@ async function collect() {
             if (url) item.image = url;
             else console.log(`Skipped ${key}: its picture can't be turned into a file.`);
         }
-        const alts = altArtList(card);
-        if (alts.some(isDataUrl)) {
-            const moved = alts.map(art => (isDataUrl(art) ? store(art) : art));
-            if (moved.every(Boolean)) item.alts = moved;
+        if (altArtList(card).some(isDataUrl)) {
+            const alts = planAlts(card, store);
+            if (alts) Object.assign(item, alts);
             else console.log(`Skipped the alt arts of ${key}: one can't be turned into a file.`);
         }
         if (item.image || item.alts) plan.push(item);

@@ -10,7 +10,7 @@ import { ref, get, update, remove, onValue } from "https://www.gstatic.com/fireb
 import { database } from "./firebaseApp.js";
 import { BASE_PATH, DECKS_PATH } from "./tournamentPaths.js?v=tour-3";
 
-const LIBRARY_URL = "./cardLibraryService.js?v=collections-17";
+const LIBRARY_URL = "./cardLibraryService.js?v=collections-18";
 const norm = (value) => String(value || "").trim().toLowerCase();
 
 // ── reading a deck ───────────────────────────────────────────────────────────

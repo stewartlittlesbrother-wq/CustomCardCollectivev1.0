@@ -113,6 +113,8 @@ function injectStyles() {
  *   vocabCards(collection) - every card of a collection (for the type dictionary)
  *   getImage(card) - Promise<HTMLImageElement|null> (CORS-clean)
  *   save(guesses)  - Promise; guesses = { storageKey: "A/B" | null }
+ *   accept(types)  - optional. Promise<{ accepted: [keys], refused: [keys] }>;
+ *                    types = { storageKey: "A/B" }. Makes guesses the REAL types.
  *   onChange()     - called after saves so the grid / search can refresh
  */
 export function openTypeGuessTool(options) {
@@ -129,8 +131,9 @@ export function openTypeGuessTool(options) {
       <div class="tg-dialog" role="dialog" aria-modal="true" aria-labelledby="tgToolTitle">
         <h2 id="tgToolTitle">Guess missing types · ${esc(options.title || "")}</h2>
         <p>Reads the types line printed under each card's name (like “Human / Karakura Town”) for cards that have no types filled in.
-           The guesses only help <b>search</b> find these cards - they're never shown as the card's real types.
-           Readings it isn't sure about are not saved unless you keep them.</p>
+           A saved guess only helps <b>search</b> find the card - it isn't shown as the card's types.
+           Readings it isn't sure about are not saved unless you keep them.${options.accept ? `
+           When the list looks right (remove any that are wrong), you can turn the saved guesses into the cards' real types.` : ""}</p>
         <div class="tg-row-opts">
           <span><b>${candidates.length}</b> card${candidates.length === 1 ? "" : "s"} without types${guessed.length ? ` · ${guessed.length} already guessed` : ""}</span>
           ${guessed.length ? `<label><input type="checkbox" data-tg-rescan> Scan those again too</label>` : ""}
@@ -140,6 +143,7 @@ export function openTypeGuessTool(options) {
         <div class="tg-list" hidden></div>
         <div class="tg-actions">
           ${guessed.length ? `<button type="button" class="tg-btn" data-tg-clear>Remove all guesses</button>` : ""}
+          ${options.accept ? `<button type="button" class="tg-btn" data-tg-accept hidden></button>` : ""}
           <span class="tg-spacer"></span>
           <button type="button" class="tg-btn" data-tg-close>Close</button>
           <button type="button" class="tg-btn primary" data-tg-start ${candidates.length ? "" : "disabled"}>Start scanning</button>
@@ -190,7 +194,7 @@ export function openTypeGuessTool(options) {
           <div class="tg-name">${esc(card.name || "Card")}<small>${esc(card.cardNumber || "")}</small></div>
           <div class="tg-guess">${result.found ? esc(result.types) : "Couldn't read a types line"}</div>
           <div class="tg-side">
-            ${result.found ? `<span class="tg-badge" title="How sure the reader is (0-100)">${kept ? "saved" : "not saved"} · ${result.confidence}</span>` : ""}
+            ${result.found ? `<span class="tg-badge" title="How sure the reader is (0-100)">${kept ? "saved" : "not saved"}${result.confidence == null ? "" : ` · ${result.confidence}`}</span>` : ""}
             ${result.found ? `<button type="button" class="tg-btn small">${kept ? "Remove" : "Keep"}</button>` : ""}
           </div>`;
         row.item.querySelector("button")?.addEventListener("click", async (event) => {
@@ -198,15 +202,67 @@ export function openTypeGuessTool(options) {
             try {
                 await save({ [card.__storageKey]: row.kept ? null : row.result.types });
                 setRow(card, row.result, !row.kept);
-                showCounts();
+                if (scanned) showCounts();
+                refreshAccept();
             } catch (error) {
                 status.textContent = `Couldn't save: ${error.message || error}`;
                 event.currentTarget.disabled = false;
             }
         });
     }
+    // "Use the guesses as real types": every guess that is saved right now.
+    const acceptBtn = $("[data-tg-accept]");
+    const keptRows = () => [...rows.entries()].filter(([, row]) => row.kept && row.result.found);
+    function refreshAccept() {
+        if (!acceptBtn) return;
+        const count = keptRows().length;
+        acceptBtn.hidden = !count;
+        acceptBtn.disabled = running;
+        acceptBtn.dataset.armed = "";
+        acceptBtn.textContent = `Use the ${count} saved guess${count === 1 ? "" : "es"} as real types`;
+    }
+    acceptBtn?.addEventListener("click", async () => {
+        const chosen = keptRows();
+        if (!chosen.length || running) return;
+        if (acceptBtn.dataset.armed !== "1") {
+            acceptBtn.dataset.armed = "1";
+            acceptBtn.textContent = `Tap again: ${chosen.length} card${chosen.length === 1 ? "" : "s"} get${chosen.length === 1 ? "s" : ""} these types`;
+            return;
+        }
+        acceptBtn.disabled = true;
+        status.textContent = "Saving the types…";
+        const types = {};
+        chosen.forEach(([card, row]) => { types[card.__storageKey] = row.result.types; });
+        try {
+            const result = await options.accept(types);
+            const accepted = new Set(result.accepted || []);
+            chosen.forEach(([card, row]) => {
+                if (!accepted.has(card.__storageKey)) return;
+                card.type = row.result.types;
+                card.typeGuess = "";
+                row.item.remove();
+                rows.delete(card);
+            });
+            const refused = (result.refused || []).length;
+            status.textContent = `${accepted.size} card${accepted.size === 1 ? " now has its" : "s now have their"} types.`
+                + (refused ? ` ${refused} couldn't be changed (not yours to edit).` : "");
+            try { options.onChange && options.onChange(); } catch (_) {}
+        } catch (error) {
+            status.textContent = `Couldn't save the types: ${error.message || error}`;
+        }
+        refreshAccept();
+    });
+
+    // Guesses this collection already has, so they can be reviewed without scanning.
+    let scanned = false;
+    guessed.forEach(card => setRow(card, { found: true, types: card.typeGuess, confidence: null }, true));
+    if (guessed.length) list.hidden = false;
+    refreshAccept();
+
+    // Counts describe THIS scan, not the guesses that were listed when it opened.
+    const scannedNow = new Set();
     const counts = () => {
-        const all = [...rows.values()];
+        const all = [...rows.entries()].filter(([card]) => scannedNow.has(card)).map(([, row]) => row);
         return { done: all.length, saved: all.filter(row => row.kept).length, unsure: all.filter(row => row.result.found && !row.kept).length, unread: all.filter(row => !row.result.found).length };
     };
     let lead = "";
@@ -220,7 +276,8 @@ export function openTypeGuessTool(options) {
         const rescan = Boolean($("[data-tg-rescan]")?.checked);
         const queue = candidates.filter(card => rescan || !card.typeGuess);
         if (!queue.length) { status.textContent = "Nothing left to scan."; return; }
-        running = true; stopped = false; lead = "";
+        running = true; stopped = false; lead = ""; scanned = true; scannedNow.clear();
+        refreshAccept();
         startBtn.textContent = "Stop";
         $("[data-tg-clear]")?.setAttribute("disabled", "");
         $("[data-tg-rescan]")?.setAttribute("disabled", "");
@@ -246,12 +303,13 @@ export function openTypeGuessTool(options) {
                     // Step 2 only ever upgrades: a guess that was already saved stays.
                     if (step === 2 && was && was.kept && !sure) return;
                     if (sure) pending[card.__storageKey] = result.types;
+                    scannedNow.add(card);
                     setRow(card, result, sure);
                     if (Object.keys(pending).length >= 10) {
                         try { await flush(); } catch (error) { failed = `Couldn't save: ${error.message || error}`; stopped = true; }
                     }
                     if (step === 1) {
-                        const done = rows.size;
+                        const done = scannedNow.size;
                         const left = Math.round((Date.now() - started) / done * (queue.length - done) / 60000);
                         fill.style.width = `${Math.round(done / queue.length * 100)}%`;
                         showCounts(done < queue.length ? ` · about ${left < 1 ? "<1" : left} min left` : " · checking the unsure ones…");
@@ -267,5 +325,6 @@ export function openTypeGuessTool(options) {
         startBtn.textContent = "Start scanning";
         lead = stopped ? "Stopped. " : "Done. ";
         if (failed) status.textContent = failed; else showCounts();
+        refreshAccept();
     });
 }
