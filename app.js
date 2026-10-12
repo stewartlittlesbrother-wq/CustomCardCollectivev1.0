@@ -650,6 +650,10 @@ function normalizeCard(raw, category) {
     // Firebase rejects) so JSON-imported cards preserve everything the source
     // provided and can round-trip back through the shared library unchanged.
     untapId: raw.untapId || "",
+    // Ids this card had before (decks store ids - see cardForFormerId).
+    formerIds: (Array.isArray(raw.formerIds) ? raw.formerIds
+      : (raw.formerIds && typeof raw.formerIds === "object") ? Object.values(raw.formerIds) : [])
+      .map(String).filter(Boolean),
     subtype: raw.subtype || "",
     trigger: raw.trigger || "",
     donEffect: raw.donEffect || "",
@@ -1049,6 +1053,8 @@ async function loadCardPool() {
     if (token === poolLoadToken) {
       state.cards = assembleCardPool(loadedCards, useShared.cards, useShared.deleted);
       state.sharedSyncing = false;
+      // Only after a real, complete read of the library.
+      if (fresh.ok) repairAllDeckCardIds();
       populateFilterOptions();
       renderAll();
       updateImportStatus();
@@ -4210,6 +4216,17 @@ function creationCardFromForm(imageDataUrl, altArts = []) {
   };
 }
 
+// Carry a card's identity across an edit: the same id while its number is the
+// same, and a note of the old id when the number (and so the id) changes.
+function keepCardIdentity(card, prior) {
+  const former = new Set((prior.formerIds || []).map(String));
+  if (prior.untapId) card.untapId = prior.untapId;
+  if (prior.id && String(card.cardNumber) === String(prior.cardNumber)) card.id = prior.id;
+  else if (prior.id && prior.id !== card.id) former.add(String(prior.id));
+  former.delete(String(card.id));
+  if (former.size) card.formerIds = [...former].slice(-8);
+}
+
 let creationSaving = false;
 
 function setCreationSaving(saving) {
@@ -4326,6 +4343,11 @@ async function saveCreatedCardInner(mode) {
   if (state.editingCardId) {
     const prior = getCard(state.editingCardId);
     card.ownerUid = (prior && prior.ownerUid) ? prior.ownerUid : "";
+    // Decks store card ids, so an edit must never change one. The form builds the
+    // card with id = its number, but a card imported from Untap long ago has the
+    // Untap uuid as its id: re-saving it (just to swap the picture, say) gave it a
+    // new id and every deck using it said "N cards not found".
+    if (prior) keepCardIdentity(card, prior);
   }
 
   if (!await publishSingleCard(card)) return;
@@ -4351,9 +4373,18 @@ async function saveCreatedCardInner(mode) {
     } catch (error) {
       console.warn("Could not remove the pre-edit card:", error);
     }
-    delete state.deck[previousKey];
-    if (state.leaderId === previousKey) state.leaderId = card.cardNumber;
-    saveDeck(false);
+    // The card moved to a new storage key. Its id usually did NOT change (an old
+    // number-only key becoming number+collection), so the deck being built keeps
+    // it; when the id did change, carry the copies over to the new id.
+    if (previousKey && previousKey !== card.id) {
+      if (state.deck[previousKey]) {
+        state.deck[card.id] = (state.deck[card.id] || 0) + state.deck[previousKey];
+        delete state.deck[previousKey];
+      }
+      if (state.leaderId === previousKey) state.leaderId = card.id;
+      if (state.leaderId2 === previousKey) state.leaderId2 = card.id;
+      saveDeck(false);
+    }
   }
 
   // Reload the pool FIRST so the just-saved card is in state.cards, THEN clear
@@ -6491,7 +6522,7 @@ function openMultiplayerTab() {
         .sort((a, b) => a.name.localeCompare(b.name));
     }
   };
-  import("./js/pages/multiplayerTab.js?v=mpx-7")
+  import("./js/pages/multiplayerTab.js?v=mpx-8")
     .then(mod => {
       multiplayerTabModule = mod;
       if (state.activeView === "multiplayer") mod.show();
@@ -6509,6 +6540,125 @@ function cardsByCategory(category) {
 
 function getCard(id) {
   return state.cards.find(card => card.id === id);
+}
+
+// ── Decks pointing at a card's OLD id ─────────────────────────────────────
+// A deck is a map of card id -> copies. The card can still be in the library
+// under a different id than the deck remembers:
+//   - it was imported from Untap long ago (id = the Untap uuid) and later
+//     re-saved or re-imported, which made its id the card number
+//   - its number was changed
+// Find the card such a key meant. Returns null unless exactly one card fits.
+function cardForFormerId(id, collections) {
+  const key = String(id || "").trim();
+  if (!key) return null;
+  const one = (list) => {
+    if (list.length === 1) return list[0];
+    if (list.length > 1 && collections && collections.size) {
+      const same = list.filter(card => collections.has(card.collection));
+      if (same.length === 1) return same[0];
+    }
+    return null;
+  };
+  const lower = key.toLowerCase();
+  // The card's number rather than its id.
+  let found = one(state.cards.filter(card => String(card.cardNumber) === key));
+  // The Untap uuid the card was imported with.
+  if (!found) found = one(state.cards.filter(card => card.untapId && String(card.untapId).toLowerCase() === lower));
+  // An id the card remembers having.
+  if (!found) found = one(state.cards.filter(card => card.formerIds && card.formerIds.includes(key)));
+  // An Untap uuid whose card lost it: imported numbers are "<set>-<first five
+  // hex digits of the uuid>" (makeUntapCardNumber), e.g. 12271abc-... -> JBA100-12271.
+  if (!found && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)) {
+    const tail = key.replace(/[^a-fA-F0-9]/g, "").slice(0, 5).toUpperCase();
+    const pattern = new RegExp("^[A-Z0-9]{1,6}-" + tail + "$");
+    found = one(state.cards.filter(card => !card.untapId && pattern.test(String(card.cardNumber))));
+  }
+  return found || null;
+}
+
+// Point one deck ({ leaderId, leaderId2, deck, tokens, startingCards }) at the
+// current ids of its cards. Returns how many card entries were reconnected.
+function repairDeckCardIds(deck) {
+  if (!deck || typeof deck !== "object") return 0;
+  const ids = new Set([deck.leaderId, deck.leaderId2, ...Object.keys(deck.deck || {}),
+    ...(Array.isArray(deck.tokens) ? deck.tokens : []),
+    ...(Array.isArray(deck.startingCards) ? deck.startingCards.map(entry => entry && entry.id) : [])
+  ].filter(Boolean).map(String));
+  const missing = [...ids].filter(id => !getCard(id));
+  if (!missing.length) return 0;
+  // Which collections the rest of the deck comes from - breaks a tie between two
+  // cards that would both fit.
+  const collections = new Set([...ids].map(id => getCard(id)).filter(Boolean).map(card => card.collection));
+  const moved = new Map();
+  missing.forEach(id => {
+    const card = cardForFormerId(id, collections);
+    if (card && card.id !== id) moved.set(id, card.id);
+  });
+  if (!moved.size) return 0;
+
+  const next = (id) => moved.get(String(id)) || id;
+  if (deck.leaderId) deck.leaderId = next(deck.leaderId);
+  if (deck.leaderId2) deck.leaderId2 = next(deck.leaderId2);
+  if (deck.deck && typeof deck.deck === "object") {
+    const fixed = {};
+    Object.entries(deck.deck).forEach(([id, qty]) => { fixed[next(id)] = (fixed[next(id)] || 0) + Number(qty || 0); });
+    deck.deck = fixed;
+  }
+  if (Array.isArray(deck.tokens)) deck.tokens = [...new Set(deck.tokens.map(next))];
+  if (Array.isArray(deck.startingCards)) {
+    deck.startingCards = deck.startingCards.map(entry => (entry && entry.id ? { ...entry, id: next(entry.id) } : entry));
+  }
+  return moved.size;
+}
+
+// Run once the whole card pool is in (never while it is still downloading - a
+// card that just hasn't arrived yet is not a card that changed id). Fixes the
+// deck being built and every saved deck, and tells the player.
+function repairAllDeckCardIds() {
+  let cards = 0, decks = 0;
+  try {
+    const draft = { leaderId: state.leaderId, leaderId2: state.leaderId2, deck: state.deck, tokens: state.tokens, startingCards: state.startingCards };
+    const fixedDraft = repairDeckCardIds(draft);
+    if (fixedDraft) {
+      state.leaderId = draft.leaderId || "";
+      state.leaderId2 = draft.leaderId2 || "";
+      state.deck = draft.deck;
+      state.tokens = draft.tokens;
+      state.startingCards = draft.startingCards;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        leaderId: state.leaderId, dualLeader: state.dualLeader, leaderId2: state.leaderId2,
+        deck: state.deck, tokens: state.tokens, startingCards: state.startingCards, deckName: state.deckName
+      }));
+      syncPush(STORAGE_KEY);
+      cards += fixedDraft;
+    }
+    const saved = savedDecks();
+    let changed = false;
+    if (Array.isArray(saved)) {
+      saved.forEach(deck => {
+        const fixed = repairDeckCardIds(deck);
+        if (!fixed) return;
+        // Newer than the copy in the account, so the sync keeps this one.
+        deck.savedAt = new Date().toISOString();
+        cards += fixed;
+        decks += 1;
+        changed = true;
+      });
+    }
+    if (changed) {
+      localStorage.setItem(SAVED_DECKS_KEY, JSON.stringify(saved));
+      syncPush(SAVED_DECKS_KEY);
+    }
+  } catch (error) {
+    console.warn("Could not reconnect deck cards:", error);
+  }
+  if (cards) {
+    try { renderSavedDecks(); } catch (_) {}
+    const where = decks ? " in " + decks + " saved deck" + (decks === 1 ? "" : "s") : " in your deck";
+    toast("Reconnected " + cards + " re-uploaded card" + (cards === 1 ? "" : "s") + where);
+  }
+  return cards;
 }
 
 // Resolve a card by its UNIQUE key (number + collection, via projectCardKey).
@@ -10818,6 +10968,13 @@ async function runUntapImport() {
         // A normal long-lived link (e.g. untap.in): keep it, but tell the user.
         summary.imageKept++;
       }
+    }
+
+    // Replacing a card keeps its id (decks store ids): an older import of the same
+    // card may have a different one than a fresh import would give it.
+    if (entry.dup && entry.action === "replace" && entry.dup.id
+        && String(entry.dup.cardNumber) === String(card.cardNumber) && entry.dup.id !== card.id) {
+      card = { ...card, id: entry.dup.id };
     }
 
     [card] = await compressImportedCardImages([card]);

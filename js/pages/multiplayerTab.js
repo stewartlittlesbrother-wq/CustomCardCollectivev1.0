@@ -103,6 +103,14 @@ function poolLoaded() {
     return Boolean(host.state && !host.state.cardsLoading);
 }
 
+// The whole library is in (bundled cards AND the shared library). Until then a
+// card a deck lists may simply not have arrived yet - e.g. right after someone
+// re-uploaded a set, everybody downloads those cards again - so it must not be
+// reported as "not found".
+function poolSettled() {
+    return poolLoaded() && !host.state?.sharedSyncing;
+}
+
 // ── State ────────────────────────────────────────────────────────────────────
 let root = null;
 let started = false;
@@ -227,12 +235,16 @@ function setConn(next) {
 // (The shared library arrives after the bundled cards, so wait for both - it is
 // where most leaders and the Draft Battle card pools come from.)
 function waitForCardPool() {
-    const settled = () => poolLoaded() && !host.state?.sharedSyncing;
-    if (settled()) return;
+    if (poolSettled()) return;
     let tries = 0;
     const timer = setInterval(() => {
         tries += 1;
-        if (!settled() && tries < 120) return;
+        // A big download (a re-uploaded set, a first visit) can take minutes; this
+        // used to give up after one, leaving "cards not found" on screen for good.
+        if (!poolSettled() && tries < 2400) {
+            if (tries % 60 === 0) refreshArt();   // show what has arrived so far
+            return;
+        }
         clearInterval(timer);
         refreshArt();
     }, 500);
@@ -273,7 +285,7 @@ function deckStats(deck) {
         if (!m) return;
         const qty = Number(m[1]) || 0;
         count += qty;
-        if (poolLoaded() && !leaderCard(m[2].trim())) missing += qty;
+        if (poolSettled() && !leaderCard(m[2].trim())) missing += qty;
     });
     const leader = leaderCard(deck?.leaderKey);
     const leader2 = deck?.leaderKey2 ? leaderCard(deck.leaderKey2) : null;
