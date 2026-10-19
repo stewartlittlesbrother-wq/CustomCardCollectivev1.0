@@ -1670,7 +1670,14 @@ async function loadTournamentContext() {
         const db = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
         const read = (path) => db.get(db.ref(onlineFirebaseApp.database, `matches/${roomCode}/${path}`)).then(s => s.val());
         const [meta, p1, p2] = await Promise.all([read("tournament"), read("players/p1/uid"), read("players/p2/uid")]);
-        if (meta) tournamentContext = { meta, uids: { p1, p2 } };
+        if (meta) {
+            tournamentContext = { meta, uids: { p1, p2 } };
+            const link = document.querySelector(".btn-back");
+            if (link) {
+                link.href = `../index.html?view=tournaments${meta.id ? `&t=${encodeURIComponent(meta.id)}` : ""}`;
+                link.textContent = "Back to Tournament";
+            }
+        }
     } catch (error) {
         console.warn("Couldn't check for a tournament match:", error);
     }
@@ -2388,10 +2395,106 @@ function setupOnlineChat() {
     });
 }
 
+// ── Moves that haven't reached the server yet ────────────────────────────────
+// When the connection is slow or drops, your moves wait in this browser and
+// Firebase sends them by itself once it's back. Refreshing the page throws them
+// away - that's how a player at 0 life refreshed "to stop the lag" and was back on
+// 4. So the board says when moves are waiting or the connection is down, and asks
+// before the page is left while anything is still unsent.
+let onlineWritesPending = 0;
+let onlineConnected = true;
+let onlineEverConnected = false;
+let onlineSlowTimer = null;
+let onlineShowSlow = false;
+// Service calls that only read, or return a value straight away.
+const NOT_ONLINE_WRITES = /^(get|subscribe|strip|hydrate|snapshot|clockLeftMs|serverNow|setupPresence)/;
+
+function trackOnlineWrites(service) {
+    const wrapped = {};
+    Object.keys(service).forEach((name) => {
+        const fn = service[name];
+        if (typeof fn !== "function" || NOT_ONLINE_WRITES.test(name)) { wrapped[name] = fn; return; }
+        wrapped[name] = (...args) => {
+            const result = fn(...args);
+            if (result && typeof result.then === "function") {
+                onlineWritesPending += 1;
+                updateOnlineSyncNotice();
+                const done = () => {
+                    onlineWritesPending = Math.max(0, onlineWritesPending - 1);
+                    updateOnlineSyncNotice();
+                };
+                result.then(done, done);
+            }
+            return result;
+        };
+    });
+    return wrapped;
+}
+
+async function watchOnlineConnection() {
+    try {
+        const db = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
+        db.onValue(db.ref(onlineFirebaseApp.database, ".info/connected"), (snapshot) => {
+            onlineConnected = snapshot.val() === true;
+            if (onlineConnected) onlineEverConnected = true;
+            updateOnlineSyncNotice();
+        });
+    } catch (error) {
+        console.warn("Couldn't watch the connection:", error);
+    }
+}
+
+function updateOnlineSyncNotice() {
+    // A move normally lands in well under a second: only mention it when one is slow.
+    if (onlineWritesPending > 0 && !onlineSlowTimer && !onlineShowSlow) {
+        onlineSlowTimer = setTimeout(() => {
+            onlineSlowTimer = null;
+            onlineShowSlow = onlineWritesPending > 0;
+            updateOnlineSyncNotice();
+        }, 1500);
+    }
+    if (!onlineWritesPending) {
+        clearTimeout(onlineSlowTimer);
+        onlineSlowTimer = null;
+        onlineShowSlow = false;
+    }
+    const offline = onlineEverConnected && !onlineConnected;
+    let notice = document.getElementById("onlineSyncNotice");
+    if (!offline && !onlineShowSlow) { if (notice) notice.hidden = true; return; }
+    if (!notice) {
+        notice = document.createElement("div");
+        notice.id = "onlineSyncNotice";
+        notice.className = "online-sync-notice";
+        notice.setAttribute("role", "status");
+        document.body.appendChild(notice);
+    }
+    notice.hidden = false;
+    notice.classList.toggle("is-offline", offline);
+    notice.textContent = offline
+        ? "Connection lost — reconnecting… Don't refresh: your moves are kept and sent when it's back."
+        : "Sending your moves… (slow connection — please don't refresh)";
+}
+
+window.addEventListener("beforeunload", (event) => {
+    if (!isOnlineMatch || isSpectator || onlineWritesPending <= 0) return;
+    // Browsers show their own wording; this just makes them ask first.
+    event.preventDefault();
+    event.returnValue = "";
+});
+
+// The board's "Back to Lobby" link points at the practice page by default; an
+// online game or a spectator belongs back on the Multiplayer tab (a tournament
+// match on its tournament - see loadTournamentContext).
+function pointBackLinkAtLobby() {
+    const link = document.querySelector(".btn-back");
+    if (link && (isOnlineMatch || isSpectator)) link.href = "../index.html?view=multiplayer";
+}
+
 async function initializeOnlineMultiplayer() {
     if (!isOnlineMatch) return;
 
     applyOwnSidePerspective();
+    pointBackLinkAtLobby();
 
     if (!roomCode) {
         addGameLog("Online match URL is missing the room code.");
@@ -2412,10 +2515,11 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=quick-1");
+        onlineMultiplayerService = trackOnlineWrites(await import("../firebase/multiplayerService.js?v=quick-1"));
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
+        watchOnlineConnection();
 
         // Remember this game, so the Multiplayer tab can offer "Rejoin game".
         try {

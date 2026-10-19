@@ -5993,3 +5993,47 @@ body.hand-flat .opponent-hand .hand-card.hand-card-glide {
     translate: calc(-50% - 10%) calc(-50% - 4%);
     filter: brightness(.9);
 }
+
+/* ── Spectators could not leave (v275) ──
+   The "SPECTATING" bar spans the top of the screen above everything, so it sat on
+   top of the Back to Lobby button and swallowed the click. The bar is only a
+   label: let clicks through, and give the button its own spot below it. */
+.spectator-banner {
+    pointer-events: none;
+}
+body.spectator-mode .btn-back {
+    top: 40px;
+    z-index: 2147483001;
+}
+
+/* ── Sort button under the hand (v275) ──
+   A card under the pointer is raised above the rest (z-index 500), which also put
+   it above the sort button: with a full hand overlapping the button, the card won
+   every click. Keep the button above any hand card. */
+.hand-sort-button {
+    z-index: 700 !important;
+}
+
+/* ── Slow or lost connection notice (v275) ── */
+.online-sync-notice {
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    z-index: 2147482000;
+    max-width: min(560px, calc(100vw - 32px));
+    padding: 9px 16px;
+    border-radius: 999px;
+    background: rgba(18, 24, 34, .94);
+    border: 1px solid rgba(255, 255, 255, .22);
+    color: #fff;
+    font-size: .86rem;
+    font-weight: 700;
+    text-align: center;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, .5);
+    pointer-events: none;
+}
+.online-sync-notice.is-offline {
+    background: rgba(150, 30, 30, .96);
+    border-color: rgba(255, 180, 180, .5);
+}

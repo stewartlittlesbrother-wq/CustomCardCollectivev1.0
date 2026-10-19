@@ -1179,7 +1179,7 @@ function getCardLibrary() {
 let userSyncPromise = null;
 function getUserSync() {
   if (!userSyncPromise) {
-    userSyncPromise = import("./js/firebase/userDataSync.js?v=sync-1")
+    userSyncPromise = import("./js/firebase/userDataSync.js?v=sync-2")
       .catch(error => { console.warn("Account sync unavailable:", error); return null; });
   }
   return userSyncPromise;
@@ -7674,10 +7674,27 @@ function setCollectionHidden(slug, hidden) {
   try { localStorage.setItem(HIDDEN_COLLECTIONS_KEY, JSON.stringify([...set])); } catch {}
 }
 
+// Favourite collections: starred ones are listed first. Follows the account to
+// other devices (userDataSync.js).
+const FAVORITE_COLLECTIONS_KEY = "cc_favorite_collections";
+function getFavoriteCollectionSlugs() {
+  try {
+    const a = JSON.parse(localStorage.getItem(FAVORITE_COLLECTIONS_KEY) || "[]");
+    return Array.isArray(a) ? a : [];
+  } catch { return []; }
+}
+function setCollectionFavorite(slug, favorite) {
+  const list = getFavoriteCollectionSlugs().filter(s => s !== slug);
+  if (favorite) list.push(slug);
+  try { localStorage.setItem(FAVORITE_COLLECTIONS_KEY, JSON.stringify(list)); } catch {}
+  syncPush(FAVORITE_COLLECTIONS_KEY);
+}
+
 function renderCollectionPicker() {
   if (!el.collectionPicker) return;
   const counts = collectionCounts();
   const hiddenSet = new Set(getHiddenCollectionSlugs());
+  const favoriteSet = new Set(getFavoriteCollectionSlugs());
   el.collectionPicker.innerHTML = "";
 
   // While the shared library is still downloading in the background, uploaded
@@ -7706,7 +7723,10 @@ function renderCollectionPicker() {
   el.collectionPicker.appendChild(omniTile);
 
   const hidden = [];
-  CARD_COLLECTIONS.forEach(entry => {
+  // Favourites first; otherwise the usual order (sort is stable).
+  const ordered = [...CARD_COLLECTIONS].sort((a, b) =>
+    (favoriteSet.has(b.slug) ? 1 : 0) - (favoriteSet.has(a.slug) ? 1 : 0));
+  ordered.forEach(entry => {
     if (hiddenSet.has(entry.slug)) { hidden.push(entry); return; } // tucked away below
 
     const tile = document.createElement("button");
@@ -7725,6 +7745,23 @@ function renderCollectionPicker() {
       <span class="collection-tile-count">${counts[entry.slug] || 0} cards</span>
     `;
     tile.addEventListener("click", () => openCollection(entry.slug));
+
+    // Star in the other corner: favourite collections are listed first.
+    const favorite = favoriteSet.has(entry.slug);
+    if (favorite) tile.classList.add("is-favorite");
+    const favBtn = document.createElement("span");
+    favBtn.className = "collection-fav-btn";
+    favBtn.setAttribute("role", "button");
+    favBtn.setAttribute("aria-pressed", favorite ? "true" : "false");
+    favBtn.title = favorite ? "Remove from favourites" : "Add to favourites (listed first)";
+    favBtn.setAttribute("aria-label", favBtn.title);
+    favBtn.textContent = favorite ? "★" : "☆";
+    favBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setCollectionFavorite(entry.slug, !favorite);
+      renderCollectionPicker();
+    });
+    tile.appendChild(favBtn);
 
     // Small "hide" control in the corner — tucks this collection into the Hidden
     // strip. It's a span (not a nested button) so it's valid inside the tile

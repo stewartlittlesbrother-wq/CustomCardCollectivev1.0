@@ -61,7 +61,8 @@ const SYNC_SPECS = [
     { key: "custom-img-cardback-v1",                     mode: "lww" },
     { key: "custom-img-donback-v1",                      mode: "lww" },
     { key: "cc_builder_cards_big",                       mode: "lww" },
-    { key: "cc_spectator_name",                          mode: "lww" }
+    { key: "cc_spectator_name",                          mode: "lww" },
+    { key: "cc_favorite_collections",                    mode: "lww" }    // starred sets
 ];
 const SYNC_KEYS = new Set(SYNC_SPECS.map(s => s.key));
 const META_KEY = "cc_sync_meta_v1";   // { key: lastPushedAtMs }
