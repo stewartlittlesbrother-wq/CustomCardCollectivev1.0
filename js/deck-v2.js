@@ -348,6 +348,13 @@
         testButton.addEventListener("click", () => { if (window.ccOpenHandTester) window.ccOpenHandTester(); });
         actions.append(testButton);
 
+        // What other decks with this leader run (app.js window.ccOpenLeaderStats).
+        const statsButton = make("button", "v2-btn", "📊 Popular cards");
+        statsButton.type = "button";
+        statsButton.title = "See what share of the decks played online with a leader run each card";
+        statsButton.addEventListener("click", () => { if (window.ccOpenLeaderStats) window.ccOpenLeaderStats(); });
+        actions.append(statsButton);
+
         // Export / import
         const exportWrap = make("div", "v2-menu-wrap");
         const exportButton = make("button", "v2-btn", "Export ▾");

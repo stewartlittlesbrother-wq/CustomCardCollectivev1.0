@@ -5783,6 +5783,31 @@ window.ccOpenHandTester = () => {
     });
 };
 
+// Deck Builder "Popular cards": for a leader, the share of decks played online
+// that ran each card and their average copies (js/leaderStats.js, loaded on first use).
+window.ccOpenLeaderStats = () => {
+  import("./js/leaderStats.js?v=1")
+    .then(mod => mod.openLeaderStats({
+      leaderId: state.dualLeader ? "" : (state.leaderId || ""),
+      cardFor: (id) => getCard(id) || null,
+      imageFor: (card) => resolveCardImageUrl(card),
+      canAdd: (id) => {
+        const card = getCard(id);
+        return Boolean(card && card.category !== "leader" && state.leaderId && !state.dualLeader);
+      },
+      onAdd: (id) => {
+        const before = state.deck[id] || 0;
+        addToDeck(id);
+        const card = getCard(id);
+        if ((state.deck[id] || 0) > before && card) toast(`Added ${card.name} (${state.deck[id]} in deck)`);
+      }
+    }))
+    .catch(error => {
+      console.warn(error);
+      toast("Couldn't open Popular cards — check your connection and try again.");
+    });
+};
+
 // A tournament's published top deck -> the Deck Builder (Tournaments tab, "Open in
 // Deck Builder"). deck = { name, leaderKey, leaderKey2?, deckText ("4xNUM" lines) }.
 // It replaces the deck being edited, so ask first when there is one.

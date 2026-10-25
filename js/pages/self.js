@@ -813,6 +813,8 @@ function applyOnlinePublicState(publicState = {}) {
 
     // A freshly dealt Quick match game: put my ladder rating in the room (once).
     maybeWriteLadderSnapshot();
+    // ...and add the deck I brought to the play stats (once per game, any room).
+    maybeRecordDeckStats();
 
     // Self-heal a mulligan deadlock: if BOTH players are marked done but the
     // phase is still "mulligan" (they both decided at the same instant, so
@@ -1528,6 +1530,26 @@ function maybeWriteLadderSnapshot() {
     loadProfileService()
         .then(svc => svc.writeLadderSnapshot(roomCode, gameId, playerSlot, onlineUser.uid))
         .catch(error => console.warn("Couldn't note your ladder rating:", error));
+}
+
+// Play stats (js/firebase/metaStats.js): add the deck I brought to its leader's
+// totals, once per dealt game - the Deck Builder's "Popular cards" reads them.
+// Not for spectators, and not for draft games (those decks are random).
+let deckStatsFor = "";
+function maybeRecordDeckStats() {
+    if (isSpectator || !onlineFirebaseApp || !onlineUser) return;
+    const gameId = onlinePublicState?.gameId;
+    if (!gameId || deckStatsFor === gameId || onlinePublicState.winner || onlinePublicState.phase === "waiting") return;
+    deckStatsFor = gameId;
+    (async () => {
+        const db = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
+        const read = (path) => db.get(db.ref(onlineFirebaseApp.database, `matches/${roomCode}/${path}`)).then(s => s.val());
+        const [mode, deck] = await Promise.all([read("mode"), read(`players/${playerSlot}/deck`)]);
+        // Draft decks are random and Dual Leader decks mix two leaders' colours: neither says what a leader runs.
+        if (mode === "draft" || !deck || !deck.leaderKey || deck.leaderKey2 || !deck.deckText) return;
+        const stats = await import("../firebase/metaStats.js?v=1");
+        await stats.recordDeckPlayed({ roomCode, gameId, slot: playerSlot, leaderId: deck.leaderKey, deckText: deck.deckText });
+    })().catch(error => console.warn("Couldn't add this deck to the play stats:", error));
 }
 
 async function recordProfileGame(won) {

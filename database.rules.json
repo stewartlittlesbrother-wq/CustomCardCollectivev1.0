@@ -139,6 +139,63 @@
       "$uid": {
         ".write": "auth != null && auth.uid === $uid"
       }
+    },
+    "meta": {
+      ".read": true,
+      "leaders": {
+        "$leader": {
+          ".validate": "newData.hasChildren(['id', 'decks'])",
+          "id": {
+            ".write": "auth != null && newData.isString() && (!data.exists() || data.val() === newData.val())",
+            ".validate": "newData.val().length > 0 && newData.val().length <= 200"
+          },
+          "decks": {
+            ".write": "auth != null && newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1"
+          },
+          "cards": {
+            "$card": {
+              ".validate": "newData.hasChildren(['id', 'd', 'c'])",
+              "id": {
+                ".write": "auth != null && newData.isString() && (!data.exists() || data.val() === newData.val())",
+                ".validate": "newData.val().length > 0 && newData.val().length <= 200"
+              },
+              "d": {
+                ".write": "auth != null && newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1"
+              },
+              "c": {
+                ".write": "auth != null && newData.isNumber() && newData.val() >= (data.exists() ? data.val() : 0) + 1 && newData.val() <= (data.exists() ? data.val() : 0) + 60"
+              },
+              "$other": {
+                ".validate": false
+              }
+            }
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      },
+      "leaderTotals": {
+        "$leader": {
+          ".validate": "newData.hasChildren(['id', 'decks', 'at'])",
+          "id": {
+            ".write": "auth != null && newData.isString() && (!data.exists() || data.val() === newData.val())",
+            ".validate": "newData.val().length > 0 && newData.val().length <= 200"
+          },
+          "decks": {
+            ".write": "auth != null && newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1"
+          },
+          "at": {
+            ".write": "auth != null && newData.isNumber() && newData.val() <= now"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      },
+      "$other": {
+        ".validate": false
+      }
     }
   }
 }
