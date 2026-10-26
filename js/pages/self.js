@@ -399,6 +399,29 @@ function getOnlinePublicPlayerKey(playerKey) {
     return playerKey === "player1" ? "player1" : "player2";
 }
 
+// The top card of a deck can be revealed to its owner only ("self") or to both
+// players ("both"): player.deckTopReveal = { id: <that card's instanceId>, to }.
+// It belongs to THAT card - once it leaves the top (drawn, moved, shuffled away)
+// the reveal is over. Returns "self" | "both" | null.
+function deckTopRevealOf(player) {
+    const reveal = player?.deckTopReveal;
+    const deck = player?.deck;
+    const top = Array.isArray(deck) ? deck[deck.length - 1] : null;
+    if (!reveal || !top || !top.instanceId || top.instanceId !== reveal.id) return null;
+    return reveal.to === "both" ? "both" : "self";
+}
+
+// The opponent only learns a "both" reveal: their top card arrives in the public
+// state and goes on top of the face-down stack of hidden cards.
+function applyPublicTopReveal(player, publicPlayer) {
+    player.deckTopReveal = null;
+    const card = publicPlayer?.revealedTopCard;
+    if (!card || !player.deck.length) return;
+    const top = hydrateCard({ ...card, faceUp: true });
+    player.deck[player.deck.length - 1] = top;
+    player.deckTopReveal = { id: top.instanceId, to: "both" };
+}
+
 function createHiddenCards(count) {
     return Array.from({ length: Number(count || 0) }, (_, index) => ({
         instanceId: `hidden-${index}`,
@@ -538,6 +561,7 @@ function applyOnlinePlayerState(playerKey) {
         player.hand = hydrateCards(zones.hand || []);
         player.deck = hydrateCards(zones.deck || []);
         player.life = hydrateCards(zones.life || []);
+        player.deckTopReveal = zones.deckTopReveal || null;
 
         // Self-heal the token menu for matches whose document was written before
         // tokens existed: rebuild it from the deck this player actually chose.
@@ -576,6 +600,8 @@ function applyOnlinePlayerState(playerKey) {
             player.life[index] = hydrateCard({ ...entry.card, faceUp: true });
         }
     });
+
+    applyPublicTopReveal(player, publicPlayer);
 }
 
 // Reveal a player fully for a spectator: board from the public snapshot, hand /
@@ -594,12 +620,14 @@ function applySpectatorPlayerState(player, playerKey, publicPlayer) {
         player.hand = reveal(zones.hand);
         player.deck = hydrateCards(zones.deck || []);   // deck stays a face-down stack
         player.life = reveal(zones.life);
+        player.deckTopReveal = zones.deckTopReveal || null;   // a revealed top card shows
     } else {
         // Private state hasn't arrived yet - fall back to hidden counts so the
         // zones aren't empty for the first instant of spectating.
         player.hand = createHiddenCards(publicPlayer.handCount);
         player.deck = createHiddenCards(publicPlayer.deckCount);
         player.life = createHiddenCards(publicPlayer.lifeCount);
+        applyPublicTopReveal(player, publicPlayer);
     }
 
     // Any face-down cards sitting on the board are revealed for spectators too.
@@ -1997,7 +2025,11 @@ function createPublicPlayerStateFromLocal(player) {
         turns: Number(player.turns || 0),
         faceUpLifeCards: (player.life || [])
             .map((card, index) => card?.faceUp ? { index, card: createPublicCardSnapshot(card) } : null)
-            .filter(Boolean)
+            .filter(Boolean),
+        // The top card of the deck, while it's revealed to both players.
+        revealedTopCard: deckTopRevealOf(player) === "both"
+            ? createPublicCardSnapshot(player.deck[player.deck.length - 1])
+            : null
     };
 }
 
@@ -2005,7 +2037,9 @@ function createOwnPrivateStateFromLocal(player) {
     const zones = {
         hand: stripCards(player.hand || []),
         deck: stripCards(player.deck || []),
-        life: stripCards(player.life || [])
+        life: stripCards(player.life || []),
+        // A revealed top card (see deckTopRevealOf), so a reload keeps it.
+        deckTopReveal: deckTopRevealOf(player) ? player.deckTopReveal : null
     };
     return {
         selectedDeck: onlinePrivateState?.selectedDeck || null,
@@ -6182,12 +6216,24 @@ function renderDeck(player, deckAreaId) {
         deckArea.classList.add("deck-warning");
     }
 
+    // A revealed top card shows face-up: to everyone for "both", otherwise only to
+    // its owner (and spectators, who see hands too). A reveal whose card has left
+    // the top is over.
+    const reveal = deckTopRevealOf(player);
+    if (player.deckTopReveal && !reveal) player.deckTopReveal = null;
+    const topCard = player.deck[player.deck.length - 1];
+    const showTop = Boolean(reveal) && (reveal === "both" || !isOnlineMatch || isSpectator || isOwnOnlinePlayer(player));
+
     if (player.deck.length > 0) {
         const img = document.createElement("img");
 
-        img.src = cardBackImage;
-        img.alt = `${player.name} Deck`;
+        img.src = showTop ? cardArtSrc(topCard) : cardBackImage;
+        img.alt = showTop ? (topCard.name || "Card") : `${player.name} Deck`;
         img.className = "deck-card-img life-card-img";
+        if (showTop) {
+            img.classList.add(reveal === "both" ? "deck-top-revealed" : "deck-top-peeked");
+            img.addEventListener("mouseenter", () => showCardPreview(cardArtSrc(topCard)));
+        }
         img.draggable = true;
         img.setAttribute("data-card-source", "deck");
         img.setAttribute("data-player", player === gameState.player1 ? "player1" : "player2");
@@ -6207,6 +6253,14 @@ function renderDeck(player, deckAreaId) {
         }
 
         deckArea.appendChild(img);
+
+        if (showTop) {
+            const badge = document.createElement("div");
+            badge.className = `deck-reveal-badge ${reveal}`;
+            badge.textContent = reveal === "both" ? "👁 Both" : "👁 You";
+            badge.title = reveal === "both" ? "The top card is revealed to both players" : "Only you can see the top card";
+            deckArea.appendChild(badge);
+        }
     } else {
         deckArea.textContent = "";
     }
@@ -6562,10 +6616,42 @@ function showDeckContextMenu(event, player, pileKey = "deck", pileLabel = "Deck"
         });
         addItem("Shuffle deck", () => {
             player.deck = shuffleDeck(player.deck);
+            player.deckTopReveal = null;
             window.renderDecks?.();
             addGameLog(`${player.name} shuffled their deck.`);
             window.scheduleOnlineBoardSync?.();
         });
+    }
+
+    // Reveal the top card to me / to both players, or hide it again. Your own deck
+    // only (online), never for spectators.
+    if (pileKey === "deck" && total > 0 && !isSpectator && (!isOnlineMatch || isOwnOnlinePlayer(player))) {
+        const current = deckTopRevealOf(player);
+        const top = player.deck[player.deck.length - 1];
+        const setReveal = (to) => {
+            if (!top.instanceId) top.instanceId = `card-${Math.random()}`;
+            player.deckTopReveal = to ? { id: top.instanceId, to } : null;
+            window.renderDecks?.();
+            window.scheduleOnlineBoardSync?.();
+        };
+        if (!current) {
+            addItem("👁 Reveal top card to me", () => {
+                setReveal("self");
+                addGameLog(`${player.name} looked at the top card of their deck.`);
+            });
+        }
+        if (current !== "both") {
+            addItem("📢 Reveal top card to both players", () => {
+                setReveal("both");
+                addGameLog(`${player.name} revealed the top card of their deck: ${top.name || "a card"}.`);
+            });
+        }
+        if (current) {
+            addItem("🙈 Hide top card", () => {
+                setReveal(null);
+                addGameLog(`${player.name} hid the top card of their deck.`);
+            });
+        }
     }
 
     if (total > 0) {
@@ -6662,7 +6748,7 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
     // when browsing a whole pile that can actually be shuffled.
     if (!peekIds && pileKey !== "trash") {
         const shuffleBtn = mkBtn("\uD83D\uDD00 Shuffle", "#FF9800");
-        shuffleBtn.onclick = () => { shuffleDeck(player[pileKey]); buildGrid(); addGameLog(`${player.name}'s ${pileLabel.toLowerCase()} shuffled`); window.scheduleOnlineBoardSync?.(); };
+        shuffleBtn.onclick = () => { shuffleDeck(player[pileKey]); if (pileKey === "deck") player.deckTopReveal = null; renderPileSource(); buildGrid(); addGameLog(`${player.name}'s ${pileLabel.toLowerCase()} shuffled`); window.scheduleOnlineBoardSync?.(); };
         toolbar.appendChild(shuffleBtn);
     }
 

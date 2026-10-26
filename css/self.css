@@ -4697,6 +4697,40 @@ body.extra-slots-off .extra-slots-wrap { display: none !important; }
     border-radius: 6px;
 }
 
+/* A deck's revealed top card: blue = only its owner sees it, amber = both players. */
+.deck-card-img.deck-top-peeked {
+    outline: 3px solid #46a0ff;
+    outline-offset: -1px;
+    box-shadow: 0 0 12px rgba(70, 160, 255, .8);
+}
+.deck-card-img.deck-top-revealed {
+    outline: 3px solid #ffb020;
+    outline-offset: -1px;
+    box-shadow: 0 0 12px rgba(255, 176, 32, .85);
+}
+.deck-reveal-badge {
+    position: absolute;
+    left: 4px;
+    top: 4px;
+    z-index: 50;
+    pointer-events: none;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid #46a0ff;
+    background: rgba(3, 8, 16, .88);
+    color: #fff;
+    font-size: .68rem;
+    font-weight: 800;
+    line-height: 1.3;
+    white-space: nowrap;
+}
+.deck-reveal-badge.both { border-color: #ffb020; }
+/* The deck pile normally forces the card back (see .deck-area .deck-card-img). */
+.deck-area .deck-card-img.deck-top-peeked,
+.deck-area .deck-card-img.deck-top-revealed {
+    content: normal;
+}
+
 /* A life card you're privately peeking at (only you can see the face). Blue tint
    distinguishes it from a public "flip face-up" (which both players see). */
 .life-card.life-peeked {
