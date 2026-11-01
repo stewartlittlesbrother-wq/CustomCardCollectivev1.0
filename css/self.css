@@ -5861,6 +5861,28 @@ html.touch-device .context-menu > * {
 .confirm-no { background: rgba(255, 255, 255, .12); color: #fff; }
 .confirm-yes { background: #3b82f6; color: #fff; }
 
+/* "Your character area is full" - pick a character to trash. */
+.replace-picker-panel { max-width: min(94vw, 640px); }
+.replace-picker-grid { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.replace-picker-card {
+    appearance: none;
+    width: 96px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border: 2px solid rgba(255, 255, 255, .18);
+    border-radius: 9px;
+    background: rgba(0, 0, 0, .35);
+    color: #fff;
+    font: 600 11px/1.2 system-ui, sans-serif;
+    cursor: pointer;
+}
+.replace-picker-card:hover,
+.replace-picker-card:focus-visible { border-color: #f44336; box-shadow: 0 0 10px rgba(244, 67, 54, .55); }
+.replace-picker-card img { width: 100%; aspect-ratio: 5 / 7; object-fit: cover; border-radius: 6px; display: block; }
+.replace-picker-card span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* In-match sidebar Turn Automation toggles (replaced the How-to-Play tips). */
 .auto-turn-section { padding: 0 2px; }
 .auto-turn-row {

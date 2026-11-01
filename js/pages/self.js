@@ -1323,14 +1323,83 @@ function restDonForCost(player, cost) {
     return rested;
 }
 
-// Drop a character into the first open slot (5 base, up to 10 with the extra row).
+// Character slots shown on the board: 5, or 10 with the second row switched on.
+// A card put past them sits in a hidden slot - it looked like it vanished.
+function characterSlotCap(player) {
+    return player?.extraRow ? 10 : 5;
+}
+
+function hasFreeCharacterSlot(player) {
+    const chars = Array.isArray(player?.characters) ? player.characters : [];
+    for (let i = 0; i < characterSlotCap(player); i++) if (!chars[i]) return true;
+    return false;
+}
+
+// Drop a character into the first open slot on the board. False when full.
 function placeCharacterCard(player, card) {
     if (!Array.isArray(player.characters)) player.characters = [];
     while (player.characters.length < 5) player.characters.push(null);
-    const idx = player.characters.findIndex(c => !c);
-    if (idx !== -1) { player.characters[idx] = card; return true; }
-    if (player.characters.length < 10) { player.characters.push(card); return true; }
+    for (let i = 0; i < characterSlotCap(player); i++) {
+        if (player.characters[i]) continue;
+        while (player.characters.length <= i) player.characters.push(null);
+        player.characters[i] = card;
+        return true;
+    }
     return false;
+}
+
+// The character area is full: pick one of your characters to trash so the new
+// card can take its place, as in the real game. Cancel leaves everything as it was.
+function chooseCharacterToReplace(player, newCard, onChosen) {
+    document.getElementById("replaceCharacterPicker")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "replaceCharacterPicker";
+    overlay.className = "confirm-overlay";
+    // Next tick, or the click that opened this would close it straight away.
+    setTimeout(() => overlay.addEventListener("click", () => overlay.remove()), 0);
+
+    const panel = document.createElement("div");
+    panel.className = "confirm-panel replace-picker-panel";
+    panel.addEventListener("click", (e) => e.stopPropagation());
+
+    const msg = document.createElement("p");
+    msg.className = "confirm-msg";
+    msg.innerHTML = sanitizeLogHtml(`Your character area is full. Choose a character to <strong>trash</strong> to make room for <strong>${newCard.name || "this card"}</strong>.`);
+    panel.appendChild(msg);
+
+    const grid = document.createElement("div");
+    grid.className = "replace-picker-grid";
+    player.characters.slice(0, characterSlotCap(player)).forEach((card, index) => {
+        if (!card) return;
+        const pick = document.createElement("button");
+        pick.type = "button";
+        pick.className = "replace-picker-card";
+        pick.title = `Trash ${card.name || "this character"}`;
+        const img = document.createElement("img");
+        img.src = cardArtSrc(card);
+        img.alt = card.name || "Character";
+        const name = document.createElement("span");
+        name.textContent = card.name || "Character";
+        pick.append(img, name);
+        pick.addEventListener("mouseenter", () => showCardPreview(cardArtSrc(card)));
+        pick.addEventListener("click", () => { overlay.remove(); onChosen(index); });
+        grid.appendChild(pick);
+    });
+    panel.appendChild(grid);
+
+    const row = document.createElement("div");
+    row.className = "confirm-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "confirm-no";
+    cancel.textContent = "Cancel — keep it in hand";
+    cancel.addEventListener("click", () => overlay.remove());
+    row.appendChild(cancel);
+    panel.appendChild(row);
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
 }
 
 function playCardFromHand(player, card) {
@@ -1344,6 +1413,27 @@ function playCardFromHand(player, card) {
         addGameLog(`Not enough active DON!! to play ${card.name} (needs ${cost}, has ${activeDon}).`);
         return;
     }
+
+    // A character onto a full board: choose one to trash first (before any
+    // DON!! is rested), then play into the freed slot. Cancel changes nothing.
+    const playType = String(card.cardType || card.category || "").toLowerCase();
+    if (playType === "character" && !playCardRestOnly() && !hasFreeCharacterSlot(player)) {
+        chooseCharacterToReplace(player, card, (slot) => {
+            if (!player.hand.some(c => c.instanceId === card.instanceId)) return;
+            const old = player.characters[slot];
+            if (old) {
+                detachDonToRested(player, old);
+                player.characters[slot] = null;
+                (player.trash = player.trash || []).push(old);
+                addGameLog(`${player.name} trashed ${old.name || "a character"} to make room.`);
+                renderCharacters();
+                renderTrash();
+            }
+            playCardFromHand(player, card);
+        });
+        return;
+    }
+
     const rested = noCost ? 0 : restDonForCost(player, cost);
     const restNote = noCost
         ? (cost > 0 ? " — no DON!! rested" : "")
