@@ -282,10 +282,16 @@ function cycleAltArtPref(card) {
   try { localStorage.setItem(ALT_ART_PREFS_KEY, JSON.stringify(prefs)); } catch {}
   syncPush(ALT_ART_PREFS_KEY);
 }
-// The image a card should display for THIS player (their selected art).
+// The image a card should display for THIS player (their selected art). When the
+// selected alt isn't in memory (light pool card) this is "" so the caller fetches
+// it with resolveCardImageUrl - falling back to the main art made hover previews
+// show the default art while the tile showed the alt.
 function preferredCardImageUrl(card) {
+  const idx = altArtIndexFor(card);
   const list = cardArtList(card);
-  return list[altArtIndexFor(card)] || card.imageUrl;
+  if (list[idx]) return list[idx];
+  if (idx > 0) return (card?.__storageKey && artMemGet(`${card.__storageKey}#${idx}`)) || "";
+  return card.imageUrl;
 }
 
 const CARD_BACK_IMAGE = "images/basic/card-back-custom.png";
@@ -9807,8 +9813,10 @@ function setGameLog(message) {
   el.gameLogMessages.innerHTML = `<div class="log-message">${escapeHtml(message || "No actions yet.")}</div>`;
 }
 
+let practicePreviewToken = 0;
 function updatePracticePreview(card) {
   if (!el.previewImage || !el.previewPlaceholder) return;
+  const token = ++practicePreviewToken;
 
   if (!card) {
     el.previewImage.hidden = true;
@@ -9833,6 +9841,17 @@ function updatePracticePreview(card) {
   el.previewImage.removeAttribute("src");
   el.previewPlaceholder.hidden = false;
   el.previewPlaceholder.textContent = `${card.name} - ${card.cardNumber}`;
+  // The chosen art lives in the cache: fill it in unless another card was
+  // previewed meanwhile.
+  if (card.__storageKey) {
+    resolveCardImageUrl(card).then(url => {
+      if (!url || token !== practicePreviewToken) return;
+      el.previewImage.hidden = false;
+      el.previewImage.src = url;
+      el.previewImage.alt = card.name;
+      el.previewPlaceholder.hidden = true;
+    });
+  }
 }
 
 function activePlayer() {

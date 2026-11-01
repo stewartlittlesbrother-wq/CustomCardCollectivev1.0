@@ -5503,7 +5503,9 @@ function addGameLog(message, previewCards = null) {
         const chip = document.createElement("span");
         chip.className = "log-card";
         chip.textContent = ` ${card.name}`;
-        if (card.image) chip.setAttribute("data-card-image", card.image);
+        // The art the card is shown with (its picked alt), not always the main one.
+        const art = cardArtSrc(card);
+        if (art && art !== cardBackImage) chip.setAttribute("data-card-image", art);
         logMessage.appendChild(chip);
     });
 
