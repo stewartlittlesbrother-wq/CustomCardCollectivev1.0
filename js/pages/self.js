@@ -775,6 +775,7 @@ function applyOnlineStateToGame() {
 
     renderOnlineGameState();
     updateOnlinePhaseButton();
+    receivePendingGifts();
 }
 
 function updateOnlineMatchInfo() {
@@ -2608,6 +2609,7 @@ async function initializeOnlineMultiplayer() {
             onlineUser.uid,
             (privateState) => applyOnlinePrivateState(privateState || {})
         );
+        startGiftMailbox();   // cards the opponent gives me (see giveCardToOpponent)
 
         addGameLog(`Connected to online room ${roomCode} as ${playerSlot.toUpperCase()}.`);
         updateOnlinePhaseButton();
@@ -6555,6 +6557,224 @@ function removeTokenPicker() {
     document.getElementById("tokenPickerOverlay")?.remove();
 }
 
+// =========================
+// Giving a card to the opponent
+// =========================
+// Right-click one of your cards (in hand, on the field, or in a pile you're
+// looking through) -> "Give to opponent" -> pick where it lands on their side.
+// From then on it is THEIR card: it sits in their zones and leaves play to their
+// trash, deck and so on.
+// Online each browser owns its own side, so the card travels through a mailbox in
+// the room (matches/<room>/transfers): the giver takes it out of their state and
+// posts it; the receiver's browser takes the letter out and puts the card into
+// their own state.
+const GIFT_ZONES = [
+    ["character", "Character area"],
+    ["stage", "Stage"],
+    ["hand", "Hand"],
+    ["deckTop", "Top of deck"],
+    ["deckBottom", "Bottom of deck"],
+    ["life", "Top of Life (face-down)"],
+    ["trash", "Trash"]
+];
+const giftZoneLabel = (zone) => (GIFT_ZONES.find(([z]) => z === zone) || [zone, String(zone)])[1].toLowerCase();
+
+function opponentOf(player) {
+    return player === gameState.player1 ? gameState.player2 : gameState.player1;
+}
+
+// Your own side online (once the deal and mulligan are over and your cards are
+// yours to move); either side in practice. Never a spectator.
+function canGiveCards(player) {
+    return Boolean(player) && !isSpectator && (!isOnlineMatch || (isOwnOnlinePlayer(player) && ownStateLockedToLocal));
+}
+
+// The card as it arrives: a fresh copy with nothing left over from its time on
+// the giver's side (attached DON!!, rested, buffs, "can't attack until" marks).
+function cleanGiftCard(card) {
+    const gift = { ...card, instanceId: `card-${Math.random()}`, state: "active", attachedDon: 0 };
+    ["faceUp", "peeked", "fromLife", "hidden", "temporaryBasePower", "temporaryPowerBonus",
+        "temporaryKeywords", "battleKeywords", "playedOnTurn", "activated"].forEach(key => delete gift[key]);
+    Object.keys(gift).forEach(key => { if (/Until$/.test(key)) delete gift[key]; });
+    return gift;
+}
+
+// Put a received card where the giver chose. Returns where it actually went
+// (a full character area sends it to hand instead).
+function placeGiftCard(player, card, zone) {
+    if (zone === "character") {
+        if (placeCharacterCard(player, card)) return zone;
+        player.hand.push(card);
+        return "hand";
+    }
+    if (zone === "stage") { placeCardOnStage(player, card); return zone; }
+    if (zone === "deckTop") { player.deck.push(card); return zone; }
+    if (zone === "deckBottom") { player.deck.unshift(card); return zone; }
+    if (zone === "life") { (player.life = player.life || []).unshift({ ...card, faceUp: false }); return zone; }
+    if (zone === "trash") { (player.trash = player.trash || []).push(card); return zone; }
+    player.hand.push(card);
+    return "hand";
+}
+
+function renderAfterGift() {
+    updateDonDisplay();
+    renderDecks();
+    renderLifeCards();
+    renderHands();
+    renderCharacters();
+    renderTrash();
+    renderStages();
+    renderExtraPiles();
+}
+
+// takeCard() removes the card from wherever it is now (false if it's gone).
+function giveCardToOpponent(player, card, takeCard, zone) {
+    const receiver = opponentOf(player);
+    if (!canGiveCards(player) || !receiver || !card || !takeCard()) return;
+    detachDonToRested(player, card);
+    const gift = cleanGiftCard(card);
+
+    if (isOnlineMatch) {
+        postGiftCard(gift, zone).catch(error => {
+            // Couldn't send it: give it back rather than lose it.
+            console.warn("Couldn't give the card:", error);
+            player.hand.push(card);
+            renderAfterGift();
+            window.scheduleOnlineBoardSync?.();
+            addGameLog(`Couldn't give ${card.name || "the card"} to ${receiver.name} — it went back to your hand.`);
+        });
+    } else {
+        zone = placeGiftCard(receiver, gift, zone);
+    }
+
+    addGameLog(`${player.name} gave a card to ${receiver.name} (${giftZoneLabel(zone)}):`, [{ name: card.name, image: card.image }]);
+    renderAfterGift();
+    window.scheduleOnlineBoardSync?.();
+}
+
+// "Where does it go?" - opened from a card's right-click menu.
+function openGiveCardMenu(x, y, player, card, takeCard) {
+    if (!canGiveCards(player) || !card) return;
+    // Opened from another menu's click: wait for that menu to finish closing.
+    setTimeout(() => {
+        document.getElementById("giveCardMenu")?.remove();
+        const receiver = opponentOf(player);
+        const menu = document.createElement("div");
+        menu.id = "giveCardMenu";
+        menu.className = "context-menu";
+        menu.style.cssText =
+            `position:fixed;top:${y}px;left:${x}px;z-index:10003;` +
+            "min-width:200px;padding:6px;border:1px solid #555;border-radius:8px;" +
+            "background:rgba(20,20,20,.98);box-shadow:0 12px 32px rgba(0,0,0,.55);" +
+            "display:flex;flex-direction:column;gap:4px;";
+
+        const head = document.createElement("div");
+        head.textContent = `Give ${card.name || "this card"} to ${receiver?.name || "your opponent"} — where does it go?`;
+        head.style.cssText = "padding:6px 10px 8px;color:#cfd8dc;font-size:12px;font-weight:700;border-bottom:1px solid #444;max-width:260px;";
+        menu.appendChild(head);
+
+        const close = () => menu.remove();
+        GIFT_ZONES.forEach(([zone, label]) => {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.textContent = label;
+            item.style.cssText =
+                "padding:8px 10px;border:0;border-radius:5px;background:transparent;color:#fff;" +
+                "font-size:12px;font-weight:700;text-align:left;cursor:pointer;";
+            item.onmouseenter = () => { item.style.background = "rgba(255,255,255,.12)"; };
+            item.onmouseleave = () => { item.style.background = "transparent"; };
+            item.onclick = (e) => { e.stopPropagation(); close(); giveCardToOpponent(player, card, takeCard, zone); };
+            menu.appendChild(item);
+        });
+
+        document.body.appendChild(menu);
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) menu.style.left = `${Math.max(8, window.innerWidth - rect.width - 8)}px`;
+        if (rect.bottom > window.innerHeight) menu.style.top = `${Math.max(8, window.innerHeight - rect.height - 8)}px`;
+
+        setTimeout(() => {
+            const outside = (e) => {
+                if (menu.contains(e.target)) return;
+                close();
+                document.removeEventListener("click", outside, true);
+                document.removeEventListener("contextmenu", outside, true);
+            };
+            document.addEventListener("click", outside, true);
+            document.addEventListener("contextmenu", outside, true);
+        }, 0);
+    }, 0);
+}
+
+// ── The online mailbox ──
+let giftsUnsubscribe = null;
+let pendingGifts = {};
+const handledGifts = new Set();
+const firebaseDb = () => import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
+
+async function postGiftCard(card, zone) {
+    const db = await firebaseDb();
+    await db.push(db.ref(onlineFirebaseApp.database, `matches/${roomCode}/transfers`), {
+        from: playerSlot,
+        to: playerSlot === "p1" ? "p2" : "p1",
+        zone,
+        card: stripCard(card),
+        gameId: onlinePublicState?.gameId || null,
+        at: db.serverTimestamp()
+    });
+}
+
+function startGiftMailbox() {
+    if (isSpectator || giftsUnsubscribe || !onlineFirebaseApp || !roomCode) return;
+    firebaseDb().then(db => {
+        giftsUnsubscribe = db.onValue(db.ref(onlineFirebaseApp.database, `matches/${roomCode}/transfers`), (snap) => {
+            pendingGifts = snap.val() || {};
+            receivePendingGifts();
+        });
+    }).catch(error => console.warn("Couldn't open the card mailbox:", error));
+}
+
+// Take a letter out of the mailbox. True only for the browser that removed it,
+// so a card is never received twice.
+async function claimGift(id) {
+    const db = await firebaseDb();
+    let seen = null;
+    const result = await db.runTransaction(
+        db.ref(onlineFirebaseApp.database, `matches/${roomCode}/transfers/${id}`),
+        (current) => { seen = current; return null; },
+        { applyLocally: false }
+    );
+    return result.committed && seen !== null;
+}
+
+// Cards the opponent gave me go in once my side is mine to change (after the
+// deal and mulligan - see ownStateLockedToLocal). Letters from an earlier game
+// in this room are thrown away.
+function receivePendingGifts() {
+    if (isSpectator || !isOnlineMatch || !ownStateLockedToLocal || !gameState) return;
+    // Not mid-drag: re-rendering under a drag leaves it stuck. The next state
+    // update (my own push echoes back after the drop) tries again.
+    if (window.__ccDragActive) return;
+    Object.entries(pendingGifts).forEach(([id, letter]) => {
+        if (!letter || letter.to !== playerSlot || handledGifts.has(id)) return;
+        handledGifts.add(id);
+        const stale = Boolean(letter.gameId && onlinePublicState?.gameId && letter.gameId !== onlinePublicState.gameId);
+        claimGift(id).then(claimed => {
+            if (!claimed || stale || !letter.card) return;
+            const me = gameState[getOwnOnlinePlayerKey()];
+            if (!me) return;
+            // It's my card now, so it shows the art I picked for it.
+            const card = useOwnArtPicks([hydrateCard(letter.card)])[0];
+            const where = placeGiftCard(me, card, letter.zone);
+            addGameLog(`${opponentOf(me)?.name || "Your opponent"} gave you a card (${giftZoneLabel(where)}):`, [{ name: card.name, image: card.image }]);
+            renderAfterGift();
+            window.scheduleOnlineBoardSync?.();
+        }).catch(error => {
+            handledGifts.delete(id);   // try again on the next update
+            console.warn("Couldn't take the card you were given:", error);
+        });
+    });
+}
+
 // Right-clicking a deck opens this first: browse the whole deck, or look at
 // just the top N. Both land in the same viewer with the same controls.
 function showDeckContextMenu(event, player, pileKey = "deck", pileLabel = "Deck") {
@@ -6996,6 +7216,24 @@ function showDeckViewer(player, pileKey = "deck", pileLabel = "Deck", peekCount 
             hoverPanel.appendChild(botBtn);
             hoverPanel.appendChild(tBtn);
 
+            // Give this card to the opponent (pick where it lands on their side).
+            if (canGiveCards(player)) {
+                const giveBtn = mkSmBtn("\uD83C\uDF81 Give", "#5D4037");
+                giveBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    openGiveCardMenu(e.clientX, e.clientY, player, card, () => {
+                        const idx = player[pileKey].indexOf(card);
+                        if (idx === -1) return false;
+                        player[pileKey].splice(idx, 1);
+                        if (peekIds) peekIds.delete(card.instanceId);
+                        renderPileSource();
+                        buildGrid();
+                        return true;
+                    });
+                };
+                hoverPanel.appendChild(giveBtn);
+            }
+
             frame.addEventListener("mouseenter", () => { if (dragSrcIndex === null) showPanel(); });
             frame.addEventListener("mouseleave", hidePanel);
 
@@ -7306,6 +7544,18 @@ function renderPlayerHand(player, handElementId, hidden) {
                         }
                     }
                 ];
+                if (canGiveCards(player)) {
+                    const menuX = event.clientX, menuY = event.clientY;
+                    options.push({
+                        label: "🎁 Give to Opponent…",
+                        action: () => openGiveCardMenu(menuX, menuY, player, card, () => {
+                            const cardIndex = player.hand.findIndex(c => c.instanceId === card.instanceId);
+                            if (cardIndex === -1) return false;
+                            player.hand.splice(cardIndex, 1);
+                            return true;
+                        })
+                    });
+                }
 
                 options.forEach(opt => {
                     const btn = document.createElement("div");
@@ -9635,6 +9885,12 @@ function setupBoardContextMenus() {
                         addGameLog(`${card.name} sent to trash`);
                     }
                 });
+                if (canGiveCards(player)) {
+                    options.push({
+                        label: "🎁 Give to Opponent…",
+                        action: () => openGiveCardMenu(menuX, menuY, player, card, takeCharacter)
+                    });
+                }
             }
             
             // Both characters and leaders can detach DON
