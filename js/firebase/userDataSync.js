@@ -60,6 +60,7 @@ const SYNC_SPECS = [
     { key: "custom-img-playmat-style-v1",                mode: "lww" },   // playmat zones / both sides
     { key: "custom-img-cardback-v1",                     mode: "lww" },
     { key: "custom-img-donback-v1",                      mode: "lww" },
+    { key: "custom-board-bg-v1",                         mode: "lww" },   // board background colour
     { key: "cc_builder_cards_big",                       mode: "lww" },
     { key: "cc_spectator_name",                          mode: "lww" },
     { key: "cc_favorite_collections",                    mode: "lww" }    // starred sets

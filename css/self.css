@@ -2648,6 +2648,17 @@ body {
         linear-gradient(90deg, rgba(90, 38, 12, .15), rgba(23, 35, 52, .25), rgba(90, 38, 12, .13));
 }
 
+/* A background colour the player picked (right-click the background, or
+   Settings) is shown plain, without the tints. Set by js/boardBackground.js. */
+html.custom-board-bg,
+html.custom-board-bg body {
+    background: var(--custom-board-bg);
+}
+
+html.custom-board-bg .self-page {
+    background: none;
+}
+
 /* Perona/Mihawk artwork lives on the practice + multiplayer MENU pages (see
    styles.css), not on the live board - it competed with the cards here. */
 

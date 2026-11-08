@@ -130,12 +130,12 @@
           <section class="home-section" aria-labelledby="homeNewTitle">
             <h2 class="home-section-title" id="homeNewTitle">What's new</h2>
             <ul class="home-news">
+              <li><span class="home-news-badge">NEW</span><div><strong>Board background color</strong><span>Right-click the empty area around the playmat in a match and choose 🎨 Change background color, then mix any color with the red, green and blue sliders. It’s in Settings → Board Display too, and it follows your account.</span></div></li>
               <li><span class="home-news-badge fix">FIXED</span><div><strong>Alt art when you hover</strong><span>If you’ve switched a card to an alt art, hovering it in the Deck Builder now shows that alt in the big preview instead of the default picture. Card names in the game log show your alt too.</span></div></li>
               <li><span class="home-news-badge fix">FIXED</span><div><strong>Playing onto a full board</strong><span>Using Play Card with 5 characters out made the new card vanish into a hidden slot. Now it asks which of your characters to trash to make room (its DON!! go back rested), and the new card takes its place. Cancel keeps it in hand.</span></div></li>
-              <li><span class="home-news-badge">NEW</span><div><strong>Give a card to your opponent</strong><span>Right-click one of your cards — in hand, on the field, or in your deck or trash viewer — and choose 🎁 Give to Opponent, then where it lands on their side (character area, stage, hand, deck, life or trash). From then on it’s their card.</span></div></li>
+              <li><span class="home-news-badge old">EARLIER</span><div><strong>Give a card to your opponent</strong><span>Right-click one of your cards — in hand, on the field, or in your deck or trash viewer — and choose 🎁 Give to Opponent, then where it lands on their side (character area, stage, hand, deck, life or trash). From then on it’s their card.</span></div></li>
               <li><span class="home-news-badge old">EARLIER</span><div><strong>Reveal the top of your deck</strong><span>Right-click your deck to reveal its top card to just you or to both players, and hide it again. It stays face-up on the deck until you hide it or the card leaves the top.</span></div></li>
-              <li><span class="home-news-badge old">EARLIER</span><div><strong>Popular cards</strong><span>In the Deck Builder, tap 📊 Popular cards to see what other players run with a leader: the share of decks played online that include each card, and how many copies. Every online game adds to it (draft games aren’t counted).</span></div></li>
-              <li><span class="home-news-badge old">EARLIER</span><div><strong>Favourite sets</strong><span>Star a collection in the Deck Builder and it stays at the front of the list. Your favourites follow your account to other devices.</span></div></li>              </ul>
+              <li><span class="home-news-badge old">EARLIER</span><div><strong>Popular cards</strong><span>In the Deck Builder, tap 📊 Popular cards to see what other players run with a leader: the share of decks played online that include each card, and how many copies. Every online game adds to it (draft games aren’t counted).</span></div></li>              </ul>
           </section>
 
         </div>
@@ -195,7 +195,7 @@
           <section class="settings-group" aria-label="Board display settings">
             <h2>Board Display</h2>
             <p class="settings-group-note">
-              Optional zones shown on the game board.
+              How the game board looks.
             </p>
             <label class="settings-row">
               <input type="checkbox" id="setExtraSlots">
@@ -211,6 +211,13 @@
                 <small>Lay your hand cards side by side instead of fanned out. Easier to see every card at once.</small>
               </span>
             </label>
+            <div class="settings-row board-bg-setting">
+              <span>
+                <strong>Background color</strong>
+                <small>The color around the playmat in matches. You can also right-click that area during a game and choose Change background color.</small>
+              </span>
+              <div class="board-bg-picker" id="boardBgPicker"></div>
+            </div>
           </section>
 
           <section class="settings-group" aria-label="Custom board images">
@@ -1343,9 +1350,10 @@
     </form>
   </dialog>
 
-  <script src="js/version.js?v=280"></script>
+  <script src="js/version.js?v=281"></script>
   <script src="js/rotate-prompt.js"></script>
   <script src="js/auth-ui.js?v=267"></script>
+  <script src="js/boardBackground.js?v=1"></script>
   <script src="js/cards/cardCollections.js?v=draft-1"></script>
   <script src="js/cards/decks.js?v=creation-10"></script>
   <script src="js/manual-play.js?v=manual-28"></script>
@@ -1398,6 +1406,10 @@
         window.ccSyncPush && window.ccSyncPush(KEY);
       });
     })();
+
+    // Board Display: background colour around the playmat (js/boardBackground.js;
+    // the board offers the same picker on right-click).
+    window.ccBoardBg?.mount(document.getElementById("boardBgPicker"));
 
     // Board Display: flat hand (no fanning). Default OFF. self.js reads this key
     // (optcgFlatHand) to lay hand cards side by side instead of fanned.

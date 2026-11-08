@@ -4063,6 +4063,7 @@ window.onCardDatabaseUpdated = function reRenderAfterCardLoad() {
 
 async function initializeGamePage() {
     applyBoardDisplaySettings();
+    setupBoardBackground();
     setupExtraSlotsToggle();
     setupSidebarTurnToggles();
     setupDiceRoller();
@@ -9072,6 +9073,60 @@ function setupCardPreview() {
             clearCardPreview();
         };
     });
+}
+
+// Right-click the empty space around the playmat to recolour it. The picker and
+// the saving live in js/boardBackground.js (Settings shows the same picker).
+const BOARD_BACKGROUND_TARGETS = "html, body, .self-page, .game-layout, .game-board, .extra-zones-column, .extra-zones-group";
+
+function setupBoardBackground() {
+    if (!window.ccBoardBg) return;
+    document.documentElement.classList.add("cc-board-page");
+    window.ccBoardBg.apply();
+    document.addEventListener("contextmenu", (event) => {
+        // Cards and zones handle their own right-click; only bare background here.
+        if (event.defaultPrevented || !event.target?.matches?.(BOARD_BACKGROUND_TARGETS)) return;
+        event.preventDefault();
+        showBoardBackgroundMenu(event.clientX, event.clientY);
+    });
+}
+
+function showBoardBackgroundMenu(x, y) {
+    document.getElementById("boardBgMenu")?.remove();
+
+    const menu = document.createElement("div");
+    menu.id = "boardBgMenu";
+    menu.className = "context-menu";
+    menu.style.cssText =
+        `position:fixed;top:${y}px;left:${x}px;z-index:10001;` +
+        "min-width:180px;padding:6px;border:1px solid #555;border-radius:8px;" +
+        "background:rgba(20,20,20,.98);box-shadow:0 12px 32px rgba(0,0,0,.55);" +
+        "display:flex;flex-direction:column;gap:4px;";
+
+    const item = document.createElement("button");
+    item.textContent = "🎨 Change background color";
+    item.style.cssText =
+        "padding:8px 10px;border:0;border-radius:5px;background:transparent;color:#fff;" +
+        "font-size:12px;font-weight:700;text-align:left;cursor:pointer;";
+    item.onmouseenter = () => { item.style.background = "rgba(255,255,255,.12)"; };
+    item.onmouseleave = () => { item.style.background = "transparent"; };
+    item.onclick = (event) => {
+        event.stopPropagation();
+        menu.remove();
+        window.ccBoardBg.openPopover(x, y);
+    };
+    menu.appendChild(item);
+    document.body.appendChild(menu);
+
+    const box = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - box.width - 4))}px`;
+    menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - box.height - 4))}px`;
+
+    const close = () => menu.remove();
+    setTimeout(() => {
+        document.addEventListener("click", close, { once: true });
+        document.addEventListener("contextmenu", close, { once: true });
+    }, 0);
 }
 
 // Inspect-on-hover for the deck/peek viewers (Look at Top X, trash, etc). Those
