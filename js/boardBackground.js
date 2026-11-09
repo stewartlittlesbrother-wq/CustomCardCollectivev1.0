@@ -75,6 +75,11 @@
     function createPicker({ value, onPreview, onPick, extraButtons = [] } = {}) {
         addStyle();
         let hex = clean(value) || DEFAULT;
+        // Going Back to a page, the browser refills its text boxes by their ORDER,
+        // after the page has set them. These boxes are added by script, so they shift
+        // that order - the hex code ended up in the Deck Builder's deck name box.
+        // The picker sets its own values, so keep every box out of the refill.
+        const noRefill = (input) => { input.autocomplete = "off"; return input; };
 
         const root = document.createElement("div");
         root.className = "bgpick";
@@ -83,7 +88,7 @@
         top.className = "bgpick-top";
         const swatch = document.createElement("div");
         swatch.className = "bgpick-swatch";
-        const hexBox = document.createElement("input");
+        const hexBox = noRefill(document.createElement("input"));
         hexBox.type = "text";
         hexBox.className = "bgpick-hex";
         hexBox.maxLength = 7;
@@ -92,7 +97,7 @@
         const native = document.createElement("label");
         native.className = "bgpick-native";
         native.textContent = "Pick…";
-        const nativeInput = document.createElement("input");
+        const nativeInput = noRefill(document.createElement("input"));
         nativeInput.type = "color";
         nativeInput.setAttribute("aria-label", "Open the colour picker");
         native.appendChild(nativeInput);
@@ -104,12 +109,12 @@
             row.className = "bgpick-row";
             const letter = document.createElement("b");
             letter.textContent = name[0];
-            const range = document.createElement("input");
+            const range = noRefill(document.createElement("input"));
             range.type = "range";
             range.min = "0";
             range.max = "255";
             range.setAttribute("aria-label", name);
-            const number = document.createElement("input");
+            const number = noRefill(document.createElement("input"));
             number.type = "number";
             number.min = "0";
             number.max = "255";

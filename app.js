@@ -1800,7 +1800,7 @@ function renderHotkeys() {
     ).join("");
     const noteRow = hk.action === "write"
       ? `<label class="hotkey-note-field"><span>Note text</span>
-           <input type="text" data-hotkey-note="${hk.id}" maxlength="120" value="${escapeAttr(hk.noteText || "")}" placeholder="Text to write on the card"></label>`
+           <input type="text" data-hotkey-note="${hk.id}" autocomplete="off" maxlength="120" value="${escapeAttr(hk.noteText || "")}" placeholder="Text to write on the card"></label>`
       : "";
     return `<div class="hotkey-card" data-hotkey-id="${hk.id}">
       <div class="hotkey-row">
@@ -5425,6 +5425,10 @@ function loadSavedDeck() {
     state.tokens = Array.isArray(saved.tokens) ? saved.tokens : [];
     state.startingCards = Array.isArray(saved.startingCards) ? saved.startingCards : [];
     state.deckName = saved.deckName || "";
+    // Before v283 the browser's back/forward refill could drop the board background
+    // colour's hex code into the deck name box, and this draft kept it. A name that is
+    // exactly that code is that bug, not a name someone chose.
+    if (state.deckName && state.deckName.toLowerCase() === (window.ccBoardBg?.get() || "")) state.deckName = "";
     el.deckName.value = state.deckName;
   } catch {
     localStorage.removeItem(STORAGE_KEY);
@@ -5438,6 +5442,13 @@ function loadSavedDeck() {
 function saveDeck() {
   state.deckName = el.deckName.value.trim();
   reconcileStartingCards();
+  persistDraft();
+  renderAll();
+  queueDeckTableResize();
+}
+
+// Write the working draft to this device (and the account) without re-rendering.
+function persistDraft() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     leaderId: state.leaderId,
     dualLeader: state.dualLeader,
@@ -5448,8 +5459,6 @@ function saveDeck() {
     deckName: state.deckName
   }));
   syncPush(STORAGE_KEY);
-  renderAll();
-  queueDeckTableResize();
 }
 
 // Save the current deck into the named Saved Decks list. Overwrites a saved deck
@@ -10111,6 +10120,9 @@ function bindEvents() {
 
   el.deckName.addEventListener("input", () => {
     state.deckName = el.deckName.value.trim();
+    // Saved as you type: the browser doesn't refill this box on Back any more
+    // (autocomplete="off"), so a name typed before any card change would be lost.
+    persistDraft();
     renderHome();
     renderBuilder();
   });
