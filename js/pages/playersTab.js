@@ -7,7 +7,7 @@
 
 import * as profiles from "../firebase/profileService.js?v=1";
 import { openProfile, profileBodyHtml, avatarHtml, paintLeaderArt, injectProfileStyles } from "../profileDialog.js?v=1";
-import { createRoom } from "../firebase/multiplayerService.js?v=quick-1";
+import { createRoom } from "../firebase/multiplayerService.js?v=quick-2";
 import { waitForUser } from "../firebase/firebaseApp.js";
 
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) =>

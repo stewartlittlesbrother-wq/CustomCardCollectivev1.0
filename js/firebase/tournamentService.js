@@ -21,7 +21,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 import { database } from "./firebaseApp.js";
-import { createRoom, joinRoom } from "./multiplayerService.js?v=quick-1";
+import { createRoom, joinRoom } from "./multiplayerService.js?v=quick-2";
 import { BASE_PATH, DECKS_PATH, SECRETS_PATH, JOIN_PATH } from "./tournamentPaths.js?v=tour-3";
 import { getSubmittedDeck, deckContents } from "./tournamentDecks.js?v=tab-1";
 import {
@@ -408,6 +408,17 @@ export async function publishTopDecks(id, t) {
 // ── playing a match ──────────────────────────────────────────────────────────
 
 /** Who may play, which game this is and which rules apply - stored on the room itself. */
+/** Who picks turn order in this game of a series: whoever lost the game before.
+ *  Game 1 has no loser yet, so it's the usual dice roll (null). */
+export function turnChooserOf(pairing, game) {
+    if (!pairing || !(Number(game) > 1)) return null;
+    const before = gamesOf(pairing).find(g => g.n === Number(game) - 1);
+    if (!before || !before.winner) return null;
+    if (before.winner === pairing.a) return pairing.b || null;
+    if (before.winner === pairing.b) return pairing.a || null;
+    return null;
+}
+
 function matchMetadata(id, t, round, pairing, game) {
     const players = { [pairing.a]: true };
     if (pairing.b) players[pairing.b] = true;
@@ -426,6 +437,9 @@ function matchMetadata(id, t, round, pairing, game) {
         players
     };
     if (t.matchType === "draft") meta.draft = draftSettingsOf(t);
+    // Read by initializeMultiplayerGame when it deals this game.
+    const chooser = turnChooserOf(pairing, game);
+    if (chooser) meta.turnChooser = chooser;
     return meta;
 }
 

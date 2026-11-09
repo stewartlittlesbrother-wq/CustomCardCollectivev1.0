@@ -1073,9 +1073,12 @@ function renderDiceRollStep(heading, body, actions) {
     const foeRoll = dice[`${foeSlot}Roll`];
     const winner = dice.winner;
 
-    // Rematch: no dice roll - the loser of the last game just picks turn order.
+    // Rematch, or game 2+ of a tournament series: no dice roll - the loser of the
+    // last game just picks turn order.
     if (dice.rematchLoser) {
-        heading.textContent = "Rematch — choose turn order";
+        heading.textContent = dice.seriesGame
+            ? `Game ${dice.seriesGame} — choose turn order`
+            : "Rematch — choose turn order";
         const status = document.createElement("p");
         status.className = "setup-overlay-status";
         if (dice.rematchLoser === playerSlot) {
@@ -1830,7 +1833,7 @@ function reportTournamentResult(winnerSlot) {
     if (!winnerUid) return;
     tournamentContext.iWon = winnerSlot === playerSlot;
     Promise.all([
-        import("../firebase/tournamentService.js?v=tab-1"),
+        import("../firebase/tournamentService.js?v=tab-2"),
         import("../core/tournamentEngine.js?v=tab-1")
     ])
         .then(async ([service, engine]) => {
@@ -2662,7 +2665,7 @@ async function initializeOnlineMultiplayer() {
     }
 
     try {
-        onlineMultiplayerService = trackOnlineWrites(await import("../firebase/multiplayerService.js?v=quick-1"));
+        onlineMultiplayerService = trackOnlineWrites(await import("../firebase/multiplayerService.js?v=quick-2"));
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();
@@ -2739,7 +2742,7 @@ async function initializeSpectatorMatch() {
     installSpectatorInteractionGuard();
 
     try {
-        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=quick-1");
+        onlineMultiplayerService = await import("../firebase/multiplayerService.js?v=quick-2");
         onlineFirebaseApp = await import("../firebase/firebaseApp.js");
         await onlineFirebaseApp.signInGuest();
         onlineUser = await onlineFirebaseApp.waitForUser();

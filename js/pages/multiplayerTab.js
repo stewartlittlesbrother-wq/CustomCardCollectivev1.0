@@ -35,7 +35,7 @@ import {
     keepQuickMatchAlive,
     cancelQuickMatch,
     subscribeToQuickMatch
-} from "../firebase/multiplayerService.js?v=quick-1";
+} from "../firebase/multiplayerService.js?v=quick-2";
 
 const host = window.ccMpHost || {};
 

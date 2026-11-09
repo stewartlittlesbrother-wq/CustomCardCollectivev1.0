@@ -6493,7 +6493,7 @@ function openPlayersTab() {
   if (playersTabModule) { playersTabModule.show(); return; }
   if (playersTabLoading) return;
   playersTabLoading = true;
-  import("./js/pages/playersTab.js?v=1")
+  import("./js/pages/playersTab.js?v=2")
     .then(mod => {
       playersTabModule = mod;
       if (state.activeView === "players") mod.show();
@@ -6574,7 +6574,7 @@ function openTournamentsTab() {
       return openDeckFromTournament(deck);
     }
   };
-  import("./js/pages/tournaments.js?v=tab-2")
+  import("./js/pages/tournaments.js?v=tab-3")
     .then(mod => {
       tournamentsTabModule = mod;
       if (state.activeView === "tournaments") mod.show();
@@ -6617,7 +6617,7 @@ function openMultiplayerTab() {
         .sort((a, b) => a.name.localeCompare(b.name));
     }
   };
-  import("./js/pages/multiplayerTab.js?v=mpx-10")
+  import("./js/pages/multiplayerTab.js?v=mpx-11")
     .then(mod => {
       multiplayerTabModule = mod;
       if (state.activeView === "multiplayer") mod.show();
@@ -8869,7 +8869,7 @@ async function maybeStartMultiplayerDraft() {
   try {
     [firebaseApp, svc] = await Promise.all([
       import("./js/firebase/firebaseApp.js"),
-      import("./js/firebase/multiplayerService.js?v=quick-1")
+      import("./js/firebase/multiplayerService.js?v=quick-2")
     ]);
     await firebaseApp.signInGuest();
   } catch (e) {

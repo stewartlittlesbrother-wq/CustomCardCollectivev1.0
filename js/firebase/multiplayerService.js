@@ -1059,8 +1059,14 @@ export async function initializeMultiplayerGame(roomCode) {
         console.warn("Starting without some cards (not in the card library):", stillMissing);
     }
 
-    await update(matchRef, buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, null,
-        Number(match.settings?.clockSeconds) || 0));
+    // Game 2+ of a tournament series: whoever lost the game before picks turn order
+    // instead of rolling (tournament.turnChooser, see matchMetadata in tournamentService.js).
+    const chooserUid = match.tournament?.turnChooser;
+    const seriesChooser = !chooserUid ? null
+        : player1.uid === chooserUid ? "p1"
+        : player2.uid === chooserUid ? "p2" : null;
+    await update(matchRef, buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, seriesChooser,
+        Number(match.settings?.clockSeconds) || 0, seriesChooser ? Number(match.tournament?.game) || 0 : 0));
 }
 
 // ── Game clock ───────────────────────────────────────────
@@ -1112,9 +1118,10 @@ export async function claimClockTimeout(roomCode, loserSlot, loserName = "") {
 // The full "deal a brand new game" write. Shared by the first start and by a
 // rematch so the two can never drift apart. On a rematch, `rematchLoser` (the
 // player who lost the last game) is pre-set as the dice "winner" so THEY get to
-// choose who goes first - no dice roll needed. `clockSeconds` > 0 gives both
-// players a full game clock.
-function buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, rematchLoser = null, clockSeconds = 0) {
+// choose who goes first - no dice roll needed. A tournament series does the same
+// from game 2 on, with `seriesGame` (the game number) for the wording.
+// `clockSeconds` > 0 gives both players a full game clock.
+function buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, rematchLoser = null, clockSeconds = 0, seriesGame = 0) {
     const clockMs = Math.max(0, Math.round(Number(clockSeconds) || 0)) * 1000;
     const p1Private = createInitialPrivateState(player1Deck, player1 && player1.artPrefs);
     const p2Private = createInitialPrivateState(player2Deck, player2 && player2.artPrefs);
@@ -1123,7 +1130,8 @@ function buildFreshMatchPayload(player1, player2, player1Deck, player2Deck, rema
     const diceSetup = chooser
         // Pre-resolved: the loser is the "winner" (chooser). rematchLoser flags
         // the client to show rematch wording instead of dice results.
-        ? { p1Roll: null, p2Roll: null, winner: chooser, tie: false, rematchLoser: chooser }
+        ? { p1Roll: null, p2Roll: null, winner: chooser, tie: false, rematchLoser: chooser,
+            ...(seriesGame > 1 ? { seriesGame } : {}) }
         : { p1Roll: null, p2Roll: null, winner: null, tie: false };
 
     return {

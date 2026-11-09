@@ -10,7 +10,7 @@ import {
     enterMatch,
     publishTopDecks,
     isPermissionError
-} from "../firebase/tournamentService.js?v=tab-1";
+} from "../firebase/tournamentService.js?v=tab-2";
 import { lookupCards } from "../firebase/tournamentDecks.js?v=tab-1";
 import {
     ROUND_LENGTHS,
@@ -44,7 +44,7 @@ import {
 import { $, esc, fmtDate, relative, toast, toLocalInput, copyText } from "./tournamentUi.js?v=tour-3";
 import { openSubmitDialog, closeSubmitDialog, closeViewDialog, openViewDialog } from "./tournamentDeckUi.js?v=tab-1";
 import { bracketHtml } from "./tournamentBracket.js?v=tab-1";
-import { createManage } from "./tournamentManage.js?v=tab-1";
+import { createManage } from "./tournamentManage.js?v=tab-2";
 
 // ── state ────────────────────────────────────────────────────────────────────
 

@@ -24,7 +24,7 @@ import { alertsFor, inboxAlertsFor, trophiesFor, INVITE_FRESH_MS } from "./core/
 import * as profiles from "./firebase/profileService.js?v=1";
 
 const STORE_KEY = "cc_tn_alerts_v1";          // { dismissed: {key: ms}, announced: {key: ms}, history: [...] }
-const SERVICE_URL = "./firebase/tournamentService.js?v=tab-1";
+const SERVICE_URL = "./firebase/tournamentService.js?v=tab-2";
 const HISTORY_MAX = 40;
 const STICKY_SNOOZE_MS = 20 * 60 * 1000;       // a dismissed "you must decide" comes back after this
 const KEEP_MS = 30 * 24 * 60 * 60 * 1000;      // forget dismissals after a month
