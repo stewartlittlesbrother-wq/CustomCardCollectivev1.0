@@ -80,6 +80,10 @@ function getOmniLeaderCard() {
 // override a built-in's name/image). Rebuilt by applyCustomCollections. Kept as
 // a mutable array so every reader (picker, selects, normalize) sees new ones.
 let CARD_COLLECTIONS = [...BUILTIN_COLLECTIONS];
+// Collections their owner deleted. Built-ins are hard-coded above, so these hide them.
+let deletedCollectionSlugs = new Set();
+// Never deletable: the official list, the fallback bucket and the all-collections view.
+const UNDELETABLE_COLLECTIONS = ["official-op", "everything-else", "all-access"];
 
 // Merge a set of custom collections over the built-ins. Matching slugs override
 // name/image; new slugs are inserted just before "everything-else" so that stays
@@ -103,6 +107,8 @@ function applyCustomCollections(customList) {
         : (Array.isArray(existing.coOwners) ? existing.coOwners : [])
     });
   });
+
+  deletedCollectionSlugs.forEach(slug => { if (!UNDELETABLE_COLLECTIONS.includes(slug)) bySlug.delete(slug); });
 
   const everythingElse = bySlug.get("everything-else");
   bySlug.delete("everything-else");
@@ -142,7 +148,12 @@ async function loadCollections() {
     console.warn("Shared collections unavailable:", error);
   }
 
-  const local = loadLocalCustomCollections();
+  try {
+    const library = await getCardLibrary();
+    if (library?.deletedCollectionSlugs) deletedCollectionSlugs = new Set(library.deletedCollectionSlugs());
+  } catch (_) { /* keep what we had */ }
+
+  const local = loadLocalCustomCollections().filter(entry => !deletedCollectionSlugs.has(entry.slug));
   // Shared wins over local for the same slug; keep any purely-local ones too.
   const merged = new Map(local.map(entry => [entry.slug, entry]));
   shared.forEach(entry => merged.set(entry.slug, entry));
@@ -175,6 +186,8 @@ async function saveCollection({ slug, name, image, editors, ownerUid, coOwners }
       : (Array.isArray(prior?.coOwners) ? prior.coOwners : [])
   };
   if (!entry.slug) return;
+  // Making a collection again under a deleted one's name brings it back.
+  deletedCollectionSlugs.delete(entry.slug);
 
   const index = customCollections.findIndex(c => c.slug === entry.slug);
   if (index === -1) customCollections.push(entry);
@@ -204,7 +217,7 @@ function collectionSlugFromName(name) {
     .slice(0, 40) || "collection";
   let slug = base;
   let n = 2;
-  while (CARD_COLLECTIONS.some(entry => entry.slug === slug)) {
+  while (CARD_COLLECTIONS.some(entry => entry.slug === slug) || deletedCollectionSlugs.has(slug)) {
     slug = `${base}-${n++}`;
   }
   return slug;
@@ -1166,7 +1179,7 @@ let sharedLibraryWarned = false;
 function getCardLibrary() {
   if (cardLibraryUnavailable) return Promise.resolve(null);
   if (!cardLibraryPromise) {
-    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-18")
+    cardLibraryPromise = import("./js/firebase/cardLibraryService.js?v=collections-19")
       .catch(error => {
         console.warn("Shared card library unavailable:", error);
         cardLibraryUnavailable = true;
@@ -5175,6 +5188,21 @@ function openCollectionEditor(slug = null) {
         <button type="button" class="ghost" id="colEditCancel">Cancel</button>
         <button type="button" class="red-button" id="colEditSave">${existing ? "Save changes" : "Create collection"}</button>
       </div>
+      ${canDeleteCollection(existing) ? `
+      <div class="col-edit-delete" style="text-align:left;display:flex;flex-direction:column;gap:8px;margin-top:4px;padding-top:12px;border-top:1px solid var(--line,#333);">
+        <button type="button" class="ghost danger" data-col-delete style="align-self:flex-start">Delete this collection…</button>
+        <div data-col-delete-confirm style="display:none;flex-direction:column;gap:8px;">
+          <p style="margin:0;line-height:1.45;">Delete <strong>${escapeHtml(existing.name || existing.slug)}</strong> and its <strong>${collectionCardsOf(existing.slug).length} card(s)</strong> for everyone? This can't be undone. Decks that use these cards will show them as missing.</p>
+          <label>Type the collection's name to confirm
+            <input type="text" data-col-delete-name autocomplete="off" placeholder="${escapeAttr(existing.name || existing.slug)}" style="margin-top:4px">
+          </label>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button type="button" class="ghost" data-col-delete-cancel>Keep it</button>
+            <button type="button" class="red-button" data-col-delete-go disabled>Delete forever</button>
+          </div>
+          <p data-col-delete-status style="margin:0;opacity:.8;" aria-live="polite"></p>
+        </div>
+      </div>` : ""}
     </div>
   `;
   document.body.appendChild(overlay);
@@ -5293,7 +5321,86 @@ function openCollectionEditor(slug = null) {
     if (!existing) openCollection(targetSlug);
   });
 
+  if (canDeleteCollection(existing)) wireCollectionDelete(overlay, existing, close);
+
   overlay.querySelector("#colEditName").focus();
+}
+
+// The owner (or the admin) may delete a collection - never the official list, the
+// "Everything else" bucket or the all-collections view.
+function canDeleteCollection(existing) {
+  return Boolean(existing && existing.slug && !existing.official
+    && !UNDELETABLE_COLLECTIONS.includes(existing.slug)
+    && canManageCollectionSettings(existing));
+}
+
+// The cards in a collection that this page knows about (the library adds any others).
+function collectionCardsOf(slug) {
+  return state.cards.filter(card => card && !card.omniLeader && normalizeCollectionSlug(card.collection) === slug);
+}
+
+function wireCollectionDelete(overlay, existing, close) {
+  const open = overlay.querySelector("[data-col-delete]");
+  const box = overlay.querySelector("[data-col-delete-confirm]");
+  const nameBox = overlay.querySelector("[data-col-delete-name]");
+  const go = overlay.querySelector("[data-col-delete-go]");
+  const status = overlay.querySelector("[data-col-delete-status]");
+  const wanted = String(existing.name || existing.slug).trim().toLowerCase();
+
+  // style.display, not [hidden]: the site's button and flex styles would override it.
+  const showConfirm = (on) => { box.style.display = on ? "flex" : "none"; open.style.display = on ? "none" : ""; };
+  open.addEventListener("click", () => { showConfirm(true); nameBox.focus(); });
+  overlay.querySelector("[data-col-delete-cancel]").addEventListener("click", () => {
+    showConfirm(false); nameBox.value = ""; go.disabled = true; status.textContent = "";
+  });
+  nameBox.addEventListener("input", () => { go.disabled = nameBox.value.trim().toLowerCase() !== wanted; });
+
+  go.addEventListener("click", async () => {
+    if (go.disabled) return;
+    if (!window.ccAccount || !window.ccAccount.requireAccount("Sign in to delete a collection.")) return;
+    const library = await getCardLibrary();
+    if (!library?.deleteSharedCollectionWithCards) { status.textContent = "Couldn't reach the card library - check your connection and try again."; return; }
+
+    const cards = collectionCardsOf(existing.slug);
+    const keys = cards.map(card => card.__storageKey || (library.cardLibraryKey ? library.cardLibraryKey(card) : "")).filter(Boolean);
+    overlay.querySelectorAll("button, input").forEach(control => { control.disabled = true; });
+    status.textContent = "Deleting…";
+    let result;
+    try {
+      result = await library.deleteSharedCollectionWithCards(existing.slug, keys,
+        (done, total) => { status.textContent = `Deleting… ${done} of ${total} cards`; });
+    } catch (error) {
+      console.error(error);
+      status.textContent = isPermissionDenied(error)
+        ? "Only this collection's owner can delete it."
+        : `Delete failed: ${error.message || error}`;
+      overlay.querySelectorAll("button, input").forEach(control => { control.disabled = false; });
+      go.disabled = nameBox.value.trim().toLowerCase() !== wanted;
+      return;
+    }
+
+    // Drop the deleted cards from the deck being built.
+    const gone = new Set(cards.map(card => card.id));
+    Object.keys(state.deck || {}).forEach(id => { if (gone.has(id)) delete state.deck[id]; });
+    if (gone.has(state.leaderId)) state.leaderId = "";
+    if (gone.has(state.leaderId2)) state.leaderId2 = "";
+
+    if (result.collectionDeleted) {
+      deletedCollectionSlugs.add(existing.slug);
+      customCollections = customCollections.filter(entry => entry.slug !== existing.slug);
+      saveLocalCustomCollections(customCollections);
+      applyCustomCollections(customCollections);
+      if (state.activeCollection === existing.slug) state.activeCollection = null;
+      close();
+      toast(`Deleted "${existing.name || existing.slug}" and ${result.deleted} card(s)`);
+    } else {
+      status.textContent = `${result.deleted} card(s) deleted, but ${result.failed} couldn't be (you don't have permission for them), so the collection was kept. Ask the admin to finish it.`;
+      overlay.querySelectorAll("button, input").forEach(control => { control.disabled = false; });
+    }
+    populateCollectionSelects();
+    saveDeck();
+    await loadCardPool();
+  });
 }
 
 async function openCardForEditing(card) {
@@ -6583,7 +6690,7 @@ function openTournamentsTab() {
       return openDeckFromTournament(deck);
     }
   };
-  import("./js/pages/tournaments.js?v=tab-3")
+  import("./js/pages/tournaments.js?v=tab-4")
     .then(mod => {
       tournamentsTabModule = mod;
       if (state.activeView === "tournaments") mod.show();
@@ -6626,7 +6733,7 @@ function openMultiplayerTab() {
         .sort((a, b) => a.name.localeCompare(b.name));
     }
   };
-  import("./js/pages/multiplayerTab.js?v=mpx-11")
+  import("./js/pages/multiplayerTab.js?v=mpx-12")
     .then(mod => {
       multiplayerTabModule = mod;
       if (state.activeView === "multiplayer") mod.show();

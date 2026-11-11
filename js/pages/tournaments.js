@@ -10,8 +10,8 @@ import {
     enterMatch,
     publishTopDecks,
     isPermissionError
-} from "../firebase/tournamentService.js?v=tab-2";
-import { lookupCards } from "../firebase/tournamentDecks.js?v=tab-1";
+} from "../firebase/tournamentService.js?v=tab-3";
+import { lookupCards } from "../firebase/tournamentDecks.js?v=tab-2";
 import {
     ROUND_LENGTHS,
     DRAFT_DEFAULTS,
@@ -42,9 +42,9 @@ import {
     nameOf
 } from "../core/tournamentEngine.js?v=tab-1";
 import { $, esc, fmtDate, relative, toast, toLocalInput, copyText } from "./tournamentUi.js?v=tour-3";
-import { openSubmitDialog, closeSubmitDialog, closeViewDialog, openViewDialog } from "./tournamentDeckUi.js?v=tab-1";
+import { openSubmitDialog, closeSubmitDialog, closeViewDialog, openViewDialog } from "./tournamentDeckUi.js?v=tab-2";
 import { bracketHtml } from "./tournamentBracket.js?v=tab-1";
-import { createManage } from "./tournamentManage.js?v=tab-2";
+import { createManage } from "./tournamentManage.js?v=tab-3";
 
 // ── state ────────────────────────────────────────────────────────────────────
 
@@ -808,7 +808,7 @@ async function ensureSearchLibrary() {
     searchLoading = true;
     $("tnBanResults").innerHTML = `<div class="tn-hint">Loading the card library…</div>`;
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-18");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-19");
         const result = await library.loadSharedCards({
             light: true,
             onProgress: ({ cards }) => { searchCards = cards; renderBanResults(); }
@@ -1140,9 +1140,10 @@ async function loadCollectionChoices() {
     const names = {};
     (window.BUILTIN_COLLECTIONS || []).forEach(c => { if (c && c.slug) names[c.slug] = c.name || c.slug; });
     try {
-        const library = await import("../firebase/cardLibraryService.js?v=collections-18");
+        const library = await import("../firebase/cardLibraryService.js?v=collections-19");
         const registry = library.loadSharedCollections ? await library.loadSharedCollections() : [];
         (registry || []).forEach(c => { if (c && c.slug) names[c.slug] = c.name || names[c.slug] || c.slug; });
+        (library.deletedCollectionSlugs ? library.deletedCollectionSlugs() : []).forEach(slug => { delete names[slug]; });
     } catch { /* the built-in list is enough */ }
 
     delete names["all-access"];     // a virtual view, not a real card pool

@@ -10,7 +10,7 @@ import {
     getSubmittedDeck,
     lookupCards,
     deckListText
-} from "../firebase/tournamentDecks.js?v=tab-1";
+} from "../firebase/tournamentDecks.js?v=tab-2";
 import { collectionsOf, bannedOf } from "../core/tournamentEngine.js?v=tab-1";
 
 // ── submitting ───────────────────────────────────────────────────────────────

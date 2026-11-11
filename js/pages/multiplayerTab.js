@@ -1077,7 +1077,7 @@ async function loadRequiredDeck(meta) {
     if (lockedDeckRequested || !user) return;
     lockedDeckRequested = true;
     try {
-        const decks = await import("../firebase/tournamentDecks.js?v=tab-1");
+        const decks = await import("../firebase/tournamentDecks.js?v=tab-2");
         const submitted = await decks.getSubmittedDeck(meta.id, user.uid);
         if (!submitted || !submitted.deck) {
             showError("#mpxRoomError", "You haven't submitted a deck list for this tournament, so you can't play yet. Go back and submit one.");
@@ -1099,7 +1099,7 @@ async function tournamentDeckProblem(deck) {
     const banned = Object.values(tournamentMeta?.banned || {});
     if (!pool.length && !banned.length) return "";
     try {
-        const decks = await import("../firebase/tournamentDecks.js?v=tab-1");
+        const decks = await import("../firebase/tournamentDecks.js?v=tab-2");
         const result = await decks.checkDeck(deck, { collections: pool, banned, collectionName });
         return result.problems.join(" ");
     } catch {

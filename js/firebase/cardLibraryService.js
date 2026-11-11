@@ -1106,10 +1106,17 @@ export async function deleteSharedCard(target) {
 // load - no index/cache dance like the heavy card bodies need.
 const COLLECTIONS_PATH = "collections";
 
+// Collections their owner deleted (tombstones, see deleteSharedCollectionWithCards).
+// Built-in collections are written into the site itself, so the app needs these to
+// hide them. Filled by loadSharedCollections.
+let deletedCollections = [];
+export function deletedCollectionSlugs() { return [...deletedCollections]; }
+
 export async function loadSharedCollections() {
     try {
         const snap = await get(ref(database, COLLECTIONS_PATH));
         const val = snap.val() || {};
+        deletedCollections = Object.entries(val).filter(([, entry]) => entry && entry.deleted).map(([slug]) => slug);
         return Object.entries(val)
             .filter(([, entry]) => entry && !entry.deleted)
             .map(([slug, entry]) => ({
@@ -1175,6 +1182,91 @@ export async function deleteSharedCollection(slug) {
     const key = String(slug || "").trim();
     if (!key) return;
     await remove(ref(database, `${COLLECTIONS_PATH}/${key}`));
+}
+
+const DELETE_BATCH = 100;
+
+/** The writes that delete one card: body, catalog copy, and an index tombstone so a
+ *  bundled copy can't come back (same as deleteSharedCard). */
+function cardDeleteUpdates(updates, key) {
+    catalogUpdate(updates, key, null);
+    updates[`${CARDS_PATH}/${key}`] = null;
+    updates[`${INDEX_PATH}/${key}`] = { deleted: true, updatedAt: serverTimestamp() };
+    return updates;
+}
+
+/** The multi-path writes that delete a collection: its cards in batches, then the
+ *  collection as a tombstone that keeps its owner (built-ins are written into the
+ *  site, so only a tombstone hides them, and nobody else can take the name over).
+ *  Pure apart from the server-time markers; exported for the tests. */
+export function collectionDeleteBatches(slug, keys, ownerUid) {
+    const batches = [];
+    for (let i = 0; i < keys.length; i += DELETE_BATCH) {
+        const chunk = keys.slice(i, i + DELETE_BATCH);
+        const updates = {};
+        chunk.forEach(key => cardDeleteUpdates(updates, key));
+        stampUpdate(updates);
+        batches.push({ keys: chunk, updates });
+    }
+    const last = {
+        [`${CARDS_PATH}/${CATALOG_PREFIX}${slug}`]: null,
+        [`${COLLECTIONS_PATH}/${slug}`]: { deleted: true, ownerUid: String(ownerUid || ""), updatedAt: serverTimestamp() }
+    };
+    return { batches, last };
+}
+
+/**
+ * Delete a whole collection and every card in it. `keys` = the storage keys of its
+ * cards that the page knows about; any other card stored under the collection (from
+ * the index) is included too. onProgress(done, total) after each batch.
+ * If some cards can't be deleted (no permission) the collection itself is kept and
+ * { failed } says how many are left.
+ */
+export async function deleteSharedCollectionWithCards(slug, keys = [], onProgress) {
+    await waitForUser();
+    const name = String(slug || "").trim();
+    if (!name || name.startsWith("~")) throw new Error("No collection given.");
+
+    const index = await getIndex({ force: true });
+    const all = new Set((keys || []).map(key => String(key || "").trim()).filter(key => key && !key.startsWith("~")));
+    Object.keys(index || {}).forEach(key => {
+        if (key.endsWith(`__${name}`) && index[key] && index[key].deleted !== true) all.add(key);
+    });
+    const ownerUid = (await get(ref(database, `${COLLECTIONS_PATH}/${name}/ownerUid`))).val() || "";
+    const { batches, last } = collectionDeleteBatches(name, [...all], ownerUid);
+
+    const removed = [];
+    const failed = [];
+    let done = 0;
+    for (const batch of batches) {
+        try {
+            await update(ref(database), batch.updates);
+            removed.push(...batch.keys);
+        } catch (error) {
+            // One card we may not touch fails the whole batch: go card by card.
+            for (const key of batch.keys) {
+                try {
+                    const one = cardDeleteUpdates({}, key);
+                    stampUpdate(one);
+                    await update(ref(database), one);
+                    removed.push(key);
+                } catch (_) {
+                    failed.push(key);
+                }
+            }
+        }
+        done += batch.keys.length;
+        if (onProgress) { try { onProgress(done, all.size); } catch (_) {} }
+    }
+
+    if (!failed.length) {
+        await update(ref(database), last);
+        if (!deletedCollections.includes(name)) deletedCollections.push(name);
+    }
+    await writeCachedCards([], removed);
+    await catalogWrite(LIGHT_STORE, [], removed);
+    await forgetIndex();
+    return { deleted: removed.length, failed: failed.length, collectionDeleted: !failed.length };
 }
 
 // Every registered account username (lowercased), for the admin's collection
@@ -1371,7 +1463,7 @@ export async function acceptTypeGuesses(types) {
 // (Re)build the catalog for every card in the library. Uses the copies already on
 // this device and only downloads a card it doesn't have. Safe to run again: it
 // writes the same thing. Run from the console of a browser that has the library
-// cached:  (await import("./js/firebase/cardLibraryService.js?v=collections-18")).backfillCatalog(console.log)
+// cached:  (await import("./js/firebase/cardLibraryService.js?v=collections-19")).backfillCatalog(console.log)
 export async function backfillCatalog(onProgress) {
     await waitForUser();
     const index = await getIndex({ force: true });

@@ -23,7 +23,7 @@ import {
 import { database } from "./firebaseApp.js";
 import { createRoom, joinRoom } from "./multiplayerService.js?v=quick-2";
 import { BASE_PATH, DECKS_PATH, SECRETS_PATH, JOIN_PATH } from "./tournamentPaths.js?v=tour-3";
-import { getSubmittedDeck, deckContents } from "./tournamentDecks.js?v=tab-1";
+import { getSubmittedDeck, deckContents } from "./tournamentDecks.js?v=tab-2";
 import {
     tick,
     cleanSettings,

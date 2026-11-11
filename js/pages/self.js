@@ -1833,7 +1833,7 @@ function reportTournamentResult(winnerSlot) {
     if (!winnerUid) return;
     tournamentContext.iWon = winnerSlot === playerSlot;
     Promise.all([
-        import("../firebase/tournamentService.js?v=tab-2"),
+        import("../firebase/tournamentService.js?v=tab-3"),
         import("../core/tournamentEngine.js?v=tab-1")
     ])
         .then(async ([service, engine]) => {
