@@ -12484,11 +12484,14 @@ function updateOnlinePhaseButton() {
         }
     }
 
-    // Is this a power-bearing board card (leader or character)? The +1000/-1000
-    // hotkeys only make sense there, not on the stage or a hand card.
+    // Can the power (±1000) / cost (±1) hotkeys mark this card? The leader, a
+    // character, or a face-up card in hand (cost changes usually apply there). Notes
+    // follow the card itself, so a hand card keeps its note when it's played. A
+    // face-down opponent hand card has no instance id, so it can't be picked.
     function isPowerCard(el) {
         return Boolean(el && typeof el.closest === "function" &&
-            (el.closest(".character-slot") || el.closest(".board-leader-card")));
+            (el.closest(".character-slot") || el.closest(".board-leader-card")
+                || el.closest(".hand-card[data-card-instance-id]")));
     }
 
     // The card's NOTE doubles as the running counter for BOTH the power (±1000)
@@ -12513,7 +12516,7 @@ function updateOnlinePhaseButton() {
         return parts.join("\n");
     }
 
-    // Adjust the selected leader/character's power (kind "power", ±1000) or cost
+    // Adjust the selected leader/character/hand card's power (kind "power", ±1000) or cost
     // (kind "cost", ±1) and show it as a NOTE that stacks on repeated presses:
     // +1000, +2000, … / Cost -1, Cost -2, … Both at 0 clears the note.
     function adjustManualMod(kind, delta) {
