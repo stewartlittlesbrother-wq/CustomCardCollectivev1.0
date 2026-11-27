@@ -364,6 +364,7 @@
         exportMenu.append(
             menuItem("Copy as text", () => click("exportDeck")),
             menuItem("Save as image", () => click("exportDeckImage")),
+            menuItem("Copy image", () => click("copyDeckImage")),
             menuItem("Print", () => click("printDeck")),
             make("div", "v2-sep"),
             menuItem("Import a deck…", () => click("importDeck")));

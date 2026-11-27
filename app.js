@@ -396,6 +396,7 @@ const el = {
   deckList: document.querySelector("#deckList"),
   exportDeck: document.querySelector("#exportDeck"),
   exportDeckImage: document.querySelector("#exportDeckImage"),
+  copyDeckImage: document.querySelector("#copyDeckImage"),
   printDeck: document.querySelector("#printDeck"),
   importDeck: document.querySelector("#importDeck"),
   deckSharePanel: document.querySelector("#deckSharePanel"),
@@ -6081,117 +6082,153 @@ function drawDeckStats(ctx, x, y, w, h, entries) {
   });
 }
 
-async function exportDeckImage() {
-  if (state.cardsLoading) { toast("Cards are still loading — try again in a moment."); return; }
+// The deck to draw, or null (with a toast) when there's nothing to draw yet.
+function deckImageSource() {
+  if (state.cardsLoading) { toast("Cards are still loading — try again in a moment."); return null; }
   const leader = getCard(state.leaderId);
   const entries = deckEntries();
-  if (!leader && !entries.length) { toast("Build a deck first, then export an image."); return; }
+  if (!leader && !entries.length) { toast("Build a deck first, then export an image."); return null; }
+  return { leader, entries };
+}
 
-  const btn = el.exportDeckImage;
-  const prevLabel = btn ? btn.textContent : "";
-  if (btn) { btn.disabled = true; btn.textContent = "Rendering…"; }
+// Draw the deck image (leader banner, card grid, stats) and return it as a PNG.
+async function renderDeckImageBlob({ leader, entries }) {
+  const cells = [];
+  if (leader) cells.push({ card: leader, qty: 0, isLeader: true });
+  entries.forEach(e => cells.push({ card: e.card, qty: e.qty, isLeader: false }));
 
-  try {
-    const cells = [];
-    if (leader) cells.push({ card: leader, qty: 0, isLeader: true });
-    entries.forEach(e => cells.push({ card: e.card, qty: e.qty, isLeader: false }));
+  const imgs = await Promise.all(cells.map(c => loadCardImageForExport(c.card)));
 
-    const imgs = await Promise.all(cells.map(c => loadCardImageForExport(c.card)));
+  const COLS = 6, CARD_W = 220, CARD_H = 308, GAP = 18, PAD = 30, LABEL_H = 34;
+  const HEADER_H = 190, STATS_H = 250;
+  const width = PAD * 2 + COLS * CARD_W + (COLS - 1) * GAP;
+  const rows = Math.max(1, Math.ceil(cells.length / COLS));
+  const gridH = rows * (CARD_H + LABEL_H) + Math.max(0, rows - 1) * GAP;
+  const height = HEADER_H + GAP + gridH + GAP + STATS_H + PAD;
 
-    const COLS = 6, CARD_W = 220, CARD_H = 308, GAP = 18, PAD = 30, LABEL_H = 34;
-    const HEADER_H = 190, STATS_H = 250;
-    const width = PAD * 2 + COLS * CARD_W + (COLS - 1) * GAP;
-    const rows = Math.max(1, Math.ceil(cells.length / COLS));
-    const gridH = rows * (CARD_H + LABEL_H) + Math.max(0, rows - 1) * GAP;
-    const height = HEADER_H + GAP + gridH + GAP + STATS_H + PAD;
+  const scale = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.scale(scale, scale);
 
-    const scale = 2;
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(width * scale);
-    canvas.height = Math.round(height * scale);
-    const ctx = canvas.getContext("2d");
-    ctx.scale(scale, scale);
+  ctx.fillStyle = "#111417";
+  ctx.fillRect(0, 0, width, height);
 
-    ctx.fillStyle = "#111417";
-    ctx.fillRect(0, 0, width, height);
+  // Header banner.
+  const hx = PAD, hy = PAD, hw = width - PAD * 2, hh = HEADER_H - PAD;
+  ctx.save();
+  roundRectPath(ctx, hx, hy, hw, hh, 14); ctx.clip();
+  ctx.fillStyle = "#0b0d0f"; ctx.fillRect(hx, hy, hw, hh);
+  if (cells[0] && cells[0].isLeader && imgs[0]) {
+    drawImageCover(ctx, imgs[0], hx, hy, hw, hh);
+    ctx.fillStyle = "rgba(0,0,0,.58)"; ctx.fillRect(hx, hy, hw, hh);
+  }
+  ctx.fillStyle = "#fff"; ctx.textAlign = "left";
+  ctx.font = "800 42px system-ui, sans-serif";
+  ctx.fillText(deckExportTitle(leader), hx + 30, hy + hh / 2 + 4, hw - 60);
+  ctx.font = "500 24px system-ui, sans-serif"; ctx.fillStyle = "rgba(255,255,255,.82)";
+  ctx.fillText(`${deckMainCount()} cards` + (leader ? ` · Leader: ${leader.name}` : ""), hx + 30, hy + hh / 2 + 42, hw - 60);
+  ctx.restore();
+  ctx.strokeStyle = "rgba(255,255,255,.15)"; ctx.lineWidth = 2;
+  roundRectPath(ctx, hx, hy, hw, hh, 14); ctx.stroke();
 
-    // Header banner.
-    const hx = PAD, hy = PAD, hw = width - PAD * 2, hh = HEADER_H - PAD;
+  // Card grid.
+  const gy = HEADER_H + GAP;
+  cells.forEach((cell, i) => {
+    const col = i % COLS, row = Math.floor(i / COLS);
+    const x = PAD + col * (CARD_W + GAP);
+    const y = gy + row * (CARD_H + LABEL_H + GAP);
     ctx.save();
-    roundRectPath(ctx, hx, hy, hw, hh, 14); ctx.clip();
-    ctx.fillStyle = "#0b0d0f"; ctx.fillRect(hx, hy, hw, hh);
-    if (cells[0] && cells[0].isLeader && imgs[0]) {
-      drawImageCover(ctx, imgs[0], hx, hy, hw, hh);
-      ctx.fillStyle = "rgba(0,0,0,.58)"; ctx.fillRect(hx, hy, hw, hh);
+    roundRectPath(ctx, x, y, CARD_W, CARD_H, 10); ctx.clip();
+    if (imgs[i]) drawImageCover(ctx, imgs[i], x, y, CARD_W, CARD_H);
+    else {
+      ctx.fillStyle = "#20242a"; ctx.fillRect(x, y, CARD_W, CARD_H);
+      ctx.fillStyle = "#cbd3da"; ctx.font = "600 17px system-ui, sans-serif"; ctx.textAlign = "center";
+      wrapText(ctx, cell.card.name || "", x + CARD_W / 2, y + CARD_H / 2, CARD_W - 24, 22);
     }
-    ctx.fillStyle = "#fff"; ctx.textAlign = "left";
-    ctx.font = "800 42px system-ui, sans-serif";
-    ctx.fillText(deckExportTitle(leader), hx + 30, hy + hh / 2 + 4, hw - 60);
-    ctx.font = "500 24px system-ui, sans-serif"; ctx.fillStyle = "rgba(255,255,255,.82)";
-    ctx.fillText(`${deckMainCount()} cards` + (leader ? ` · Leader: ${leader.name}` : ""), hx + 30, hy + hh / 2 + 42, hw - 60);
     ctx.restore();
-    ctx.strokeStyle = "rgba(255,255,255,.15)"; ctx.lineWidth = 2;
-    roundRectPath(ctx, hx, hy, hw, hh, 14); ctx.stroke();
+    ctx.strokeStyle = cell.isLeader ? "#f6c445" : "rgba(255,255,255,.18)";
+    ctx.lineWidth = cell.isLeader ? 3 : 1.5;
+    roundRectPath(ctx, x, y, CARD_W, CARD_H, 10); ctx.stroke();
+    if (cell.isLeader) {
+      const bw = 100, bh = 30, bx = x + 7, by = y + 7;
+      ctx.fillStyle = "rgba(246,196,69,.94)"; roundRectPath(ctx, bx, by, bw, bh, 7); ctx.fill();
+      ctx.fillStyle = "#111"; ctx.font = "800 17px system-ui, sans-serif"; ctx.textAlign = "center";
+      ctx.fillText("LEADER", bx + bw / 2, by + bh - 9);
+    } else if (cell.qty > 0) {
+      const bw = 52, bh = 36, bx = x + CARD_W - bw - 7, by = y + 7;
+      ctx.fillStyle = "rgba(0,0,0,.82)"; roundRectPath(ctx, bx, by, bw, bh, 8); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = "800 24px system-ui, sans-serif"; ctx.textAlign = "center";
+      ctx.fillText("×" + cell.qty, bx + bw / 2, by + bh - 9);
+    }
+    ctx.fillStyle = "rgba(255,255,255,.88)"; ctx.font = "600 18px ui-monospace, monospace"; ctx.textAlign = "center";
+    ctx.fillText(cell.card.cardNumber || "", x + CARD_W / 2, y + CARD_H + 24, CARD_W);
+  });
 
-    // Card grid.
-    const gy = HEADER_H + GAP;
-    cells.forEach((cell, i) => {
-      const col = i % COLS, row = Math.floor(i / COLS);
-      const x = PAD + col * (CARD_W + GAP);
-      const y = gy + row * (CARD_H + LABEL_H + GAP);
-      ctx.save();
-      roundRectPath(ctx, x, y, CARD_W, CARD_H, 10); ctx.clip();
-      if (imgs[i]) drawImageCover(ctx, imgs[i], x, y, CARD_W, CARD_H);
-      else {
-        ctx.fillStyle = "#20242a"; ctx.fillRect(x, y, CARD_W, CARD_H);
-        ctx.fillStyle = "#cbd3da"; ctx.font = "600 17px system-ui, sans-serif"; ctx.textAlign = "center";
-        wrapText(ctx, cell.card.name || "", x + CARD_W / 2, y + CARD_H / 2, CARD_W - 24, 22);
-      }
-      ctx.restore();
-      ctx.strokeStyle = cell.isLeader ? "#f6c445" : "rgba(255,255,255,.18)";
-      ctx.lineWidth = cell.isLeader ? 3 : 1.5;
-      roundRectPath(ctx, x, y, CARD_W, CARD_H, 10); ctx.stroke();
-      if (cell.isLeader) {
-        const bw = 100, bh = 30, bx = x + 7, by = y + 7;
-        ctx.fillStyle = "rgba(246,196,69,.94)"; roundRectPath(ctx, bx, by, bw, bh, 7); ctx.fill();
-        ctx.fillStyle = "#111"; ctx.font = "800 17px system-ui, sans-serif"; ctx.textAlign = "center";
-        ctx.fillText("LEADER", bx + bw / 2, by + bh - 9);
-      } else if (cell.qty > 0) {
-        const bw = 52, bh = 36, bx = x + CARD_W - bw - 7, by = y + 7;
-        ctx.fillStyle = "rgba(0,0,0,.82)"; roundRectPath(ctx, bx, by, bw, bh, 8); ctx.fill();
-        ctx.fillStyle = "#fff"; ctx.font = "800 24px system-ui, sans-serif"; ctx.textAlign = "center";
-        ctx.fillText("×" + cell.qty, bx + bw / 2, by + bh - 9);
-      }
-      ctx.fillStyle = "rgba(255,255,255,.88)"; ctx.font = "600 18px ui-monospace, monospace"; ctx.textAlign = "center";
-      ctx.fillText(cell.card.cardNumber || "", x + CARD_W / 2, y + CARD_H + 24, CARD_W);
-    });
+  // Stats.
+  drawDeckStats(ctx, PAD, HEADER_H + GAP + gridH + GAP, width - PAD * 2, STATS_H - PAD, entries);
 
-    // Stats.
-    drawDeckStats(ctx, PAD, HEADER_H + GAP + gridH + GAP, width - PAD * 2, STATS_H - PAD, entries);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("tainted or empty canvas")), "image/png");
+  });
+}
 
-    const filename = (deckExportTitle(leader) || "deck").replace(/[^\w.-]+/g, "_").slice(0, 60) + ".png";
-    await new Promise((resolve, reject) => {
-      canvas.toBlob(blob => {
-        if (!blob) { reject(new Error("tainted or empty canvas")); return; }
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = filename;
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 4000);
-        resolve();
-      }, "image/png");
-    });
+function deckImageFailed(err, verb) {
+  console.error(`Deck image ${verb} failed:`, err);
+  if (/taint|security|insecure/i.test(String(err && err.message))) {
+    toast("Blocked: some card art is hotlinked from another site and can't be captured into an image.");
+  } else if (err && err.name === "NotAllowedError") {
+    toast("Your browser didn't allow copying the image — use Export Image instead.");
+  } else {
+    toast(`Deck image ${verb} failed — see console for details.`);
+  }
+}
+
+function busyButton(btn, busyLabel) {
+  const prevLabel = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = busyLabel; }
+  return () => { if (btn) { btn.disabled = false; btn.textContent = prevLabel; } };
+}
+
+async function exportDeckImage() {
+  const source = deckImageSource();
+  if (!source) return;
+  const done = busyButton(el.exportDeckImage, "Rendering…");
+  try {
+    const blob = await renderDeckImageBlob(source);
+    const filename = (deckExportTitle(source.leader) || "deck").replace(/[^\w.-]+/g, "_").slice(0, 60) + ".png";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
     toast("Deck image exported.");
   } catch (err) {
-    console.error("Deck image export failed:", err);
-    if (/taint|security|insecure/i.test(String(err && err.message))) {
-      toast("Export blocked: some card art is hotlinked from another site and can't be captured into an image.");
-    } else {
-      toast("Deck image export failed — see console for details.");
-    }
+    deckImageFailed(err, "export");
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = prevLabel || "Export Image"; }
+    done();
   }
+}
+
+// Put the deck image on the clipboard instead of downloading a PNG. Browsers only
+// allow the copy while they're still handling the click, and drawing takes a moment,
+// so the clipboard gets a promise of the picture straight away.
+function copyDeckImage() {
+  const source = deckImageSource();
+  if (!source) return;
+  if (!navigator.clipboard || !navigator.clipboard.write || typeof ClipboardItem === "undefined") {
+    toast("This browser can't copy images — use Export Image instead.");
+    return;
+  }
+  const done = busyButton(el.copyDeckImage, "Copying…");
+  const picture = renderDeckImageBlob(source);
+  picture.catch(() => {});   // reported below
+  navigator.clipboard.write([new ClipboardItem({ "image/png": picture })])
+    .then(() => toast("Deck image copied — paste it anywhere with Ctrl+V."))
+    .catch(async err => deckImageFailed(await picture.then(() => err, drawErr => drawErr), "copy"))
+    .finally(done);
 }
 
 // Simple centered word-wrap for the placeholder card name (canvas has no wrapping).
@@ -10519,6 +10556,7 @@ function bindEvents() {
   el.saveDeckMini.addEventListener("click", saveDeckToLibrary);
   el.exportDeck?.addEventListener("click", openDeckExport);
   el.exportDeckImage?.addEventListener("click", exportDeckImage);
+  el.copyDeckImage?.addEventListener("click", copyDeckImage);
   el.printDeck?.addEventListener("click", openPrintDeckModal);
   el.importDeck?.addEventListener("click", openDeckImport);
   el.deckShareCopy?.addEventListener("click", copyDeckShareText);
